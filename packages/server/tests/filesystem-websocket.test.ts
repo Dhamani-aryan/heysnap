@@ -94,6 +94,22 @@ describe("filesystem websocket", () => {
       listing: { entries: [{ name: "new-file.txt", path: "new-file.txt" }] },
     });
   });
+
+  it("responds to heartbeat pings", async () => {
+    const root = await createRoot();
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({ type: "ping", requestId: "heartbeat-1" }));
+
+    expect(await client.next("pong")).toMatchObject({
+      type: "pong",
+      requestId: "heartbeat-1",
+    });
+  });
 });
 
 const createRoot = async (): Promise<string> => mkdtemp(join(tmpdir(), "ank1015-ws-"));
