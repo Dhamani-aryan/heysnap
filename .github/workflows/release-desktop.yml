@@ -146,7 +146,9 @@ jobs:
             {
               platform: "win32-x64",
               artifactDir: "release-artifacts/desktop-win32-x64",
-              downloadFile: (files) => files.find((file) => file.endsWith(".exe")),
+              downloadFile: (files) =>
+                files.find((file) => file.endsWith("-x64.exe")) ??
+                files.find((file) => file.endsWith(".exe") && !file.includes("-arm64")),
             },
           ];
 
