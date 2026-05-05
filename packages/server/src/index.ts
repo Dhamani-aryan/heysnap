@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { MockAgentHarness } from "./agent/mock-harness.js";
 import { attachAgentWebSocketServer } from "./agent/websocket.js";
+import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
 import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
 import { resolveFilesystemRoot } from "./filesystem/paths.js";
 
@@ -22,7 +22,10 @@ attachFilesystemWebSocketServer(server, {
   root: filesystemRoot,
 });
 attachAgentWebSocketServer(server, {
-  harness: new MockAgentHarness({ seedThreads: true }),
+  harness: new CodexAgentHarness({
+    filesystemRoot: filesystemRoot.absolutePath,
+    codexBin: process.env.CODEX_BIN,
+  }),
 });
 
 server.listen(port, () => {

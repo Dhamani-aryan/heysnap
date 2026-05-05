@@ -31,6 +31,8 @@ export class MockAgentHarness implements IAgentHarness {
     }
   }
 
+  async setup(_input: unknown): Promise<void> {}
+
   async retrieveThreads(input: RetrieveThreadsInput = {}): Promise<RetrieveThreadsResult> {
     const threads = Array.from(this.threads.values())
       .filter((thread) => isThreadInRoot(thread, input.rootPath))

@@ -156,7 +156,10 @@ export interface CancelRunInput {
   readonly runId: string;
 }
 
+export type SetupInput = unknown;
+
 export interface IAgentHarness {
+  setup(input: SetupInput): Promise<void>;
   retrieveThreads(input: RetrieveThreadsInput): Promise<RetrieveThreadsResult>;
   getThread(input: GetThreadInput): Promise<AgentThread>;
   sendMessage(input: SendMessageInput): AsyncIterable<AgentRunEvent>;
