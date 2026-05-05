@@ -109,6 +109,7 @@ jobs:
           for platform_dir in release-artifacts/desktop-*; do
             platform="${platform_dir##*/desktop-}"
             destination="s3://$BUCKET/desktop/$CHANNEL/$VERSION/$platform/"
+            aws s3 rm "$destination" --recursive
             aws s3 cp "$platform_dir" "$destination" \
               --recursive \
               --cache-control "public,max-age=31536000,immutable"
