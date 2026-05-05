@@ -3,7 +3,9 @@
   "private": true,
   "packageManager": "pnpm@9.15.2",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm --parallel --filter @ank1015-app/web --filter @ank1015-app/desktop dev",
+    "dev:server": "pnpm --filter @ank1015-app/server dev",
+    "dev:cloud-server": "pnpm --filter @ank1015-app/cloud-server dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
