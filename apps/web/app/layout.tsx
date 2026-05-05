@@ -1,5 +1,6 @@
 import "./globals.css";
 import "@ank1015-app/ui/filesystem.css";
+import "@ank1015-app/ui/cloud.css";
 
 export const metadata = {
   title: "ank1015 web",
