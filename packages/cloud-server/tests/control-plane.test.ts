@@ -392,6 +392,42 @@ describe("cloud server computer inventory", () => {
       headers: authHeaders(secondUser.token),
     })).status).toBe(404);
   });
+
+  it("removes replaced local device records during local id migration", async () => {
+    const { app } = createTestApp();
+    const auth = await registerUser(app, "local-migration@example.com");
+    const original = await syncLocalComputer(app, auth.token, "old-local-device");
+    const duplicate = await syncLocalComputer(app, auth.token, "new-local-device");
+
+    expect(original.computer.id).not.toBe(duplicate.computer.id);
+
+    const migrated = await app.request("/computers/local", {
+      method: "POST",
+      body: JSON.stringify({
+        localDeviceId: "old-local-device",
+        replacedLocalDeviceIds: ["new-local-device"],
+        name: "Migrated Local",
+        capabilities: ["filesystem", "agent"],
+        machineServerVersion: "desktop-test",
+      }),
+      headers: authHeaders(auth.token),
+    });
+
+    expect(migrated.status).toBe(200);
+    const computers = await app.request("/computers", {
+      headers: authHeaders(auth.token),
+    });
+    const body = await computers.json() as ComputersResponse;
+
+    expect(body.computers).toHaveLength(1);
+    expect(body.computers[0]).toMatchObject({
+      id: original.computer.id,
+      name: "Migrated Local",
+      providerMetadata: {
+        localDeviceId: "old-local-device",
+      },
+    });
+  });
 });
 
 describe("cloud server computer access sessions", () => {

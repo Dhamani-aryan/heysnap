@@ -1,0 +1,200 @@
+name: Release desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Desktop version to build and publish, for example 0.1.1
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      notes:
+        description: Short release notes shown in the update prompt
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-latest
+            command: pnpm --filter @ank1015-app/desktop dist:mac:arm64
+          - platform: win32-x64
+            runner: windows-latest
+            command: pnpm --filter @ank1015-app/desktop dist:win:x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set desktop version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = "apps/desktop/package.json";
+          const packageJson = JSON.parse(fs.readFileSync(path, "utf8"));
+          packageJson.version = process.env.DESKTOP_VERSION;
+          fs.writeFileSync(path, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+        env:
+          DESKTOP_VERSION: ${{ inputs.version }}
+
+      - name: Typecheck desktop
+        run: pnpm --filter @ank1015-app/desktop typecheck
+
+      - name: Build desktop artifact
+        shell: bash
+        run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/*.yml
+          if-no-files-found: error
+
+  publish:
+    name: Publish desktop release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DESKTOP_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload artifacts to downloads bucket
+        env:
+          BUCKET: ${{ vars.DESKTOP_DOWNLOAD_BUCKET }}
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          for platform_dir in release-artifacts/desktop-*; do
+            platform="${platform_dir##*/desktop-}"
+            destination="s3://$BUCKET/desktop/$CHANNEL/$VERSION/$platform/"
+            aws s3 cp "$platform_dir" "$destination" \
+              --recursive \
+              --cache-control "public,max-age=31536000,immutable"
+          done
+
+      - name: Publish cloud release manifests
+        env:
+          ADMIN_TOKEN: ${{ secrets.CLOUD_SERVER_ADMIN_TOKEN }}
+          BASE_URL: ${{ vars.DESKTOP_DOWNLOAD_BASE_URL }}
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          node <<'NODE'
+          void main().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+
+          async function main() {
+          const fs = require("node:fs");
+
+          const adminToken = requireEnv("ADMIN_TOKEN");
+          const baseUrl = requireEnv("BASE_URL").replace(/\/+$/, "");
+          const channel = requireEnv("CHANNEL");
+          const version = requireEnv("VERSION");
+          const notes = process.env.NOTES?.trim() || null;
+
+          const platforms = [
+            {
+              platform: "darwin-arm64",
+              artifactDir: "release-artifacts/desktop-darwin-arm64",
+              downloadFile: (files) => files.find((file) => file.endsWith(".dmg")),
+            },
+            {
+              platform: "win32-x64",
+              artifactDir: "release-artifacts/desktop-win32-x64",
+              downloadFile: (files) => files.find((file) => file.endsWith(".exe")),
+            },
+          ];
+
+          for (const target of platforms) {
+            const files = fs.readdirSync(target.artifactDir);
+            const downloadFile = target.downloadFile(files);
+
+            if (downloadFile === undefined) {
+              throw new Error(`Missing download artifact for ${target.platform}`);
+            }
+
+            const feedUrl = `${baseUrl}/desktop/${channel}/${version}/${target.platform}`;
+            const body = {
+              channel,
+              platform: target.platform,
+              version,
+              downloadUrl: `${feedUrl}/${encodeURIComponent(downloadFile)}`,
+              notes,
+              metadata: {
+                feedUrl,
+              },
+            };
+
+            const response = await fetch("https://api.heysnap.xyz/admin/releases/desktop", {
+              method: "POST",
+              body: JSON.stringify(body),
+              headers: {
+                authorization: `Bearer ${adminToken}`,
+                "content-type": "application/json",
+              },
+            });
+            const text = await response.text();
+
+            if (!response.ok) {
+              throw new Error(`Failed to publish ${target.platform}: ${response.status} ${text}`);
+            }
+
+            console.log(`Published ${target.platform}: ${text}`);
+          }
+          }
+
+          function requireEnv(name) {
+            const value = process.env[name];
+
+            if (value === undefined || value.trim().length === 0) {
+              throw new Error(`${name} is required`);
+            }
+
+            return value;
+          }
+          NODE

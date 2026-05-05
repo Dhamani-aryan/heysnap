@@ -91,6 +91,8 @@ export const createComputerRoutes = (
     const name = stringField(body, "name", { required: true, maxLength: 120 }) ?? "Local Machine";
     const machineServerVersion = stringField(body, "machineServerVersion", { maxLength: 120 }) ?? null;
     const capabilities = readCapabilities(body["capabilities"]);
+    const replacedLocalDeviceIds = readLocalDeviceIds(body["replacedLocalDeviceIds"])
+      .filter((replacedLocalDeviceId) => replacedLocalDeviceId !== localDeviceId);
     const providerMetadata = {
       provider: "electron-local",
       localDeviceId,
@@ -120,20 +122,38 @@ export const createComputerRoutes = (
           lastHeartbeatAt: now,
         }) ?? existing;
     const machineToken = await createActivatedMachineToken(store, computer.id, config);
+    const syncedComputer = existing === undefined
+      ? await store.updateComputerForUser({
+          userId: user.id,
+          computerId: computer.id,
+          machineServerVersion,
+          lastHeartbeatAt: now,
+        }) ?? computer
+      : computer;
+
+    if (replacedLocalDeviceIds.length > 0) {
+      const computers = await store.listComputersForUser(user.id);
+
+      await Promise.all(computers.map(async (localComputer) => {
+        if (
+          localComputer.id !== computer.id &&
+          localComputer.kind === "local" &&
+          replacedLocalDeviceIds.includes(
+            readProviderMetadataString(localComputer.providerMetadata, "localDeviceId") ?? "",
+          )
+        ) {
+          await store.deleteComputerForUser({
+            userId: user.id,
+            computerId: localComputer.id,
+          });
+        }
+      }));
+    }
 
     return context.json({
-      computer: serializeComputer(
-        existing === undefined
-          ? await store.updateComputerForUser({
-              userId: user.id,
-              computerId: computer.id,
-              machineServerVersion,
-              lastHeartbeatAt: now,
-            }) ?? computer
-          : computer,
-      ),
+      computer: serializeComputer(syncedComputer),
       machine: {
-        computerId: computer.id,
+        computerId: syncedComputer.id,
         token: machineToken,
         heartbeatIntervalSeconds: 30,
       },
@@ -274,6 +294,18 @@ const readCapabilities = (value: unknown): string[] => {
   }
 
   return value;
+};
+
+const readLocalDeviceIds = (value: unknown): string[] => {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 };
 
 const readProviderMetadataString = (metadata: unknown, key: string): string | null => {

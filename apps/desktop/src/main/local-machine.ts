@@ -57,6 +57,11 @@ export interface SyncCloudSessionInput {
   readonly sessionToken: string;
 }
 
+interface LocalDeviceIdentity {
+  readonly localDeviceId: string;
+  readonly replacedLocalDeviceIds: readonly string[];
+}
+
 export class LocalMachineController {
   private runningServer: RunningServer | null = null;
   private serverState: LocalMachineStatus["server"] = {
@@ -132,13 +137,14 @@ export class LocalMachineController {
     this.cloudState = { ...this.cloudState, state: "syncing", error: null };
 
     try {
-      const localDeviceId = await this.readLocalDeviceId();
+      const localDevice = await this.readLocalDeviceIdentity();
       const response = await this.request<LocalMachineSyncResponse>(
         cloudServerUrl,
         "/computers/local",
         sessionToken,
         {
-          localDeviceId,
+          localDeviceId: localDevice.localDeviceId,
+          replacedLocalDeviceIds: localDevice.replacedLocalDeviceIds,
           name: `${hostname() || "Local"} Machine`,
           capabilities: ["filesystem", "agent", "local"],
           machineServerVersion: "desktop-local",
@@ -239,9 +245,30 @@ export class LocalMachineController {
     }
   }
 
-  private async readLocalDeviceId(): Promise<string> {
-    const filePath = join(this.electronApp.getPath("userData"), "local-machine.json");
+  private async readLocalDeviceIdentity(): Promise<LocalDeviceIdentity> {
+    const filePath = this.localDeviceIdPath();
+    const currentId = await this.readDeviceIdFile(filePath);
+    const legacyIds = await this.readLegacyDeviceIds();
+    const migratedId = legacyIds.find((legacyId) => legacyId !== currentId);
 
+    if (migratedId !== undefined) {
+      await this.writeDeviceIdFile(filePath, migratedId);
+      return {
+        localDeviceId: migratedId,
+        replacedLocalDeviceIds: currentId === null ? [] : [currentId],
+      };
+    }
+
+    if (currentId !== null) {
+      return { localDeviceId: currentId, replacedLocalDeviceIds: [] };
+    }
+
+    const localDeviceId = randomUUID();
+    await this.writeDeviceIdFile(filePath, localDeviceId);
+    return { localDeviceId, replacedLocalDeviceIds: [] };
+  }
+
+  private async readDeviceIdFile(filePath: string): Promise<string | null> {
     try {
       const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
 
@@ -258,10 +285,35 @@ export class LocalMachineController {
       // A missing or corrupt id file is replaced with a new stable id.
     }
 
-    const localDeviceId = randomUUID();
+    return null;
+  }
+
+  private async readLegacyDeviceIds(): Promise<string[]> {
+    const currentPath = this.localDeviceIdPath();
+    const legacyPaths = [
+      join(this.electronApp.getPath("appData"), "@ank1015-app", "desktop", "local-machine.json"),
+      join(this.electronApp.getPath("appData"), "ank1015 desktop", "local-machine.json"),
+    ].filter((path) => path !== currentPath);
+    const ids: string[] = [];
+
+    for (const legacyPath of legacyPaths) {
+      const id = await this.readDeviceIdFile(legacyPath);
+
+      if (id !== null && !ids.includes(id)) {
+        ids.push(id);
+      }
+    }
+
+    return ids;
+  }
+
+  private localDeviceIdPath(): string {
+    return join(this.electronApp.getPath("userData"), "local-machine.json");
+  }
+
+  private async writeDeviceIdFile(filePath: string, localDeviceId: string): Promise<void> {
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, JSON.stringify({ localDeviceId }, null, 2), "utf8");
-    return localDeviceId;
   }
 
   private async request<TResponse>(
