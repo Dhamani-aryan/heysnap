@@ -1,0 +1,116 @@
+name: Deploy cloud server
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Build and deploy cloud server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck cloud server
+        run: pnpm --filter @ank1015-app/cloud-server typecheck
+
+      - name: Test cloud server
+        run: pnpm --filter @ank1015-app/cloud-server test
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CLOUD_SERVER_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build and push image
+        env:
+          IMAGE_URI: ${{ vars.CLOUD_SERVER_IMAGE_URI }}
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${IMAGE_URI%/*}"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            -f packages/cloud-server/Dockerfile \
+            -t "$IMAGE_URI:$GITHUB_SHA" \
+            -t "$IMAGE_URI:latest" \
+            --push \
+            .
+
+      - name: Deploy on cloud server host
+        id: deploy
+        env:
+          IMAGE_URI: ${{ vars.CLOUD_SERVER_IMAGE_URI }}
+        run: |
+          COMMANDS="$(node <<'NODE'
+          const imageUri = process.env.IMAGE_URI;
+          const sha = process.env.GITHUB_SHA;
+          console.log(JSON.stringify({
+            commands: [
+              "set -euo pipefail",
+              `aws ecr get-login-password --region ${process.env.AWS_REGION} | docker login --username AWS --password-stdin ${imageUri.split("/")[0]}`,
+              `docker pull --platform linux/amd64 ${imageUri}:${sha}`,
+              `docker run --rm --network host --env-file /opt/ank1015/cloud-server.env ${imageUri}:${sha} pnpm --dir packages/cloud-server db:migrate`,
+              "docker rm -f ank1015-cloud-server || true",
+              `docker run -d --name ank1015-cloud-server --restart unless-stopped --network host --env-file /opt/ank1015/cloud-server.env ${imageUri}:${sha}`,
+              "sleep 2",
+              "docker logs --tail 50 ank1015-cloud-server",
+            ],
+          }));
+          NODE
+          )"
+
+          COMMAND_ID="$(aws ssm send-command \
+            --instance-ids "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
+            --document-name AWS-RunShellScript \
+            --comment "Deploy cloud server from $GITHUB_SHA" \
+            --parameters "$COMMANDS" \
+            --query 'Command.CommandId' \
+            --output text)"
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          echo "Started SSM command $COMMAND_ID"
+
+      - name: Wait for host deployment
+        run: |
+          COMMAND_ID="${{ steps.deploy.outputs.command_id }}"
+
+          while true; do
+            STATUS="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
+              --query 'Status' \
+              --output text)"
+            echo "SSM command $COMMAND_ID status: $STATUS"
+
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
+                  --query 'StandardOutputContent' \
+                  --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
+                  --query '{stdout:StandardOutputContent,stderr:StandardErrorContent}' \
+                  --output json
+                exit 1
+                ;;
+            esac
+
+            sleep 10
+          done

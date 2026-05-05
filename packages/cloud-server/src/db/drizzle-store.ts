@@ -5,6 +5,7 @@ import {
   computerAccessSessions,
   computers,
   machineIdentities,
+  releaseManifests,
   sessions,
   users,
 } from "./schema/index.js";
@@ -13,6 +14,8 @@ import type {
   ComputerAccessSessionRecord,
   ComputerRecord,
   MachineIdentityRecord,
+  ReleaseManifestRecord,
+  ReleaseTarget,
   SessionRecord,
   UserRecord,
 } from "./types.js";
@@ -228,5 +231,66 @@ export class DrizzleCloudStore implements CloudStore {
       .where(eq(computerAccessSessions.tokenHash, tokenHash))
       .limit(1);
     return accessSession ?? null;
+  }
+
+  async getReleaseManifest(input: {
+    readonly target: ReleaseTarget;
+    readonly channel: string;
+    readonly platform: string;
+  }): Promise<ReleaseManifestRecord | null> {
+    const [manifest] = await this.db
+      .select()
+      .from(releaseManifests)
+      .where(and(
+        eq(releaseManifests.target, input.target),
+        eq(releaseManifests.channel, input.channel),
+        eq(releaseManifests.platform, input.platform),
+      ))
+      .limit(1);
+    return manifest ?? null;
+  }
+
+  async upsertReleaseManifest(input: {
+    readonly target: ReleaseTarget;
+    readonly channel: string;
+    readonly platform: string;
+    readonly version: string;
+    readonly downloadUrl?: string | null;
+    readonly signatureUrl?: string | null;
+    readonly dockerImage?: string | null;
+    readonly notes?: string | null;
+    readonly metadata: unknown;
+    readonly releasedAt: Date;
+  }): Promise<ReleaseManifestRecord> {
+    const updatedAt = new Date();
+    const [manifest] = await this.db
+      .insert(releaseManifests)
+      .values({
+        target: input.target,
+        channel: input.channel,
+        platform: input.platform,
+        version: input.version,
+        downloadUrl: input.downloadUrl ?? null,
+        signatureUrl: input.signatureUrl ?? null,
+        dockerImage: input.dockerImage ?? null,
+        notes: input.notes ?? null,
+        metadata: input.metadata,
+        releasedAt: input.releasedAt,
+      })
+      .onConflictDoUpdate({
+        target: [releaseManifests.target, releaseManifests.channel, releaseManifests.platform],
+        set: {
+          version: input.version,
+          downloadUrl: input.downloadUrl ?? null,
+          signatureUrl: input.signatureUrl ?? null,
+          dockerImage: input.dockerImage ?? null,
+          notes: input.notes ?? null,
+          metadata: input.metadata,
+          releasedAt: input.releasedAt,
+          updatedAt,
+        },
+      })
+      .returning();
+    return manifest;
   }
 }

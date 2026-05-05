@@ -3,6 +3,11 @@ import { Hono } from "hono";
 import { createOpaqueToken, hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerStatus } from "../db/types.js";
+import {
+  buildReleaseCheckResponse,
+  DEFAULT_RELEASE_CHANNEL,
+  DEFAULT_RELEASE_PLATFORM,
+} from "../releases/routes.js";
 import { notFound, unauthorized } from "../shared/errors.js";
 import { serializeComputer } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
@@ -80,7 +85,31 @@ export const createMachineRoutes = (
       throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
     }
 
-    return context.json({ computer: serializeComputer(computer) });
+    const update = await buildMachineServerUpdate(store, {
+      channel: DEFAULT_RELEASE_CHANNEL,
+      currentVersion: machineServerVersion ?? computer.machineServerVersion,
+    });
+
+    return context.json({ computer: serializeComputer(computer), update });
+  });
+
+  app.get("/update-check", async (context) => {
+    const machine = await authenticateMachine(store, config, context.req.header("authorization"));
+    const computer = await store.getComputerById(machine.computerId);
+
+    if (computer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    const update = await buildMachineServerUpdate(store, {
+      channel: readQueryString(context.req.query("channel"), DEFAULT_RELEASE_CHANNEL) ?? DEFAULT_RELEASE_CHANNEL,
+      currentVersion: readQueryString(context.req.query("currentVersion"), computer.machineServerVersion),
+    });
+
+    return context.json({
+      computer: serializeComputer(computer),
+      update,
+    });
   });
 
   return app;
@@ -138,4 +167,29 @@ const readMachineStatus = (value: unknown): Extract<ComputerStatus, "online" | "
   }
 
   return "online";
+};
+
+const buildMachineServerUpdate = async (
+  store: CloudStore,
+  input: {
+    readonly channel: string;
+    readonly currentVersion: string | null;
+  },
+) => {
+  const manifest = await store.getReleaseManifest({
+    target: "machine-server",
+    channel: input.channel,
+    platform: DEFAULT_RELEASE_PLATFORM,
+  });
+
+  return buildReleaseCheckResponse(manifest, input.currentVersion);
+};
+
+const readQueryString = (value: string | undefined, fallback: string | null): string | null => {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? fallback : trimmed;
 };

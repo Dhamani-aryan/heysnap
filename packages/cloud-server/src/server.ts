@@ -11,6 +11,7 @@ import { GatewayAccessService } from "./gateway/access-sessions.js";
 import { createMachineRoutes } from "./machines/routes.js";
 import { AwsEc2Provisioner } from "./provisioning/aws-ec2-provisioner.js";
 import type { ComputerProvisioner } from "./provisioning/types.js";
+import { createReleaseRoutes } from "./releases/routes.js";
 import { HttpError } from "./shared/errors.js";
 import type { AppVariables } from "./shared/context.js";
 
@@ -40,7 +41,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   }));
 
   app.get("/health", (context) => context.json({ ok: true }));
-  app.route("/admin", createAdminRoutes(authService, options.config));
+  app.route("/admin", createAdminRoutes(options.store, authService, options.config));
   app.route("/auth", createAuthRoutes(authService, options.config));
   app.route("/computers", createComputerRoutes(
     options.store,
@@ -50,6 +51,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     options.config,
   ));
   app.route("/machines", createMachineRoutes(options.store, options.config));
+  app.route("/releases", createReleaseRoutes(options.store));
 
   app.notFound((context) => context.json({
     error: {

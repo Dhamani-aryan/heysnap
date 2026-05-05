@@ -438,6 +438,144 @@ describe("cloud server computer access sessions", () => {
   });
 });
 
+describe("cloud server release manifests", () => {
+  it("lets admins publish desktop releases and exposes latest checks publicly", async () => {
+    const { app } = createTestApp();
+
+    const unauthorized = await app.request("/admin/releases/desktop", {
+      method: "POST",
+      body: JSON.stringify({
+        platform: "darwin-arm64",
+        version: "1.2.3",
+        downloadUrl: "https://downloads.example.com/app.dmg",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const published = await app.request("/admin/releases/desktop", {
+      method: "POST",
+      body: JSON.stringify({
+        channel: "stable",
+        platform: "darwin-arm64",
+        version: "1.2.3",
+        downloadUrl: "https://downloads.example.com/app.dmg",
+        signatureUrl: "https://downloads.example.com/app.dmg.sig",
+        notes: "Desktop release",
+        metadata: { sha256: "abc123" },
+        releasedAt: "2026-05-05T00:00:00.000Z",
+      }),
+      headers: adminHeaders(),
+    });
+
+    expect(published.status).toBe(201);
+    expect(await published.json()).toMatchObject({
+      release: {
+        target: "desktop",
+        channel: "stable",
+        platform: "darwin-arm64",
+        version: "1.2.3",
+        downloadUrl: "https://downloads.example.com/app.dmg",
+        signatureUrl: "https://downloads.example.com/app.dmg.sig",
+        notes: "Desktop release",
+        metadata: { sha256: "abc123" },
+        releasedAt: "2026-05-05T00:00:00.000Z",
+      },
+    });
+
+    const latest = await app.request("/releases/desktop/latest?platform=darwin-arm64&currentVersion=1.2.0");
+    expect(latest.status).toBe(200);
+    expect(await latest.json()).toMatchObject({
+      currentVersion: "1.2.0",
+      updateAvailable: true,
+      latest: {
+        target: "desktop",
+        channel: "stable",
+        platform: "darwin-arm64",
+        version: "1.2.3",
+      },
+    });
+
+    const current = await app.request("/releases/desktop/latest?platform=darwin-arm64&currentVersion=1.2.3");
+    expect(await current.json()).toMatchObject({
+      currentVersion: "1.2.3",
+      updateAvailable: false,
+    });
+  });
+
+  it("lets machines check protected machine-server release manifests", async () => {
+    const { app, provisioner } = createTestApp();
+    const auth = await registerUser(app, "machine-release@example.com");
+    const computer = await createComputer(app, auth.token, "Machine VM");
+    const bootstrapToken = provisioner.bootstrapTokens.get(computer.id);
+    const registration = await app.request("/machines/register", {
+      method: "POST",
+      body: JSON.stringify({
+        computerId: computer.id,
+        bootstrapToken,
+        machineServerVersion: "1.0.0",
+        capabilities: ["filesystem", "agent"],
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    const registered = await registration.json() as {
+      readonly machine: { readonly token: string };
+    };
+
+    const published = await app.request("/admin/releases/machine-server", {
+      method: "POST",
+      body: JSON.stringify({
+        channel: "stable",
+        version: "1.1.0",
+        dockerImage: "example.com/ank1015-machine-server:1.1.0",
+        notes: "Machine server rollout",
+      }),
+      headers: adminHeaders(),
+    });
+    expect(published.status).toBe(201);
+
+    expect((await app.request("/machines/update-check")).status).toBe(401);
+
+    const updateCheck = await app.request("/machines/update-check?currentVersion=1.0.0", {
+      headers: { authorization: `Bearer ${registered.machine.token}` },
+    });
+    expect(updateCheck.status).toBe(200);
+    expect(await updateCheck.json()).toMatchObject({
+      update: {
+        currentVersion: "1.0.0",
+        updateAvailable: true,
+        latest: {
+          target: "machine-server",
+          channel: "stable",
+          platform: "default",
+          version: "1.1.0",
+          dockerImage: "example.com/ank1015-machine-server:1.1.0",
+        },
+      },
+    });
+
+    const heartbeat = await app.request("/machines/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({
+        status: "idle",
+        machineServerVersion: "1.0.0",
+      }),
+      headers: {
+        authorization: `Bearer ${registered.machine.token}`,
+        "content-type": "application/json",
+      },
+    });
+    expect(await heartbeat.json()).toMatchObject({
+      update: {
+        updateAvailable: true,
+        latest: {
+          version: "1.1.0",
+        },
+      },
+    });
+  });
+});
+
 describe("cloud server machine registration", () => {
   it("exchanges a bootstrap token for a machine token and accepts heartbeats", async () => {
     const { app, provisioner } = createTestApp();

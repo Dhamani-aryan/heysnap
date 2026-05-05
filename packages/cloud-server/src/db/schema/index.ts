@@ -1,6 +1,7 @@
 import { jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const computerKindEnum = pgEnum("computer_kind", ["cloud", "local"]);
+export const releaseTargetEnum = pgEnum("release_target", ["desktop", "machine-server"]);
 export const computerStatusEnum = pgEnum("computer_status", [
   "creating",
   "starting",
@@ -73,8 +74,28 @@ export const computerAccessSessions = pgTable("computer_access_sessions", {
   tokenHashUnique: uniqueIndex("computer_access_sessions_token_hash_unique").on(table.tokenHash),
 }));
 
+export const releaseManifests = pgTable("release_manifests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  target: releaseTargetEnum("target").notNull(),
+  channel: text("channel").notNull(),
+  platform: text("platform").notNull().default("default"),
+  version: text("version").notNull(),
+  downloadUrl: text("download_url"),
+  signatureUrl: text("signature_url"),
+  dockerImage: text("docker_image"),
+  notes: text("notes"),
+  metadata: jsonb("metadata").notNull().default({}),
+  releasedAt: timestamp("released_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  targetChannelPlatformUnique: uniqueIndex("release_manifests_target_channel_platform_unique")
+    .on(table.target, table.channel, table.platform),
+}));
+
 export type UserRow = typeof users.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type ComputerRow = typeof computers.$inferSelect;
 export type MachineIdentityRow = typeof machineIdentities.$inferSelect;
 export type ComputerAccessSessionRow = typeof computerAccessSessions.$inferSelect;
+export type ReleaseManifestRow = typeof releaseManifests.$inferSelect;

@@ -15,6 +15,13 @@
       "when": 1777978528540,
       "tag": "0001_machine_registration",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777994983216,
+      "tag": "0002_shiny_tusk",
+      "breakpoints": true
     }
   ]
 }

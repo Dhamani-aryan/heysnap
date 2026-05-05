@@ -7,6 +7,8 @@ import type {
   ComputerRecord,
   ComputerStatus,
   MachineIdentityRecord,
+  ReleaseManifestRecord,
+  ReleaseTarget,
   SessionRecord,
   UserRecord,
 } from "../src/db/types.js";
@@ -17,6 +19,7 @@ export class InMemoryCloudStore implements CloudStore {
   readonly computers = new Map<string, ComputerRecord>();
   readonly machineIdentities = new Map<string, MachineIdentityRecord>();
   readonly computerAccessSessions = new Map<string, ComputerAccessSessionRecord>();
+  readonly releaseManifests = new Map<string, ReleaseManifestRecord>();
 
   async createUser(input: { readonly email: string; readonly passwordHash: string }): Promise<UserRecord> {
     const now = new Date();
@@ -267,4 +270,52 @@ export class InMemoryCloudStore implements CloudStore {
     return Array.from(this.computerAccessSessions.values())
       .find((accessSession) => accessSession.tokenHash === tokenHash) ?? null;
   }
+
+  async getReleaseManifest(input: {
+    readonly target: ReleaseTarget;
+    readonly channel: string;
+    readonly platform: string;
+  }): Promise<ReleaseManifestRecord | null> {
+    return this.releaseManifests.get(releaseKey(input)) ?? null;
+  }
+
+  async upsertReleaseManifest(input: {
+    readonly target: ReleaseTarget;
+    readonly channel: string;
+    readonly platform: string;
+    readonly version: string;
+    readonly downloadUrl?: string | null;
+    readonly signatureUrl?: string | null;
+    readonly dockerImage?: string | null;
+    readonly notes?: string | null;
+    readonly metadata: unknown;
+    readonly releasedAt: Date;
+  }): Promise<ReleaseManifestRecord> {
+    const key = releaseKey(input);
+    const existing = this.releaseManifests.get(key);
+    const now = new Date();
+    const manifest = {
+      id: existing?.id ?? randomUUID(),
+      target: input.target,
+      channel: input.channel,
+      platform: input.platform,
+      version: input.version,
+      downloadUrl: input.downloadUrl ?? null,
+      signatureUrl: input.signatureUrl ?? null,
+      dockerImage: input.dockerImage ?? null,
+      notes: input.notes ?? null,
+      metadata: input.metadata,
+      releasedAt: input.releasedAt,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.releaseManifests.set(key, manifest);
+    return manifest;
+  }
 }
+
+const releaseKey = (input: {
+  readonly target: ReleaseTarget;
+  readonly channel: string;
+  readonly platform: string;
+}): string => `${input.target}:${input.channel}:${input.platform}`;

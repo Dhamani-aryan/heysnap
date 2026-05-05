@@ -1,4 +1,5 @@
 export type ComputerKind = "cloud" | "local";
+export type ReleaseTarget = "desktop" | "machine-server";
 export type ComputerStatus =
   | "creating"
   | "starting"
@@ -59,6 +60,22 @@ export interface ComputerAccessSessionRecord {
   readonly expiresAt: Date;
   readonly revokedAt: Date | null;
   readonly createdAt: Date;
+}
+
+export interface ReleaseManifestRecord {
+  readonly id: string;
+  readonly target: ReleaseTarget;
+  readonly channel: string;
+  readonly platform: string;
+  readonly version: string;
+  readonly downloadUrl: string | null;
+  readonly signatureUrl: string | null;
+  readonly dockerImage: string | null;
+  readonly notes: string | null;
+  readonly metadata: unknown;
+  readonly releasedAt: Date;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 export interface CloudStore {
@@ -137,4 +154,22 @@ export interface CloudStore {
     readonly expiresAt: Date;
   }): Promise<ComputerAccessSessionRecord>;
   getComputerAccessSessionByTokenHash(tokenHash: string): Promise<ComputerAccessSessionRecord | null>;
+
+  getReleaseManifest(input: {
+    readonly target: ReleaseTarget;
+    readonly channel: string;
+    readonly platform: string;
+  }): Promise<ReleaseManifestRecord | null>;
+  upsertReleaseManifest(input: {
+    readonly target: ReleaseTarget;
+    readonly channel: string;
+    readonly platform: string;
+    readonly version: string;
+    readonly downloadUrl?: string | null;
+    readonly signatureUrl?: string | null;
+    readonly dockerImage?: string | null;
+    readonly notes?: string | null;
+    readonly metadata: unknown;
+    readonly releasedAt: Date;
+  }): Promise<ReleaseManifestRecord>;
 }
