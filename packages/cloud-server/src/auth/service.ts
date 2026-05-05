@@ -1,6 +1,6 @@
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, SessionRecord, UserRecord } from "../db/types.js";
-import { conflict, unauthorized } from "../shared/errors.js";
+import { conflict, notFound, unauthorized } from "../shared/errors.js";
 import { normalizeEmail, requirePassword } from "../shared/validation.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { createOpaqueToken, hashToken } from "./tokens.js";
@@ -29,6 +29,21 @@ export class AuthService {
       email,
       passwordHash: await hashPassword(input.password),
     });
+
+    return user;
+  }
+
+  async setPassword(input: { readonly userId: string; readonly password: string }): Promise<UserRecord> {
+    requirePassword(input.password);
+
+    const user = await this.store.updateUserPassword({
+      userId: input.userId,
+      passwordHash: await hashPassword(input.password),
+    });
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
 
     return user;
   }

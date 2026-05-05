@@ -11,6 +11,10 @@ import type { GatewayAccessService } from "./access-sessions.js";
 
 export type GatewayRoute = "filesystem" | "agent";
 
+export interface TunnelStatusRegistry {
+  isConnected(computerId: string): boolean;
+}
+
 export interface GatewayTunnelServerOptions {
   readonly store: CloudStore;
   readonly config: CloudServerConfig;
@@ -41,6 +45,14 @@ export class MachineTunnelRegistry {
     if (this.tunnels.get(computerId) === tunnel) {
       this.tunnels.delete(computerId);
     }
+  }
+
+  isConnected(computerId: string): boolean {
+    return this.tunnels.has(computerId);
+  }
+
+  connectedComputerIds(): string[] {
+    return Array.from(this.tunnels.keys());
   }
 }
 

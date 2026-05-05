@@ -7,20 +7,28 @@ The cloud server has an admin dashboard and token-protected admin APIs.
 Open:
 
 ```text
-https://api.heysnap.xyz/admin-dashboard
+https://api.heysnap.xyz/admin-dashboard/
 ```
 
-Enter the admin token. The dashboard stores it in browser `localStorage` on
-that browser only.
+The dashboard is a React SPA built from
+`packages/cloud-server/admin-ui` and served as static assets by the cloud
+server. On first load it shows a login page that takes the cloud-server admin
+token. The token is stored in browser `localStorage` on that browser only and
+sent as `Authorization: Bearer …` on every `/admin/*` request.
 
 The dashboard can:
 
-- show user, computer, cloud/local, and active-machine counts
-- list all users
-- create users
-- list all computers with owner, status, version, heartbeat, and provider data
-- delete computers
-- show release manifests
+- show user, machine, cloud/local, active, idle, and failed counts
+- list all users with computer counts; create users; reset a user's password;
+  revoke all of a user's sessions; delete a user (terminates their cloud
+  machines and removes the record)
+- drill into a user to see their machines and active sessions
+- list all machines with kind, status, owner, heartbeat, version, region, and
+  live-tunnel state
+- drill into a machine to see provider metadata, capabilities, machine
+  identities (with revoke), and recent gateway access sessions; rename, start,
+  stop, restart, or delete the machine
+- publish and delete release manifests for desktop and machine-server
 
 ## Admin Token
 
