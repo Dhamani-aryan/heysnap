@@ -1,10 +1,9 @@
 import type { App } from "electron";
+import { startServer, type RunningServer } from "@ank1015-app/server";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-
-import { MachineSidecarSupervisor, type MachineServerReleaseManifest } from "./machine-sidecar.js";
 
 interface LocalMachineComputer {
   readonly id: string;
@@ -31,10 +30,6 @@ interface LocalMachineSyncResponse {
 
 interface LocalMachineHeartbeatResponse {
   readonly computer: LocalMachineComputer;
-  readonly update?: {
-    readonly updateAvailable: boolean;
-    readonly latest: MachineServerReleaseManifest | null;
-  };
 }
 
 export interface LocalMachineStatus {
@@ -46,10 +41,6 @@ export interface LocalMachineStatus {
       readonly filesystemWebSocketUrl: string;
       readonly agentWebSocketUrl: string;
     } | null;
-    readonly image: string | null;
-    readonly version: string | null;
-    readonly updateState: "idle" | "checking" | "deferred" | "pulling" | "restarting" | "failed";
-    readonly updateError: string | null;
     readonly error: string | null;
   };
   readonly cloud: {
@@ -71,16 +62,12 @@ interface LocalDeviceIdentity {
 }
 
 export class LocalMachineController {
-  private sidecar: MachineSidecarSupervisor | null = null;
+  private runningServer: RunningServer | null = null;
   private serverState: LocalMachineStatus["server"] = {
     state: "stopped",
     port: null,
     filesystemRoot: null,
     urls: null,
-    image: null,
-    version: null,
-    updateState: "idle",
-    updateError: null,
     error: null,
   };
   private cloudState: LocalMachineStatus["cloud"] = {
@@ -99,9 +86,8 @@ export class LocalMachineController {
     this.serverState = { ...this.serverState, state: "starting", error: null };
 
     try {
-      const sidecar = this.getSidecar();
-      await sidecar.start();
-      this.serverState = sidecar.getStatus();
+      this.runningServer = await this.startEmbeddedServer(4000);
+      this.serverState = this.createRunningServerState(this.runningServer);
     } catch (error) {
       this.serverState = {
         ...this.serverState,
@@ -109,7 +95,7 @@ export class LocalMachineController {
         port: null,
         filesystemRoot: null,
         urls: null,
-        error: error instanceof Error ? error.message : "Failed to start local server sidecar.",
+        error: error instanceof Error ? error.message : "Failed to start local server.",
       };
       throw error;
     }
@@ -179,8 +165,9 @@ export class LocalMachineController {
   async stop(): Promise<void> {
     this.stopHeartbeat();
 
-    if (this.sidecar !== null) {
-      await this.sidecar.stop();
+    if (this.runningServer !== null) {
+      await this.runningServer.stop();
+      this.runningServer = null;
     }
 
     this.serverState = {
@@ -188,10 +175,6 @@ export class LocalMachineController {
       port: null,
       filesystemRoot: null,
       urls: null,
-      image: null,
-      version: null,
-      updateState: "idle",
-      updateError: null,
       error: null,
     };
     this.cloudState = {
@@ -223,8 +206,7 @@ export class LocalMachineController {
     }
 
     try {
-      const sidecar = this.getSidecar();
-      const runtimeStatus = await sidecar.getRuntimeStatus();
+      const runtimeStatus = this.runningServer?.getStatus();
       const machineServerVersion = runtimeStatus?.version ?? this.readMachineServerVersion();
       const response = await this.request<LocalMachineHeartbeatResponse>(
         this.cloudServerUrl,
@@ -243,15 +225,8 @@ export class LocalMachineController {
         error: null,
         lastHeartbeatAt: response.computer.lastHeartbeatAt,
       };
-      this.serverState = sidecar.getStatus();
-
-      if (response.update?.updateAvailable === true) {
-        const result = await sidecar.updateIfIdle(response.update.latest);
-        this.serverState = sidecar.getStatus();
-
-        if (result === "updated") {
-          await this.sendHeartbeat();
-        }
+      if (this.runningServer !== null) {
+        this.serverState = this.createRunningServerState(this.runningServer);
       }
     } catch (error) {
       this.cloudState = {
@@ -262,18 +237,38 @@ export class LocalMachineController {
     }
   }
 
-  private getSidecar(): MachineSidecarSupervisor {
-    if (this.sidecar === null) {
-      this.sidecar = new MachineSidecarSupervisor({
+  private async startEmbeddedServer(port: number): Promise<RunningServer> {
+    try {
+      return await startServer({
+        port,
         filesystemRoot: this.electronApp.getPath("desktop"),
+        version: this.readMachineServerVersion(),
       });
-    }
+    } catch (error) {
+      if (port !== 0 && isAddressInUseError(error)) {
+        return await this.startEmbeddedServer(0);
+      }
 
-    return this.sidecar;
+      throw error;
+    }
+  }
+
+  private createRunningServerState(server: RunningServer): LocalMachineStatus["server"] {
+    return {
+      state: "running",
+      port: server.port,
+      filesystemRoot: server.filesystemRoot.absolutePath,
+      urls: {
+        filesystemWebSocketUrl: server.urls.filesystemWebSocketUrl,
+        agentWebSocketUrl: server.urls.agentWebSocketUrl,
+      },
+      error: null,
+    };
   }
 
   private readMachineServerVersion(): string {
-    return this.sidecar?.getStatus().version ?? "development";
+    const appVersion = this.electronApp.getVersion()?.trim();
+    return appVersion.length > 0 ? `desktop-${appVersion}` : "desktop-development";
   }
 
   private async readLocalDeviceIdentity(): Promise<LocalDeviceIdentity> {
@@ -401,3 +396,9 @@ const readCloudError = (body: unknown): string => {
 
   return "Cloud request failed.";
 };
+
+const isAddressInUseError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { readonly code?: unknown }).code === "EADDRINUSE";
