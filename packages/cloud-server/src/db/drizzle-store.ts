@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 import type { DbClient } from "./client.js";
 import {
@@ -42,6 +42,27 @@ export class DrizzleCloudStore implements CloudStore {
     return user ?? null;
   }
 
+  async updateUserPassword(input: {
+    readonly userId: string;
+    readonly passwordHash: string;
+  }): Promise<UserRecord | null> {
+    const updatedAt = new Date();
+    const [user] = await this.db
+      .update(users)
+      .set({ passwordHash: input.passwordHash, updatedAt })
+      .where(eq(users.id, input.userId))
+      .returning();
+    return user ?? null;
+  }
+
+  async deleteUserById(userId: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(users)
+      .where(eq(users.id, userId))
+      .returning({ id: users.id });
+    return deleted.length > 0;
+  }
+
   async createSession(input: {
     readonly userId: string;
     readonly tokenHash: string;
@@ -61,6 +82,23 @@ export class DrizzleCloudStore implements CloudStore {
       .update(sessions)
       .set({ revokedAt, updatedAt: revokedAt })
       .where(eq(sessions.id, sessionId));
+  }
+
+  async listSessionsForUser(userId: string): Promise<SessionRecord[]> {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.userId, userId))
+      .orderBy(desc(sessions.createdAt));
+  }
+
+  async revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<number> {
+    const updated = await this.db
+      .update(sessions)
+      .set({ revokedAt, updatedAt: revokedAt })
+      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+    return updated.length;
   }
 
   async listComputersForUser(userId: string): Promise<ComputerRecord[]> {
@@ -177,6 +215,19 @@ export class DrizzleCloudStore implements CloudStore {
     return deleted.length > 0;
   }
 
+  async renameComputerById(input: {
+    readonly computerId: string;
+    readonly name: string;
+  }): Promise<ComputerRecord | null> {
+    const updatedAt = new Date();
+    const [computer] = await this.db
+      .update(computers)
+      .set({ name: input.name, updatedAt })
+      .where(eq(computers.id, input.computerId))
+      .returning();
+    return computer ?? null;
+  }
+
   async createMachineIdentity(input: {
     readonly computerId: string;
     readonly bootstrapTokenHash: string;
@@ -230,6 +281,26 @@ export class DrizzleCloudStore implements CloudStore {
       .where(eq(machineIdentities.id, input.identityId));
   }
 
+  async listMachineIdentitiesForComputer(computerId: string): Promise<MachineIdentityRecord[]> {
+    return this.db
+      .select()
+      .from(machineIdentities)
+      .where(eq(machineIdentities.computerId, computerId))
+      .orderBy(desc(machineIdentities.createdAt));
+  }
+
+  async revokeMachineIdentity(input: {
+    readonly identityId: string;
+    readonly revokedAt: Date;
+  }): Promise<MachineIdentityRecord | null> {
+    const [identity] = await this.db
+      .update(machineIdentities)
+      .set({ revokedAt: input.revokedAt })
+      .where(eq(machineIdentities.id, input.identityId))
+      .returning();
+    return identity ?? null;
+  }
+
   async createComputerAccessSession(input: {
     readonly userId: string;
     readonly computerId: string;
@@ -247,6 +318,18 @@ export class DrizzleCloudStore implements CloudStore {
       .where(eq(computerAccessSessions.tokenHash, tokenHash))
       .limit(1);
     return accessSession ?? null;
+  }
+
+  async listAccessSessionsForComputer(input: {
+    readonly computerId: string;
+    readonly limit?: number;
+  }): Promise<ComputerAccessSessionRecord[]> {
+    const query = this.db
+      .select()
+      .from(computerAccessSessions)
+      .where(eq(computerAccessSessions.computerId, input.computerId))
+      .orderBy(desc(computerAccessSessions.createdAt));
+    return input.limit !== undefined ? query.limit(input.limit) : query;
   }
 
   async getReleaseManifest(input: {
@@ -312,5 +395,13 @@ export class DrizzleCloudStore implements CloudStore {
       })
       .returning();
     return manifest;
+  }
+
+  async deleteReleaseManifest(id: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(releaseManifests)
+      .where(eq(releaseManifests.id, id))
+      .returning({ id: releaseManifests.id });
+    return deleted.length > 0;
   }
 }

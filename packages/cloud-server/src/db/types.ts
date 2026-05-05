@@ -86,6 +86,11 @@ export interface CloudStore {
   listUsers(): Promise<UserRecord[]>;
   getUserByEmail(email: string): Promise<UserRecord | null>;
   getUserById(userId: string): Promise<UserRecord | null>;
+  updateUserPassword(input: {
+    readonly userId: string;
+    readonly passwordHash: string;
+  }): Promise<UserRecord | null>;
+  deleteUserById(userId: string): Promise<boolean>;
 
   createSession(input: {
     readonly userId: string;
@@ -94,6 +99,8 @@ export interface CloudStore {
   }): Promise<SessionRecord>;
   getSessionByTokenHash(tokenHash: string): Promise<SessionRecord | null>;
   revokeSession(sessionId: string, revokedAt: Date): Promise<void>;
+  listSessionsForUser(userId: string): Promise<SessionRecord[]>;
+  revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<number>;
 
   listComputersForUser(userId: string): Promise<ComputerRecord[]>;
   listComputers(): Promise<ComputerRecord[]>;
@@ -133,6 +140,10 @@ export interface CloudStore {
     readonly computerId: string;
   }): Promise<boolean>;
   deleteComputerById(computerId: string): Promise<boolean>;
+  renameComputerById(input: {
+    readonly computerId: string;
+    readonly name: string;
+  }): Promise<ComputerRecord | null>;
 
   createMachineIdentity(input: {
     readonly computerId: string;
@@ -149,6 +160,11 @@ export interface CloudStore {
     readonly identityId: string;
     readonly lastUsedAt: Date;
   }): Promise<void>;
+  listMachineIdentitiesForComputer(computerId: string): Promise<MachineIdentityRecord[]>;
+  revokeMachineIdentity(input: {
+    readonly identityId: string;
+    readonly revokedAt: Date;
+  }): Promise<MachineIdentityRecord | null>;
 
   createComputerAccessSession(input: {
     readonly userId: string;
@@ -157,6 +173,10 @@ export interface CloudStore {
     readonly expiresAt: Date;
   }): Promise<ComputerAccessSessionRecord>;
   getComputerAccessSessionByTokenHash(tokenHash: string): Promise<ComputerAccessSessionRecord | null>;
+  listAccessSessionsForComputer(input: {
+    readonly computerId: string;
+    readonly limit?: number;
+  }): Promise<ComputerAccessSessionRecord[]>;
 
   getReleaseManifest(input: {
     readonly target: ReleaseTarget;
@@ -176,4 +196,5 @@ export interface CloudStore {
     readonly metadata: unknown;
     readonly releasedAt: Date;
   }): Promise<ReleaseManifestRecord>;
+  deleteReleaseManifest(id: string): Promise<boolean>;
 }

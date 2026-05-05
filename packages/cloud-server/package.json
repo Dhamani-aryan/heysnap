@@ -5,9 +5,11 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:admin-ui": "pnpm --filter @ank1015-app/cloud-server-admin-ui dev",
     "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
+    "build": "pnpm run build:admin-ui && tsc -p tsconfig.json",
+    "build:admin-ui": "pnpm --filter @ank1015-app/cloud-server-admin-ui build",
+    "typecheck": "tsc --noEmit && pnpm --filter @ank1015-app/cloud-server-admin-ui typecheck",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:db": "RUN_POSTGRES_TESTS=true vitest run tests/postgres.integration.test.ts",

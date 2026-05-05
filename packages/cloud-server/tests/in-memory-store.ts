@@ -46,6 +46,50 @@ export class InMemoryCloudStore implements CloudStore {
     return this.users.get(userId) ?? null;
   }
 
+  async updateUserPassword(input: {
+    readonly userId: string;
+    readonly passwordHash: string;
+  }): Promise<UserRecord | null> {
+    const user = this.users.get(input.userId);
+
+    if (user === undefined) {
+      return null;
+    }
+
+    const updated = { ...user, passwordHash: input.passwordHash, updatedAt: new Date() };
+    this.users.set(input.userId, updated);
+    return updated;
+  }
+
+  async deleteUserById(userId: string): Promise<boolean> {
+    if (!this.users.has(userId)) {
+      return false;
+    }
+
+    this.users.delete(userId);
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId) {
+        this.sessions.delete(session.id);
+      }
+    }
+    for (const computer of this.computers.values()) {
+      if (computer.ownerUserId === userId) {
+        this.computers.delete(computer.id);
+        for (const identity of this.machineIdentities.values()) {
+          if (identity.computerId === computer.id) {
+            this.machineIdentities.delete(identity.id);
+          }
+        }
+        for (const accessSession of this.computerAccessSessions.values()) {
+          if (accessSession.computerId === computer.id) {
+            this.computerAccessSessions.delete(accessSession.id);
+          }
+        }
+      }
+    }
+    return true;
+  }
+
   async createSession(input: {
     readonly userId: string;
     readonly tokenHash: string;
@@ -77,6 +121,23 @@ export class InMemoryCloudStore implements CloudStore {
     }
 
     this.sessions.set(sessionId, { ...session, revokedAt, updatedAt: revokedAt });
+  }
+
+  async listSessionsForUser(userId: string): Promise<SessionRecord[]> {
+    return Array.from(this.sessions.values())
+      .filter((session) => session.userId === userId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+  }
+
+  async revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<number> {
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId && session.revokedAt === null) {
+        this.sessions.set(session.id, { ...session, revokedAt, updatedAt: revokedAt });
+        count += 1;
+      }
+    }
+    return count;
   }
 
   async listComputersForUser(userId: string): Promise<ComputerRecord[]> {
@@ -200,6 +261,21 @@ export class InMemoryCloudStore implements CloudStore {
     return this.computers.delete(computerId);
   }
 
+  async renameComputerById(input: {
+    readonly computerId: string;
+    readonly name: string;
+  }): Promise<ComputerRecord | null> {
+    const computer = this.computers.get(input.computerId);
+
+    if (computer === undefined) {
+      return null;
+    }
+
+    const updated = { ...computer, name: input.name, updatedAt: new Date() };
+    this.computers.set(input.computerId, updated);
+    return updated;
+  }
+
   async createMachineIdentity(input: {
     readonly computerId: string;
     readonly bootstrapTokenHash: string;
@@ -259,6 +335,27 @@ export class InMemoryCloudStore implements CloudStore {
     }
   }
 
+  async listMachineIdentitiesForComputer(computerId: string): Promise<MachineIdentityRecord[]> {
+    return Array.from(this.machineIdentities.values())
+      .filter((identity) => identity.computerId === computerId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+  }
+
+  async revokeMachineIdentity(input: {
+    readonly identityId: string;
+    readonly revokedAt: Date;
+  }): Promise<MachineIdentityRecord | null> {
+    const identity = this.machineIdentities.get(input.identityId);
+
+    if (identity === undefined) {
+      return null;
+    }
+
+    const updated = { ...identity, revokedAt: input.revokedAt };
+    this.machineIdentities.set(input.identityId, updated);
+    return updated;
+  }
+
   async createComputerAccessSession(input: {
     readonly userId: string;
     readonly computerId: string;
@@ -281,6 +378,16 @@ export class InMemoryCloudStore implements CloudStore {
   async getComputerAccessSessionByTokenHash(tokenHash: string): Promise<ComputerAccessSessionRecord | null> {
     return Array.from(this.computerAccessSessions.values())
       .find((accessSession) => accessSession.tokenHash === tokenHash) ?? null;
+  }
+
+  async listAccessSessionsForComputer(input: {
+    readonly computerId: string;
+    readonly limit?: number;
+  }): Promise<ComputerAccessSessionRecord[]> {
+    const sorted = Array.from(this.computerAccessSessions.values())
+      .filter((accessSession) => accessSession.computerId === input.computerId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+    return input.limit !== undefined ? sorted.slice(0, input.limit) : sorted;
   }
 
   async getReleaseManifest(input: {
@@ -328,6 +435,16 @@ export class InMemoryCloudStore implements CloudStore {
     };
     this.releaseManifests.set(key, manifest);
     return manifest;
+  }
+
+  async deleteReleaseManifest(id: string): Promise<boolean> {
+    for (const [key, manifest] of this.releaseManifests.entries()) {
+      if (manifest.id === id) {
+        this.releaseManifests.delete(key);
+        return true;
+      }
+    }
+    return false;
   }
 }
 

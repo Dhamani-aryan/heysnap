@@ -4,9 +4,20 @@ import { Hono } from "hono";
 
 import type { AuthService } from "../auth/service.js";
 import type { CloudServerConfig } from "../config.js";
-import type { CloudStore } from "../db/types.js";
+import type {
+  CloudStore,
+  ComputerAccessSessionRecord,
+  ComputerRecord,
+  MachineIdentityRecord,
+  SessionRecord,
+} from "../db/types.js";
+import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
-import { serializeReleaseManifest, readReleaseChannel, readReleasePlatform } from "../releases/routes.js";
+import {
+  serializeReleaseManifest,
+  readReleaseChannel,
+  readReleasePlatform,
+} from "../releases/routes.js";
 import type { AppVariables } from "../shared/context.js";
 import { notFound, unauthorized } from "../shared/errors.js";
 import { serializeComputer, serializeUser } from "../shared/serialization.js";
@@ -17,6 +28,7 @@ export const createAdminRoutes = (
   authService: AuthService,
   config: CloudServerConfig,
   provisioner: ComputerProvisioner,
+  tunnelRegistry: TunnelStatusRegistry,
 ): Hono<{ Variables: AppVariables }> => {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -30,22 +42,8 @@ export const createAdminRoutes = (
     await next();
   });
 
-  app.post("/users", async (context) => {
-    const body = await readJsonBody(context.req.raw);
-    const user = await authService.createUser({
-      email: stringField(body, "email", { required: true, maxLength: 320 }) ?? "",
-      password: stringField(body, "password", { required: true, maxLength: 1024 }) ?? "",
-    });
-
-    return context.json({
-      user: serializeUser({
-        id: user.id,
-        email: user.email,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      }),
-    }, 201);
-  });
+  app.get("/auth-check", (context) => context.json({ ok: true }));
+  app.post("/auth-check", (context) => context.json({ ok: true }));
 
   app.get("/overview", async (context) => {
     const [users, computers, releases] = await Promise.all([
@@ -55,13 +53,7 @@ export const createAdminRoutes = (
     ]);
 
     return context.json({
-      stats: {
-        users: users.length,
-        computers: computers.length,
-        cloudComputers: computers.filter((computer) => computer.kind === "cloud").length,
-        localComputers: computers.filter((computer) => computer.kind === "local").length,
-        activeComputers: computers.filter((computer) => computer.status === "online" || computer.status === "idle").length,
-      },
+      stats: buildStats(users, computers),
       users: users.map((user) => ({
         ...serializeUser(user),
         computerCount: computers.filter((computer) => computer.ownerUserId === user.id).length,
@@ -69,9 +61,20 @@ export const createAdminRoutes = (
       computers: computers.map((computer) => ({
         ...serializeComputer(computer),
         ownerEmail: users.find((user) => user.id === computer.ownerUserId)?.email ?? null,
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
       })),
       releases: releases.map(serializeReleaseManifest),
     });
+  });
+
+  app.post("/users", async (context) => {
+    const body = await readJsonBody(context.req.raw);
+    const user = await authService.createUser({
+      email: stringField(body, "email", { required: true, maxLength: 320 }) ?? "",
+      password: stringField(body, "password", { required: true, maxLength: 1024 }) ?? "",
+    });
+
+    return context.json({ user: serializeUser(user) }, 201);
   });
 
   app.get("/users", async (context) => {
@@ -83,11 +86,88 @@ export const createAdminRoutes = (
     return context.json({
       users: users.map((user) => ({
         ...serializeUser(user),
+        computerCount: computers.filter((computer) => computer.ownerUserId === user.id).length,
         computers: computers
           .filter((computer) => computer.ownerUserId === user.id)
-          .map(serializeComputer),
+          .map((computer) => ({
+            ...serializeComputer(computer),
+            tunnelConnected: tunnelRegistry.isConnected(computer.id),
+          })),
       })),
     });
+  });
+
+  app.get("/users/:userId", async (context) => {
+    const userId = context.req.param("userId");
+    const user = await store.getUserById(userId);
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    const [computers, sessions] = await Promise.all([
+      store.listComputersForUser(userId),
+      store.listSessionsForUser(userId),
+    ]);
+
+    return context.json({
+      user: serializeUser(user),
+      computers: computers.map((computer) => ({
+        ...serializeComputer(computer),
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      })),
+      sessions: sessions.map(serializeSession),
+    });
+  });
+
+  app.delete("/users/:userId", async (context) => {
+    const userId = context.req.param("userId");
+    const user = await store.getUserById(userId);
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    const computers = await store.listComputersForUser(userId);
+
+    await Promise.all(computers.map(async (computer) => {
+      try {
+        await provisioner.terminateComputer(computer);
+      } catch (error) {
+        console.error(`failed to terminate computer ${computer.id}`, error);
+      }
+    }));
+
+    const deleted = await store.deleteUserById(userId);
+
+    if (!deleted) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    return context.json({ ok: true });
+  });
+
+  app.post("/users/:userId/password", async (context) => {
+    const body = await readJsonBody(context.req.raw);
+    const user = await authService.setPassword({
+      userId: context.req.param("userId"),
+      password: stringField(body, "password", { required: true, maxLength: 1024 }) ?? "",
+    });
+
+    return context.json({ user: serializeUser(user) });
+  });
+
+  app.post("/users/:userId/sessions/revoke-all", async (context) => {
+    const userId = context.req.param("userId");
+    const user = await store.getUserById(userId);
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    const revokedCount = await store.revokeAllSessionsForUser(userId, new Date());
+
+    return context.json({ revokedCount });
   });
 
   app.get("/computers", async (context) => {
@@ -100,7 +180,53 @@ export const createAdminRoutes = (
       computers: computers.map((computer) => ({
         ...serializeComputer(computer),
         ownerEmail: users.find((user) => user.id === computer.ownerUserId)?.email ?? null,
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
       })),
+    });
+  });
+
+  app.get("/computers/:computerId", async (context) => {
+    const computerId = context.req.param("computerId");
+    const computer = await store.getComputerById(computerId);
+
+    if (computer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    const [owner, identities, accessSessions] = await Promise.all([
+      store.getUserById(computer.ownerUserId),
+      store.listMachineIdentitiesForComputer(computerId),
+      store.listAccessSessionsForComputer({ computerId, limit: 25 }),
+    ]);
+
+    return context.json({
+      computer: {
+        ...serializeComputer(computer),
+        ownerEmail: owner?.email ?? null,
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      },
+      identities: identities.map(serializeMachineIdentity),
+      accessSessions: accessSessions.map(serializeAccessSessionAdmin),
+    });
+  });
+
+  app.patch("/computers/:computerId", async (context) => {
+    const body = await readJsonBody(context.req.raw);
+    const name = stringField(body, "name", { required: true, maxLength: 120 }) ?? "";
+    const computer = await store.renameComputerById({
+      computerId: context.req.param("computerId"),
+      name,
+    });
+
+    if (computer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    return context.json({
+      computer: {
+        ...serializeComputer(computer),
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      },
     });
   });
 
@@ -119,6 +245,70 @@ export const createAdminRoutes = (
     }
 
     return context.json({ ok: true });
+  });
+
+  app.post("/computers/:computerId/start", async (context) => {
+    const computer = await readComputer(store, context.req.param("computerId"));
+    const providerMetadata = await provisioner.startComputer(computer);
+    const updated = await store.updateComputerById({
+      computerId: computer.id,
+      status: "starting",
+      providerMetadata,
+    });
+
+    return context.json({
+      computer: {
+        ...serializeComputer(updated ?? computer),
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      },
+    });
+  });
+
+  app.post("/computers/:computerId/stop", async (context) => {
+    const computer = await readComputer(store, context.req.param("computerId"));
+    const providerMetadata = await provisioner.stopComputer(computer);
+    const updated = await store.updateComputerById({
+      computerId: computer.id,
+      status: "sleeping",
+      providerMetadata,
+    });
+
+    return context.json({
+      computer: {
+        ...serializeComputer(updated ?? computer),
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      },
+    });
+  });
+
+  app.post("/computers/:computerId/restart", async (context) => {
+    const computer = await readComputer(store, context.req.param("computerId"));
+    const providerMetadata = await provisioner.restartComputer(computer);
+    const updated = await store.updateComputerById({
+      computerId: computer.id,
+      status: "starting",
+      providerMetadata,
+    });
+
+    return context.json({
+      computer: {
+        ...serializeComputer(updated ?? computer),
+        tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      },
+    });
+  });
+
+  app.post("/computers/:computerId/identities/:identityId/revoke", async (context) => {
+    const identity = await store.revokeMachineIdentity({
+      identityId: context.req.param("identityId"),
+      revokedAt: new Date(),
+    });
+
+    if (identity === null || identity.computerId !== context.req.param("computerId")) {
+      throw notFound("MACHINE_IDENTITY_NOT_FOUND", "Machine identity not found");
+    }
+
+    return context.json({ identity: serializeMachineIdentity(identity) });
   });
 
   app.post("/releases/desktop", async (context) => {
@@ -157,8 +347,72 @@ export const createAdminRoutes = (
     return context.json({ release: serializeReleaseManifest(manifest) }, 201);
   });
 
+  app.delete("/releases/:releaseId", async (context) => {
+    const deleted = await store.deleteReleaseManifest(context.req.param("releaseId"));
+
+    if (!deleted) {
+      throw notFound("RELEASE_NOT_FOUND", "Release not found");
+    }
+
+    return context.json({ ok: true });
+  });
+
   return app;
 };
+
+const buildStats = (
+  users: ReadonlyArray<{ readonly id: string; readonly createdAt: Date }>,
+  computers: ReadonlyArray<ComputerRecord>,
+) => ({
+  users: users.length,
+  computers: computers.length,
+  cloudComputers: computers.filter((computer) => computer.kind === "cloud").length,
+  localComputers: computers.filter((computer) => computer.kind === "local").length,
+  activeComputers: computers.filter(
+    (computer) => computer.status === "online" || computer.status === "idle",
+  ).length,
+  onlineComputers: computers.filter((computer) => computer.status === "online").length,
+  idleComputers: computers.filter((computer) => computer.status === "idle").length,
+  failedComputers: computers.filter((computer) => computer.status === "failed").length,
+});
+
+const readComputer = async (store: CloudStore, computerId: string): Promise<ComputerRecord> => {
+  const computer = await store.getComputerById(computerId);
+
+  if (computer === null) {
+    throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+  }
+
+  return computer;
+};
+
+const serializeSession = (session: SessionRecord) => ({
+  id: session.id,
+  userId: session.userId,
+  expiresAt: session.expiresAt.toISOString(),
+  revokedAt: session.revokedAt?.toISOString() ?? null,
+  createdAt: session.createdAt.toISOString(),
+  updatedAt: session.updatedAt.toISOString(),
+});
+
+const serializeMachineIdentity = (identity: MachineIdentityRecord) => ({
+  id: identity.id,
+  computerId: identity.computerId,
+  hasBootstrapToken: identity.bootstrapTokenHash !== null,
+  hasMachineToken: identity.tokenHash !== null,
+  lastUsedAt: identity.lastUsedAt?.toISOString() ?? null,
+  revokedAt: identity.revokedAt?.toISOString() ?? null,
+  createdAt: identity.createdAt.toISOString(),
+});
+
+const serializeAccessSessionAdmin = (accessSession: ComputerAccessSessionRecord) => ({
+  id: accessSession.id,
+  userId: accessSession.userId,
+  computerId: accessSession.computerId,
+  expiresAt: accessSession.expiresAt.toISOString(),
+  revokedAt: accessSession.revokedAt?.toISOString() ?? null,
+  createdAt: accessSession.createdAt.toISOString(),
+});
 
 const readMetadata = (value: unknown): unknown => {
   if (value === undefined) {

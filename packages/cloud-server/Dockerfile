@@ -5,7 +5,8 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/cloud-server/package.json packages/cloud-server/package.json
-RUN pnpm install --filter @ank1015-app/cloud-server... --frozen-lockfile
+COPY packages/cloud-server/admin-ui/package.json packages/cloud-server/admin-ui/package.json
+RUN pnpm install --filter @ank1015-app/cloud-server... --filter @ank1015-app/cloud-server-admin-ui... --frozen-lockfile
 
 COPY packages/cloud-server packages/cloud-server
 RUN pnpm --filter @ank1015-app/cloud-server build

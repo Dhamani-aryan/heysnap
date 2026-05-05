@@ -20,12 +20,18 @@ This is a Hono server backed by Postgres through Drizzle. It is deployed at
 
 ```sh
 pnpm --filter @ank1015-app/cloud-server dev
+pnpm --filter @ank1015-app/cloud-server dev:admin-ui
 pnpm --filter @ank1015-app/cloud-server build
+pnpm --filter @ank1015-app/cloud-server build:admin-ui
 pnpm --filter @ank1015-app/cloud-server test
 pnpm --filter @ank1015-app/cloud-server typecheck
 pnpm --filter @ank1015-app/cloud-server db:migrate
 pnpm --filter @ank1015-app/cloud-server test:db
 ```
+
+`dev:admin-ui` runs Vite on port 5174 and proxies `/admin`, `/auth`, and
+`/health` to the cloud server on port 4100. Run `dev` and `dev:admin-ui` in
+two terminals to iterate on the React admin SPA.
 
 ## Important URLs
 
@@ -52,11 +58,14 @@ curl -H "authorization: Bearer $CLOUD_SERVER_ADMIN_TOKEN" \
   https://api.heysnap.xyz/admin/overview
 ```
 
-Open the dashboard:
+Open the dashboard SPA:
 
 ```text
-https://api.heysnap.xyz/admin-dashboard
+https://api.heysnap.xyz/admin-dashboard/
 ```
+
+The admin SPA lives in `packages/cloud-server/admin-ui` (Vite + React + shadcn/ui).
+It is built into static assets and served by the Hono server.
 
 ## Deployment
 

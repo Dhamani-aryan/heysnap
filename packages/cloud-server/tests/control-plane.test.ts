@@ -142,13 +142,12 @@ describe("cloud server auth", () => {
     expect(login.token).toEqual(expect.any(String));
   });
 
-  it("serves the admin dashboard shell", async () => {
+  it("redirects /admin-dashboard to the trailing-slash app shell", async () => {
     const { app } = createTestApp();
     const response = await app.request("/admin-dashboard");
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/html");
-    expect(await response.text()).toContain("HeySnap Admin");
+    expect([302, 307]).toContain(response.status);
+    expect(response.headers.get("location")).toBe("/admin-dashboard/");
   });
 
   it("lets admins inspect users, computers, and release inventory", async () => {
