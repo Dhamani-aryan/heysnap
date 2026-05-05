@@ -355,7 +355,7 @@ export function CloudApp({
   if (authState === "checking") {
     return (
       <main className="cloud-shell">
-        <div className="cloud-loading" role="status">Loading...</div>
+        <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
   }
