@@ -186,7 +186,7 @@ button {
 
 .cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-wordmark,
 .cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark {
-  font-size: 34px;
+  font-size: 28px;
 }
 
 .cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-welcome {
@@ -208,7 +208,7 @@ button {
 .cloud-auth-heading h1,
 .cloud-topbar h1 {
   margin: 0;
-  font-size: 26px;
+  font-size: 34px;
   font-weight: 700;
   letter-spacing: 0;
 }
@@ -393,7 +393,7 @@ button {
 
 .cloud-workspace-title strong {
   overflow: hidden;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -431,19 +431,18 @@ button {
 
 .cloud-topbar {
   display: flex;
-  min-height: 76px;
+  min-height: 56px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
-  border-bottom: 1px solid var(--cloud-border);
   background: var(--cloud-bg);
-  padding: 12px 16px;
+  padding: 12px;
 }
 
 .cloud-topbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cloud-icon-button,
@@ -476,6 +475,48 @@ button {
   min-height: 0;
   overflow: auto;
   padding: 22px;
+}
+
+.cloud-machines-page {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 32px 48px;
+}
+
+.cloud-machines-page-inner {
+  width: min(100%, 1020px);
+  margin: 0 auto;
+}
+
+.cloud-machines-title {
+  margin: 0;
+  color: #252629;
+  font-size: 28px;
+  font-weight: 350;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:root.dark .cloud-machines-title {
+  color: #e3e4e6;
+}
+
+.cloud-machines-subtitle {
+  margin: 10px 0 0;
+  color: #6f7073;
+  font-size: 16px;
+  font-weight: 300;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+:root.dark .cloud-machines-subtitle {
+  color: #737375;
+}
+
+.cloud-machines-subtitle span {
+  color: #999fde;
 }
 
 .cloud-machines-error {
