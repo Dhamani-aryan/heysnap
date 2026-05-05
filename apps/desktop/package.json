@@ -10,9 +10,13 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@ank1015-app/server": "workspace:*",
     "@ank1015-app/ui": "workspace:*",
+    "chokidar": "^5.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "trash": "^10.1.1",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.4.1",
