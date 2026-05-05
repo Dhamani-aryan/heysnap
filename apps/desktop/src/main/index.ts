@@ -6,6 +6,7 @@ import { LocalMachineController, type SyncCloudSessionInput } from "./local-mach
 
 const localMachine = new LocalMachineController(app);
 let desktopUpdates: DesktopUpdateController | null = null;
+let isQuitInProgress = false;
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -59,11 +60,21 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (isQuitInProgress) {
+    return;
+  }
+
+  event.preventDefault();
   desktopUpdates?.stop();
-  void localMachine.stop().catch((error) => {
-    console.error("failed to stop local machine server", error);
-  });
+  void localMachine.stop()
+    .catch((error) => {
+      console.error("failed to stop local machine server", error);
+    })
+    .finally(() => {
+      isQuitInProgress = true;
+      app.quit();
+    });
 });
 
 const getDesktopUpdates = (): DesktopUpdateController => {

@@ -17,7 +17,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@ank1015-app/server": "workspace:*",
     "@ank1015-app/ui": "workspace:*",
     "chokidar": "^5.0.0",
     "electron-updater": "^6.8.3",

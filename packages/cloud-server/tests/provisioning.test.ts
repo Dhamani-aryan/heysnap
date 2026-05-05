@@ -69,6 +69,9 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("ANK1015_MACHINE_BOOTSTRAP_TOKEN=bootstrap-token");
     expect(userData).toContain("MACHINE_SERVER_IMAGE=example.com/ank1015-machine-server:test");
     expect(userData).toContain("MACHINE_SERVER_VERSION=test-version");
+    expect(userData).toContain("MACHINE_SERVER_CHANNEL=stable");
+    expect(userData).toContain("http://127.0.0.1:$PORT/status");
+    expect(userData).toContain("install_update_if_idle");
     expect(userData).toContain("docker run --rm");
     expect(userData).toContain("ank1015-machine-heartbeat.service");
     expect(userData).toContain("/machines/register");

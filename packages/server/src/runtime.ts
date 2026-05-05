@@ -26,17 +26,36 @@ export interface RunningServer {
   readonly host: string;
   readonly filesystemRoot: FilesystemRoot;
   readonly urls: LocalServerUrls;
+  getStatus(): MachineServerStatus;
   stop(): Promise<void>;
+}
+
+export interface MachineServerStatus {
+  readonly ok: true;
+  readonly version: string;
+  readonly activeSessions: {
+    readonly filesystem: number;
+    readonly agent: number;
+    readonly total: number;
+  };
+  readonly safeToRestart: boolean;
 }
 
 export const startServer = async (options: StartServerOptions = {}): Promise<RunningServer> => {
   const filesystemRoot = normalizeFilesystemRoot(options.filesystemRoot);
   const host = options.host ?? "127.0.0.1";
   const requestedPort = options.port ?? 4000;
+  const version = process.env.MACHINE_SERVER_VERSION?.trim() || "development";
   const server = createServer((request, response) => {
     if (request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (request.url === "/status") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(getStatus()));
       return;
     }
 
@@ -60,6 +79,22 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const port = typeof address === "object" && address !== null ? address.port : requestedPort;
   const localBaseUrl = `http://127.0.0.1:${String(port)}`;
   const localWebSocketBaseUrl = `ws://127.0.0.1:${String(port)}`;
+  const getStatus = (): MachineServerStatus => {
+    const filesystem = filesystemSocketServer.clients.size;
+    const agent = agentSocketServer.clients.size;
+    const total = filesystem + agent;
+
+    return {
+      ok: true,
+      version,
+      activeSessions: {
+        filesystem,
+        agent,
+        total,
+      },
+      safeToRestart: total === 0,
+    };
+  };
 
   return {
     server,
@@ -71,6 +106,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
       filesystemWebSocketUrl: `${localWebSocketBaseUrl}/filesystem`,
       agentWebSocketUrl: `${localWebSocketBaseUrl}/agent`,
     },
+    getStatus,
     async stop() {
       await Promise.all([
         closeWebSocketServer(filesystemSocketServer),

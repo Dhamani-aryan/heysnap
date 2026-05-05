@@ -1,0 +1,134 @@
+name: Release machine server
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Machine server version to build and publish, for example 0.1.1
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      notes:
+        description: Short release notes
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    name: Build and publish machine server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck machine server
+        run: pnpm --filter @ank1015-app/server typecheck
+
+      - name: Test machine server
+        run: pnpm --filter @ank1015-app/server test
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_MACHINE_SERVER_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        env:
+          IMAGE_URI: ${{ vars.MACHINE_SERVER_IMAGE_URI }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${IMAGE_URI%/*}"
+
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -f packages/server/Dockerfile \
+            -t "$IMAGE_URI:$VERSION" \
+            -t "$IMAGE_URI:$CHANNEL" \
+            --push \
+            .
+
+      - name: Publish cloud release manifest
+        env:
+          ADMIN_TOKEN: ${{ secrets.CLOUD_SERVER_ADMIN_TOKEN }}
+          IMAGE_URI: ${{ vars.MACHINE_SERVER_IMAGE_URI }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          node <<'NODE'
+          void main().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+
+          async function main() {
+            const adminToken = requireEnv("ADMIN_TOKEN");
+            const imageUri = requireEnv("IMAGE_URI");
+            const version = requireEnv("VERSION");
+            const channel = requireEnv("CHANNEL");
+            const notes = process.env.NOTES?.trim() || null;
+            const dockerImage = `${imageUri}:${version}`;
+            const response = await fetch("https://api.heysnap.xyz/admin/releases/machine-server", {
+              method: "POST",
+              body: JSON.stringify({
+                channel,
+                version,
+                dockerImage,
+                notes,
+                metadata: {
+                  imageUri,
+                  imageTag: version,
+                },
+              }),
+              headers: {
+                authorization: `Bearer ${adminToken}`,
+                "content-type": "application/json",
+              },
+            });
+            const text = await response.text();
+
+            if (!response.ok) {
+              throw new Error(`Failed to publish machine server release: ${response.status} ${text}`);
+            }
+
+            console.log(`Published machine server ${version}: ${text}`);
+          }
+
+          function requireEnv(name) {
+            const value = process.env[name];
+
+            if (value === undefined || value.trim().length === 0) {
+              throw new Error(`${name} is required`);
+            }
+
+            return value;
+          }
+          NODE

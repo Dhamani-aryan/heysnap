@@ -17,9 +17,6 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@ank1015-app/server':
-        specifier: workspace:*
-        version: link:../../packages/server
       '@ank1015-app/ui':
         specifier: workspace:*
         version: link:../../packages/ui

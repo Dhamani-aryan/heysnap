@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 
-import { startServer, type RunningServer } from "@ank1015-app/server";
+import { MachineSidecarSupervisor, type MachineServerReleaseManifest } from "./machine-sidecar.js";
 
 interface LocalMachineComputer {
   readonly id: string;
@@ -31,6 +31,10 @@ interface LocalMachineSyncResponse {
 
 interface LocalMachineHeartbeatResponse {
   readonly computer: LocalMachineComputer;
+  readonly update?: {
+    readonly updateAvailable: boolean;
+    readonly latest: MachineServerReleaseManifest | null;
+  };
 }
 
 export interface LocalMachineStatus {
@@ -42,6 +46,10 @@ export interface LocalMachineStatus {
       readonly filesystemWebSocketUrl: string;
       readonly agentWebSocketUrl: string;
     } | null;
+    readonly image: string | null;
+    readonly version: string | null;
+    readonly updateState: "idle" | "checking" | "deferred" | "pulling" | "restarting" | "failed";
+    readonly updateError: string | null;
     readonly error: string | null;
   };
   readonly cloud: {
@@ -63,12 +71,16 @@ interface LocalDeviceIdentity {
 }
 
 export class LocalMachineController {
-  private runningServer: RunningServer | null = null;
+  private sidecar: MachineSidecarSupervisor | null = null;
   private serverState: LocalMachineStatus["server"] = {
     state: "stopped",
     port: null,
     filesystemRoot: null,
     urls: null,
+    image: null,
+    version: null,
+    updateState: "idle",
+    updateError: null,
     error: null,
   };
   private cloudState: LocalMachineStatus["cloud"] = {
@@ -87,32 +99,20 @@ export class LocalMachineController {
     this.serverState = { ...this.serverState, state: "starting", error: null };
 
     try {
-      this.runningServer = await startServer({ port: 4000 });
+      const sidecar = this.getSidecar();
+      await sidecar.start();
+      this.serverState = sidecar.getStatus();
     } catch (error) {
-      if (!isAddressInUseError(error)) {
-        this.serverState = {
-          state: "failed",
-          port: null,
-          filesystemRoot: null,
-          urls: null,
-          error: error instanceof Error ? error.message : "Failed to start local server.",
-        };
-        throw error;
-      }
-
-      this.runningServer = await startServer({ port: 0 });
+      this.serverState = {
+        ...this.serverState,
+        state: "failed",
+        port: null,
+        filesystemRoot: null,
+        urls: null,
+        error: error instanceof Error ? error.message : "Failed to start local server sidecar.",
+      };
+      throw error;
     }
-
-    this.serverState = {
-      state: "running",
-      port: this.runningServer.port,
-      filesystemRoot: this.runningServer.filesystemRoot.absolutePath,
-      urls: {
-        filesystemWebSocketUrl: this.runningServer.urls.filesystemWebSocketUrl,
-        agentWebSocketUrl: this.runningServer.urls.agentWebSocketUrl,
-      },
-      error: null,
-    };
   }
 
   getStatus(): LocalMachineStatus {
@@ -123,7 +123,7 @@ export class LocalMachineController {
   }
 
   async syncCloudSession(input: SyncCloudSessionInput): Promise<LocalMachineStatus> {
-    if (this.runningServer === null) {
+    if (this.serverState.state !== "running") {
       await this.start();
     }
 
@@ -138,6 +138,7 @@ export class LocalMachineController {
 
     try {
       const localDevice = await this.readLocalDeviceIdentity();
+      const machineServerVersion = this.readMachineServerVersion();
       const response = await this.request<LocalMachineSyncResponse>(
         cloudServerUrl,
         "/computers/local",
@@ -147,7 +148,7 @@ export class LocalMachineController {
           replacedLocalDeviceIds: localDevice.replacedLocalDeviceIds,
           name: `${hostname() || "Local"} Machine`,
           capabilities: ["filesystem", "agent", "local"],
-          machineServerVersion: "desktop-local",
+          machineServerVersion,
         },
       );
 
@@ -178,9 +179,8 @@ export class LocalMachineController {
   async stop(): Promise<void> {
     this.stopHeartbeat();
 
-    if (this.runningServer !== null) {
-      await this.runningServer.stop();
-      this.runningServer = null;
+    if (this.sidecar !== null) {
+      await this.sidecar.stop();
     }
 
     this.serverState = {
@@ -188,6 +188,10 @@ export class LocalMachineController {
       port: null,
       filesystemRoot: null,
       urls: null,
+      image: null,
+      version: null,
+      updateState: "idle",
+      updateError: null,
       error: null,
     };
     this.cloudState = {
@@ -219,14 +223,17 @@ export class LocalMachineController {
     }
 
     try {
+      const sidecar = this.getSidecar();
+      const runtimeStatus = await sidecar.getRuntimeStatus();
+      const machineServerVersion = runtimeStatus?.version ?? this.readMachineServerVersion();
       const response = await this.request<LocalMachineHeartbeatResponse>(
         this.cloudServerUrl,
         "/machines/heartbeat",
         this.machineToken,
         {
-          status: "idle",
+          status: runtimeStatus?.safeToRestart === false ? "online" : "idle",
           capabilities: ["filesystem", "agent", "local"],
-          machineServerVersion: "desktop-local",
+          machineServerVersion,
         },
       );
 
@@ -236,6 +243,16 @@ export class LocalMachineController {
         error: null,
         lastHeartbeatAt: response.computer.lastHeartbeatAt,
       };
+      this.serverState = sidecar.getStatus();
+
+      if (response.update?.updateAvailable === true) {
+        const result = await sidecar.updateIfIdle(response.update.latest);
+        this.serverState = sidecar.getStatus();
+
+        if (result === "updated") {
+          await this.sendHeartbeat();
+        }
+      }
     } catch (error) {
       this.cloudState = {
         ...this.cloudState,
@@ -243,6 +260,20 @@ export class LocalMachineController {
         error: error instanceof Error ? error.message : "Local machine heartbeat failed.",
       };
     }
+  }
+
+  private getSidecar(): MachineSidecarSupervisor {
+    if (this.sidecar === null) {
+      this.sidecar = new MachineSidecarSupervisor({
+        filesystemRoot: this.electronApp.getPath("desktop"),
+      });
+    }
+
+    return this.sidecar;
+  }
+
+  private readMachineServerVersion(): string {
+    return this.sidecar?.getStatus().version ?? "development";
   }
 
   private async readLocalDeviceIdentity(): Promise<LocalDeviceIdentity> {
@@ -370,9 +401,3 @@ const readCloudError = (body: unknown): string => {
 
   return "Cloud request failed.";
 };
-
-const isAddressInUseError = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "code" in error &&
-  (error as { readonly code?: unknown }).code === "EADDRINUSE";

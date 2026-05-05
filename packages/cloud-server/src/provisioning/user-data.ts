@@ -15,6 +15,7 @@ export const renderMachineUserData = (input: RenderMachineUserDataInput): string
     `ANK1015_MACHINE_BOOTSTRAP_TOKEN=${input.bootstrapToken}`,
     `MACHINE_SERVER_IMAGE=${input.machineServerImage}`,
     `MACHINE_SERVER_VERSION=${input.machineServerVersion}`,
+    "MACHINE_SERVER_CHANNEL=stable",
     "PORT=4000",
     "ANK1015_FILESYSTEM_ROOT=/workspace",
     "ANK1015_MACHINE_TOKEN_FILE=/opt/ank1015/machine-token",
@@ -80,6 +81,10 @@ set -euo pipefail
 
 source /opt/ank1015/machine.env
 
+machine_status() {
+  curl -fsS "http://127.0.0.1:$PORT/status" || true
+}
+
 register_machine() {
   curl -fsS -X POST "$CLOUD_SERVER_PUBLIC_URL/machines/register" \\
     -H 'content-type: application/json' \\
@@ -89,6 +94,46 @@ register_machine() {
   chmod 600 /opt/ank1015/machine-token
 }
 
+update_machine_env() {
+  local image="$1"
+  local version="$2"
+  sed -i "s|^MACHINE_SERVER_IMAGE=.*|MACHINE_SERVER_IMAGE=$image|" /opt/ank1015/machine.env
+  sed -i "s|^MACHINE_SERVER_VERSION=.*|MACHINE_SERVER_VERSION=$version|" /opt/ank1015/machine.env
+  source /opt/ank1015/machine.env
+}
+
+install_update_if_idle() {
+  if [ ! -s /opt/ank1015/heartbeat.json ]; then
+    return 0
+  fi
+
+  local update_available
+  update_available="$(jq -r '.update.updateAvailable // false' /opt/ank1015/heartbeat.json)"
+
+  if [ "$update_available" != "true" ]; then
+    return 0
+  fi
+
+  local next_image
+  local next_version
+  next_image="$(jq -r '.update.latest.dockerImage // empty' /opt/ank1015/heartbeat.json)"
+  next_version="$(jq -r '.update.latest.version // empty' /opt/ank1015/heartbeat.json)"
+
+  if [ -z "$next_image" ] || [ -z "$next_version" ] || [ "$next_version" = "$MACHINE_SERVER_VERSION" ]; then
+    return 0
+  fi
+
+  local status_json
+  status_json="$(machine_status)"
+
+  if [ -n "$status_json" ] && [ "$(printf '%s' "$status_json" | jq -r '.safeToRestart // false')" != "true" ]; then
+    return 0
+  fi
+
+  update_machine_env "$next_image" "$next_version"
+  systemctl restart ank1015-machine-server.service
+}
+
 while true; do
   if [ ! -s /opt/ank1015/machine-token ]; then
     register_machine || true
@@ -96,11 +141,25 @@ while true; do
 
   if [ -s /opt/ank1015/machine-token ]; then
     MACHINE_TOKEN="$(cat /opt/ank1015/machine-token)"
+    STATUS_JSON="$(machine_status)"
+    SAFE_TO_RESTART="true"
+
+    if [ -n "$STATUS_JSON" ]; then
+      MACHINE_SERVER_VERSION="$(printf '%s' "$STATUS_JSON" | jq -r '.version // env.MACHINE_SERVER_VERSION')"
+      SAFE_TO_RESTART="$(printf '%s' "$STATUS_JSON" | jq -r '.safeToRestart // true')"
+    fi
+
+    MACHINE_STATUS="idle"
+    if [ "$SAFE_TO_RESTART" != "true" ]; then
+      MACHINE_STATUS="online"
+    fi
+
     curl -fsS -X POST "$CLOUD_SERVER_PUBLIC_URL/machines/heartbeat" \\
       -H "authorization: Bearer $MACHINE_TOKEN" \\
       -H 'content-type: application/json' \\
-      -d "{\\"status\\":\\"idle\\",\\"machineServerVersion\\":\\"$MACHINE_SERVER_VERSION\\",\\"capabilities\\":[\\"filesystem\\",\\"agent\\"]}" \\
+      -d "{\\"status\\":\\"$MACHINE_STATUS\\",\\"machineServerVersion\\":\\"$MACHINE_SERVER_VERSION\\",\\"capabilities\\":[\\"filesystem\\",\\"agent\\"]}" \\
       -o /opt/ank1015/heartbeat.json || rm -f /opt/ank1015/machine-token
+    install_update_if_idle || true
   fi
 
   sleep 30
