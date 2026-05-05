@@ -1,35 +1,36 @@
-import { createServer } from "node:http";
-import { attachAgentWebSocketServer } from "./agent/websocket.js";
-import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
-import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
-import { resolveFilesystemRoot } from "./filesystem/paths.js";
+import { startMachineTunnelClient } from "./tunnel/client.js";
+import { startServer } from "./runtime.js";
 
 const port = Number(process.env.PORT ?? 4000);
-const filesystemRoot = resolveFilesystemRoot();
 
-const server = createServer((request, response) => {
-  if (request.url === "/health") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true }));
-    return;
-  }
-
-  response.writeHead(200, { "content-type": "text/plain" });
-  response.end("ank1015 server");
+const runningServer = await startServer({
+  port,
+  host: process.env.HOST ?? "127.0.0.1",
+  codexBin: process.env.CODEX_BIN,
 });
 
-attachFilesystemWebSocketServer(server, {
-  root: filesystemRoot,
-});
-attachAgentWebSocketServer(server, {
-  harness: new CodexAgentHarness({
-    filesystemRoot: filesystemRoot.absolutePath,
-    codexBin: process.env.CODEX_BIN,
-  }),
-});
+console.log(`server listening on http://127.0.0.1:${runningServer.port}`);
+console.log(`filesystem root: ${runningServer.filesystemRoot.absolutePath}`);
+console.log(`agent websocket: ${runningServer.urls.agentWebSocketUrl}`);
 
-server.listen(port, () => {
-  console.log(`server listening on http://localhost:${port}`);
-  console.log(`filesystem root: ${filesystemRoot.absolutePath}`);
-  console.log(`agent websocket: ws://localhost:${port}/agent`);
-});
+if (
+  process.env.CLOUD_SERVER_PUBLIC_URL !== undefined &&
+  process.env.ANK1015_COMPUTER_ID !== undefined &&
+  process.env.ANK1015_MACHINE_TOKEN_FILE !== undefined
+) {
+  startMachineTunnelClient({
+    cloudServerPublicUrl: process.env.CLOUD_SERVER_PUBLIC_URL,
+    computerId: process.env.ANK1015_COMPUTER_ID,
+    tokenFile: process.env.ANK1015_MACHINE_TOKEN_FILE,
+    localPort: runningServer.port,
+  });
+}
+
+const stop = () => {
+  void runningServer.stop().finally(() => {
+    process.exit(0);
+  });
+};
+
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
