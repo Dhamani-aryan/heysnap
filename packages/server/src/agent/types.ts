@@ -156,7 +156,13 @@ export interface CancelRunInput {
   readonly runId: string;
 }
 
-export type SetupInput = unknown;
+export interface SetupInput {
+  readonly install?: boolean;
+  readonly apiKey?: string;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly apiVersion?: string;
+}
 
 export interface IAgentHarness {
   setup(input: SetupInput): Promise<void>;

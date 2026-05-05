@@ -13,6 +13,69 @@ import {
 import type { AgentContent } from "../src/agent/types.js";
 
 describe("codex agent harness", () => {
+  it("sets up Codex with opinionated Azure OpenAI provider config", async () => {
+    const previous = process.env.AZURE_OPENAI_API_KEY;
+    delete process.env.AZURE_OPENAI_API_KEY;
+    const client = new FakeCodexClient({});
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    try {
+      await harness.setup({
+        apiKey: "azure-key",
+        baseUrl: "https://example.openai.azure.com/openai",
+        model: "gpt-5.3-codex",
+        install: false,
+      });
+
+      expect(process.env.AZURE_OPENAI_API_KEY).toBe("azure-key");
+      expect(client.closedCount).toBe(1);
+      expect(client.requests).toEqual([
+        {
+          method: "config/batchWrite",
+          params: {
+            edits: [
+              {
+                keyPath: "model_provider",
+                value: "azure",
+                mergeStrategy: "replace",
+              },
+              {
+                keyPath: "model",
+                value: "gpt-5.3-codex",
+                mergeStrategy: "replace",
+              },
+              {
+                keyPath: "model_providers.azure",
+                value: {
+                  name: "Azure",
+                  base_url: "https://example.openai.azure.com/openai",
+                  wire_api: "responses",
+                  query_params: {
+                    "api-version": "2025-04-01-preview",
+                  },
+                  env_key: "AZURE_OPENAI_API_KEY",
+                  env_key_instructions: "Set AZURE_OPENAI_API_KEY in the server environment",
+                  supports_websockets: false,
+                },
+                mergeStrategy: "upsert",
+              },
+            ],
+            reloadUserConfig: true,
+          },
+        },
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AZURE_OPENAI_API_KEY;
+      } else {
+        process.env.AZURE_OPENAI_API_KEY = previous;
+      }
+    }
+  });
+
   it("retrieves Codex history threads and maps them into grouped harness summaries", async () => {
     const projectListThread = createCodexThread({
       id: "thread-project",
@@ -1157,6 +1220,7 @@ describe("codex app-server client", () => {
 
 class FakeCodexClient implements CodexAppServerClient {
   readonly requests: Array<{ readonly method: string; readonly params: unknown }> = [];
+  closedCount = 0;
   private readonly listeners = new Set<(notification: CodexAppServerNotification) => void>();
 
   constructor(
@@ -1185,7 +1249,9 @@ class FakeCodexClient implements CodexAppServerClient {
     }
   }
 
-  close(): void {}
+  close(): void {
+    this.closedCount += 1;
+  }
 }
 
 const createCodexThread = (input: {

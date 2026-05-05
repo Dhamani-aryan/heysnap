@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
+import { promisify } from "node:util";
 
 import type {
   AgentContent,
@@ -16,8 +18,10 @@ import type {
   RetrieveThreadsInput,
   RetrieveThreadsResult,
   SendMessageInput,
+  SetupInput,
   ToolResultMessage,
 } from "../../types.js";
+import { AgentError } from "../../errors.js";
 import { resolveClientPath } from "../../../filesystem/paths.js";
 import {
   CodexStdioAppServerClient,
@@ -39,6 +43,10 @@ import {
 
 const HISTORY_SOURCE_KINDS = ["appServer", "vscode"];
 const SERVICE_NAME = "ank1015_app";
+const DEFAULT_CODEX_PACKAGE = "@openai/codex";
+const DEFAULT_AZURE_API_VERSION = "2025-04-01-preview";
+const DEFAULT_AZURE_ENV_KEY = "AZURE_OPENAI_API_KEY";
+const execFileAsync = promisify(execFile);
 
 export interface CodexAgentHarnessOptions {
   readonly filesystemRoot: string;
@@ -46,17 +54,91 @@ export interface CodexAgentHarnessOptions {
   readonly client?: CodexAppServerClient;
 }
 
+interface ConfigEdit {
+  readonly keyPath: string;
+  readonly value: unknown;
+  readonly mergeStrategy: "replace" | "upsert";
+}
+
+interface NormalizedSetupInput {
+  readonly install?: boolean;
+  readonly apiKey?: string;
+  readonly baseUrl: string;
+  readonly apiVersion?: string;
+  readonly model: string;
+}
+
 export class CodexAgentHarness implements IAgentHarness {
   private readonly filesystemRoot: string;
+  private readonly codexBin?: string;
   private readonly client: CodexAppServerClient;
   private readonly liveThreadMessages = new Map<string, AgentMessage[]>();
 
   constructor(options: CodexAgentHarnessOptions) {
     this.filesystemRoot = options.filesystemRoot;
+    this.codexBin = options.codexBin;
     this.client = options.client ?? new CodexStdioAppServerClient({ codexBin: options.codexBin });
   }
 
-  async setup(_input: unknown): Promise<void> {}
+  async setup(input: SetupInput): Promise<void> {
+    const setupInput = normalizeSetupInput(input);
+
+    if (setupInput.install !== false) {
+      await ensureCodexInstalled(this.codexBin);
+    }
+
+    await this.setupAzureOpenAi(setupInput);
+  }
+
+  private async setupAzureOpenAi(input: NormalizedSetupInput): Promise<void> {
+    const envKey = DEFAULT_AZURE_ENV_KEY;
+    const apiKey = input.apiKey?.trim();
+
+    if (apiKey !== undefined && apiKey.length > 0) {
+      process.env[envKey] = apiKey;
+      this.client.close();
+    } else if (!hasEnvSecret(envKey)) {
+      throw new AgentError(
+        "CODEX_SETUP_MISSING_API_KEY",
+        `Azure Codex setup needs ${envKey} in the server environment or setup input.`,
+      );
+    }
+
+    await this.writeConfig([
+      {
+        keyPath: "model_provider",
+        value: "azure",
+        mergeStrategy: "replace",
+      },
+      {
+        keyPath: "model",
+        value: input.model,
+        mergeStrategy: "replace",
+      },
+      {
+        keyPath: "model_providers.azure",
+        value: {
+          name: "Azure",
+          base_url: input.baseUrl,
+          wire_api: "responses",
+          query_params: {
+            "api-version": input.apiVersion ?? DEFAULT_AZURE_API_VERSION,
+          },
+          env_key: envKey,
+          env_key_instructions: `Set ${envKey} in the server environment`,
+          supports_websockets: false,
+        },
+        mergeStrategy: "upsert",
+      },
+    ]);
+  }
+
+  private async writeConfig(edits: ConfigEdit[]): Promise<void> {
+    await this.client.request("config/batchWrite", {
+      edits,
+      reloadUserConfig: true,
+    });
+  }
 
   async retrieveThreads(input: RetrieveThreadsInput = {}): Promise<RetrieveThreadsResult> {
     const response = await this.client.request<CodexThreadListResponse>("thread/list", {
@@ -968,3 +1050,123 @@ const stringField = (record: Record<string, unknown> | undefined, key: string): 
   const value = record?.[key];
   return typeof value === "string" ? value : undefined;
 };
+
+const normalizeSetupInput = (input: SetupInput): NormalizedSetupInput => {
+  if (!isRecord(input)) {
+    throw new AgentError("CODEX_SETUP_INVALID_INPUT", "Codex setup input must be an object.");
+  }
+
+  return {
+    install: optionalBoolean(input["install"], "install"),
+    apiKey: optionalStringField(input["apiKey"], "apiKey"),
+    baseUrl: requiredNonEmptyString(input["baseUrl"], "baseUrl"),
+    apiVersion: optionalNonEmptyString(input["apiVersion"], "apiVersion"),
+    model: requiredNonEmptyString(input["model"], "model"),
+  };
+};
+
+const ensureCodexInstalled = async (codexBin: string | undefined): Promise<void> => {
+  const command = codexBin?.trim() || "codex";
+
+  if (await commandSucceeds(command, ["--version"])) {
+    return;
+  }
+
+  if (codexBin !== undefined && codexBin.trim().length > 0 && codexBin !== "codex") {
+    throw new AgentError("CODEX_NOT_FOUND", `Configured Codex binary was not found: ${codexBin}`);
+  }
+
+  try {
+    await execFileAsync("npm", ["install", "-g", DEFAULT_CODEX_PACKAGE], {
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024,
+    });
+  } catch (error) {
+    throw new AgentError("CODEX_INSTALL_FAILED", renderCommandError("npm install -g @openai/codex", error));
+  }
+
+  if (!(await commandSucceeds("codex", ["--version"]))) {
+    throw new AgentError("CODEX_NOT_FOUND", "Installed @openai/codex, but the codex binary is still unavailable.");
+  }
+};
+
+const commandSucceeds = async (command: string, args: readonly string[]): Promise<boolean> => {
+  try {
+    await execFileAsync(command, [...args], {
+      timeout: 20_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const hasEnvSecret = (name: string): boolean => {
+  const value = process.env[name]?.trim();
+  return value !== undefined && value.length > 0;
+};
+
+const requiredNonEmptyString = (value: unknown, fieldName: string): string => {
+  const result = optionalNonEmptyString(value, fieldName);
+
+  if (result === undefined) {
+    throw new AgentError("CODEX_SETUP_INVALID_INPUT", `Codex setup field ${fieldName} is required.`);
+  }
+
+  return result;
+};
+
+const optionalNonEmptyString = (value: unknown, fieldName: string): string | undefined => {
+  const result = optionalStringField(value, fieldName)?.trim();
+
+  if (result !== undefined && result.length === 0) {
+    throw new AgentError("CODEX_SETUP_INVALID_INPUT", `Codex setup field ${fieldName} must not be empty.`);
+  }
+
+  return result;
+};
+
+const optionalStringField = (value: unknown, fieldName: string): string | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new AgentError("CODEX_SETUP_INVALID_INPUT", `Codex setup field ${fieldName} must be a string.`);
+  }
+
+  return value;
+};
+
+const optionalBoolean = (value: unknown, fieldName: string): boolean | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new AgentError("CODEX_SETUP_INVALID_INPUT", `Codex setup field ${fieldName} must be a boolean.`);
+  }
+
+  return value;
+};
+
+const renderCommandError = (command: string, error: unknown): string => {
+  if (isRecord(error)) {
+    const stderr = typeof error["stderr"] === "string" ? error["stderr"].trim() : "";
+    const message = error["message"];
+
+    if (stderr.length > 0) {
+      return `${command} failed: ${stderr}`;
+    }
+
+    if (typeof message === "string") {
+      return `${command} failed: ${message}`;
+    }
+  }
+
+  return `${command} failed.`;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
