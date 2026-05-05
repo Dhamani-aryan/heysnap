@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import darkLogoUrl from "../../../../apps/assets/heysnap-dark-logo.gif";
 import lightLogoUrl from "../../../../apps/assets/heysnap-light-logo.gif";
@@ -25,6 +25,28 @@ export function LoginScreen({
 }: LoginScreenProps): React.ReactElement {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isInvalidFeedbackVisible, setIsInvalidFeedbackVisible] = useState(false);
+
+  useEffect(() => {
+    if (error === null) {
+      setIsInvalidFeedbackVisible(false);
+      return;
+    }
+
+    setIsInvalidFeedbackVisible(false);
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      setIsInvalidFeedbackVisible(true);
+    });
+    const timeout = window.setTimeout(() => {
+      setIsInvalidFeedbackVisible(false);
+    }, 2200);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(timeout);
+    };
+  }, [error]);
 
   return (
     <main className="cloud-auth-shell">
@@ -33,6 +55,7 @@ export function LoginScreen({
       </div>
       <form
         className="cloud-auth-panel"
+        data-invalid-feedback={isInvalidFeedbackVisible ? "true" : undefined}
         onSubmit={(event) => {
           event.preventDefault();
           void onSubmit({ email, password });
@@ -77,7 +100,11 @@ export function LoginScreen({
           />
         </label>
 
-        {error !== null ? <div className="cloud-auth-error" role="alert">{error}</div> : null}
+        {error !== null ? (
+          <div className="cloud-auth-error cloud-auth-error-sr" role="alert">
+            {error}
+          </div>
+        ) : null}
 
         <button className="cloud-primary-button" disabled={isSubmitting} type="submit">
           {isSubmitting ? "Signing in..." : "Sign in"}

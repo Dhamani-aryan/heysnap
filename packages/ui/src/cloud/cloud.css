@@ -190,6 +190,15 @@ button {
   box-shadow: none;
 }
 
+.cloud-auth-panel[data-invalid-feedback="true"] .cloud-field input {
+  animation: cloud-auth-input-shake 220ms ease-in-out;
+  border-color: rgba(220, 38, 38, 0.42);
+}
+
+:root.dark .cloud-auth-panel[data-invalid-feedback="true"] .cloud-field input {
+  border-color: rgba(255, 107, 107, 0.38);
+}
+
 .cloud-auth-error,
 .cloud-machines-error {
   border: 1px solid rgba(180, 35, 24, 0.22);
@@ -201,6 +210,17 @@ button {
 
 .cloud-auth-error {
   padding: 10px 12px;
+}
+
+.cloud-auth-error-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
 }
 
 .cloud-primary-button,
@@ -234,6 +254,25 @@ button {
 .cloud-text-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+@keyframes cloud-auth-input-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-5px);
+  }
+
+  50% {
+    transform: translateX(5px);
+  }
+
+  75% {
+    transform: translateX(-3px);
+  }
 }
 
 .cloud-shell {
