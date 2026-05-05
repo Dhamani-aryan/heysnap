@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderAddIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, FolderAddIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -9,14 +9,15 @@ import { ThreadHistoryButton } from "../agent/thread-history";
 import type { AgentThreadSummary } from "../agent/types";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
-import { FilesystemClient } from "./filesystem-client";
+import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
 import { ThemeToggle } from "./theme-toggle";
 import type { FilesystemEntry, FilesystemListing } from "./types";
 
 const HISTORY_LIMIT = 64;
-const DEFAULT_LEFT_PANE_RATIO = 0.6;
+const DEFAULT_LEFT_PANE_RATIO = 0.5;
 const MIN_PANE_RATIO = 0.25;
 const MAX_PANE_RATIO = 0.75;
+const LEFT_PANE_RATIO_STORAGE_KEY = "filesystem-explorer:left-pane-ratio";
 const CONTEXT_MENU_WIDTH = 200;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 const BACKGROUND_CONTEXT_MENU_HEIGHT = 268;
@@ -51,6 +52,19 @@ type ContextMenuState =
       readonly entry: FilesystemEntry;
     };
 
+const clampPaneRatio = (ratio: number): number =>
+  Math.min(MAX_PANE_RATIO, Math.max(MIN_PANE_RATIO, ratio));
+
+const getInitialLeftPaneRatio = (): number => {
+  if (typeof window === "undefined") {
+    return DEFAULT_LEFT_PANE_RATIO;
+  }
+
+  const stored = Number.parseFloat(window.localStorage.getItem(LEFT_PANE_RATIO_STORAGE_KEY) ?? "");
+
+  return Number.isFinite(stored) ? clampPaneRatio(stored) : DEFAULT_LEFT_PANE_RATIO;
+};
+
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentWebsocketUrl?: string;
@@ -64,13 +78,15 @@ export function FilesystemExplorer({
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [leftPaneRatio, setLeftPaneRatio] = useState(DEFAULT_LEFT_PANE_RATIO);
+  const [leftPaneRatio, setLeftPaneRatio] = useState(getInitialLeftPaneRatio);
   const [listing, setListing] = useState<FilesystemListing | null>(null);
   const [listingError, setListingError] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(true);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
+  const [filesystemConnectionStatus, setFilesystemConnectionStatus] =
+    useState<FilesystemConnectionStatus>("connecting");
   const currentPath = listing?.path ?? "";
 
   useEffect(() => {
@@ -80,6 +96,7 @@ export function FilesystemExplorer({
       },
       onLoading: setIsFetching,
       onError: setListingError,
+      onConnectionStatus: setFilesystemConnectionStatus,
     });
 
     clientRef.current = client;
@@ -90,6 +107,13 @@ export function FilesystemExplorer({
       clientRef.current = null;
     };
   }, [websocketUrl]);
+
+  const handleLeftPaneRatioChange = useCallback((ratio: number): void => {
+    const nextRatio = clampPaneRatio(ratio);
+
+    setLeftPaneRatio(nextRatio);
+    window.localStorage.setItem(LEFT_PANE_RATIO_STORAGE_KEY, String(nextRatio));
+  }, []);
 
   const subscribeTo = useCallback(async (nextPath: string, shouldPushHistory: boolean): Promise<void> => {
     setIsFetching(true);
@@ -265,16 +289,20 @@ export function FilesystemExplorer({
         onForward={onForward}
         title={listing?.name ?? "Desktop"}
         isFetching={isFetching}
+        filesystemConnectionStatus={filesystemConnectionStatus}
         agentWebsocketUrl={agentWebsocketUrl}
         selectedThreadId={selectedThread?.id ?? null}
         onSelectThread={setSelectedThread}
+        onNewThread={() => setSelectedThread(null)}
       />
 
       <DesktopSplitPane
         leftPaneRatio={leftPaneRatio}
-        onLeftPaneRatioChange={setLeftPaneRatio}
+        onLeftPaneRatioChange={handleLeftPaneRatioChange}
         agentWebsocketUrl={agentWebsocketUrl}
         selectedThreadId={selectedThread?.id ?? null}
+        currentPath={currentPath}
+        onSelectThread={setSelectedThread}
       >
         <FinderBody
           error={listingError}
@@ -314,9 +342,11 @@ const FinderToolbar = ({
   onForward,
   title,
   isFetching,
+  filesystemConnectionStatus,
   agentWebsocketUrl,
   selectedThreadId,
   onSelectThread,
+  onNewThread,
 }: {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
@@ -324,9 +354,11 @@ const FinderToolbar = ({
   readonly onForward: () => void;
   readonly title: string;
   readonly isFetching: boolean;
+  readonly filesystemConnectionStatus: FilesystemConnectionStatus;
   readonly agentWebsocketUrl: string;
   readonly selectedThreadId: string | null;
   readonly onSelectThread: (thread: AgentThreadSummary) => void;
+  readonly onNewThread: () => void;
 }): React.ReactElement => (
   <div className="finder-toolbar">
     <div className="toolbar-inner">
@@ -340,14 +372,30 @@ const FinderToolbar = ({
       </div>
 
       <div className="tab-strip-wrap">
-        <button type="button" title={`${title} - Local`} className="directory-tab active">
-          {title} <span>- Local</span>
+        <button
+          type="button"
+          title={`${title} - Local`}
+          className="directory-tab active"
+          data-connection-status={filesystemConnectionStatus}
+        >
+          <span className="directory-tab-status" aria-hidden="true" />
+          <span className="directory-tab-title">{title}</span>
+          <span className="directory-tab-location">- Local</span>
         </button>
 
         <div className="tab-strip" />
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
+      <button
+        type="button"
+        className="new-thread-button"
+        aria-label="New chat"
+        title="New chat"
+        onClick={onNewThread}
+      >
+        <HugeiconsIcon icon={Add01Icon} size={18} color="currentColor" strokeWidth={1.8} />
+      </button>
       <ThreadHistoryButton
         websocketUrl={agentWebsocketUrl}
         selectedThreadId={selectedThreadId}
@@ -386,12 +434,16 @@ const DesktopSplitPane = ({
   onLeftPaneRatioChange,
   agentWebsocketUrl,
   selectedThreadId,
+  currentPath,
+  onSelectThread,
 }: {
   readonly children: React.ReactNode;
   readonly leftPaneRatio: number;
   readonly onLeftPaneRatioChange: (ratio: number) => void;
   readonly agentWebsocketUrl: string;
   readonly selectedThreadId: string | null;
+  readonly currentPath: string;
+  readonly onSelectThread: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -410,7 +462,7 @@ const DesktopSplitPane = ({
 
       const rect = container.getBoundingClientRect();
       const nextRatio = (event.clientX - rect.left) / rect.width;
-      onLeftPaneRatioChange(Math.min(MAX_PANE_RATIO, Math.max(MIN_PANE_RATIO, nextRatio)));
+      onLeftPaneRatioChange(nextRatio);
     };
 
     const handleMouseUp = (): void => {
@@ -454,7 +506,12 @@ const DesktopSplitPane = ({
       </div>
 
       <aside className="split-preview" aria-label="Preview panel">
-        <AgentPanel websocketUrl={agentWebsocketUrl} selectedThreadId={selectedThreadId} />
+        <AgentPanel
+          websocketUrl={agentWebsocketUrl}
+          selectedThreadId={selectedThreadId}
+          currentPath={currentPath}
+          onSelectThread={onSelectThread}
+        />
       </aside>
     </div>
   );

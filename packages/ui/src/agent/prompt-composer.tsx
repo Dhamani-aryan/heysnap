@@ -1,8 +1,10 @@
 "use client";
 
-import { ArrowUp02Icon, Pdf02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp02Icon, Pdf02Icon, PlusSignIcon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLayoutEffect, useRef, useState } from "react";
+
+import type { AgentContent } from "./types";
 
 const PDF_MIME_TYPE = "application/pdf";
 const ATTACHMENT_ACCEPT = `image/*,${PDF_MIME_TYPE}`;
@@ -18,7 +20,9 @@ export type PromptAttachment = {
 };
 
 export interface RightPromptComposerProps {
-  readonly onSubmit?: (input: { readonly text: string; readonly attachments: readonly PromptAttachment[] }) => void;
+  readonly isRunning?: boolean;
+  readonly onCancel?: () => void;
+  readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void;
 }
 
 const getAttachmentId = (): string => {
@@ -81,7 +85,35 @@ const eventHasFiles = (event: { readonly dataTransfer?: DataTransfer | null }): 
   return Array.from(event.dataTransfer?.types ?? []).includes("Files");
 };
 
-export const RightPromptComposer = ({ onSubmit }: RightPromptComposerProps): React.ReactElement => {
+const toAgentContent = (text: string, attachments: readonly PromptAttachment[]): AgentContent => {
+  const content: AgentContent = [
+    ...(text.trim().length > 0 ? [{ type: "text" as const, content: text.trim() }] : []),
+    ...attachments.map((attachment) =>
+      attachment.type === "image"
+        ? {
+            type: "image" as const,
+            data: attachment.content,
+            mimeType: attachment.mimeType,
+            metadata: { filename: attachment.fileName, size: attachment.size },
+          }
+        : {
+            type: "file" as const,
+            data: attachment.content,
+            mimeType: attachment.mimeType,
+            filename: attachment.fileName,
+            metadata: { size: attachment.size },
+          },
+    ),
+  ];
+
+  return content;
+};
+
+export const RightPromptComposer = ({
+  isRunning = false,
+  onCancel,
+  onSubmit,
+}: RightPromptComposerProps): React.ReactElement => {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -134,11 +166,32 @@ export const RightPromptComposer = ({ onSubmit }: RightPromptComposerProps): Rea
   };
 
   const handleSubmit = (): void => {
-    if (!canSubmit) {
+    if (isRunning || !canSubmit) {
       return;
     }
 
-    onSubmit?.({ text: draft, attachments });
+    const didSubmit = onSubmit?.({ content: toAgentContent(draft, attachments) });
+
+    if (didSubmit === false) {
+      return;
+    }
+
+    setDraft("");
+    setAttachments([]);
+    setAttachmentError(null);
+
+    if (fileInputRef.current !== null) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handlePrimaryAction = (): void => {
+    if (isRunning) {
+      onCancel?.();
+      return;
+    }
+
+    handleSubmit();
   };
 
   return (
@@ -256,14 +309,19 @@ export const RightPromptComposer = ({ onSubmit }: RightPromptComposerProps): Rea
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            handleSubmit();
+            handlePrimaryAction();
           }}
-          disabled={!canSubmit}
-          className={canSubmit ? "prompt-send-button active" : "prompt-send-button"}
-          aria-label="Send prompt"
-          title="Send prompt"
+          disabled={!isRunning && !canSubmit}
+          className={isRunning ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
+          aria-label={isRunning ? "Stop response" : "Send prompt"}
+          title={isRunning ? "Stop response" : "Send prompt"}
         >
-          <HugeiconsIcon icon={ArrowUp02Icon} size={16} color="currentColor" strokeWidth={1.9} />
+          <HugeiconsIcon
+            icon={isRunning ? StopIcon : ArrowUp02Icon}
+            size={isRunning ? 13 : 16}
+            color="currentColor"
+            strokeWidth={1.9}
+          />
         </button>
       </div>
 
