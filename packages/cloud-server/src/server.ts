@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 import { createAdminRoutes } from "./admin/routes.js";
+import { renderAdminDashboard } from "./admin/dashboard.js";
 import { AuthService } from "./auth/service.js";
 import { createAuthRoutes } from "./auth/routes.js";
 import type { CloudServerConfig } from "./config.js";
@@ -41,7 +42,8 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   }));
 
   app.get("/health", (context) => context.json({ ok: true }));
-  app.route("/admin", createAdminRoutes(options.store, authService, options.config));
+  app.get("/admin-dashboard", (context) => context.html(renderAdminDashboard()));
+  app.route("/admin", createAdminRoutes(options.store, authService, options.config, provisioner));
   app.route("/auth", createAuthRoutes(authService, options.config));
   app.route("/computers", createComputerRoutes(
     options.store,

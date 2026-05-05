@@ -142,6 +142,85 @@ describe("cloud server auth", () => {
     expect(login.token).toEqual(expect.any(String));
   });
 
+  it("serves the admin dashboard shell", async () => {
+    const { app } = createTestApp();
+    const response = await app.request("/admin-dashboard");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(await response.text()).toContain("HeySnap Admin");
+  });
+
+  it("lets admins inspect users, computers, and release inventory", async () => {
+    const { app } = createTestApp();
+    const owner = await registerUser(app, "owner@example.com");
+    const computer = await createComputer(app, owner.token, "Owner VM");
+    await app.request("/admin/releases/machine-server", {
+      method: "POST",
+      body: JSON.stringify({
+        channel: "stable",
+        version: "1.0.0",
+        dockerImage: "example.com/machine-server:1.0.0",
+      }),
+      headers: adminHeaders(),
+    });
+
+    const unauthorized = await app.request("/admin/overview");
+    expect(unauthorized.status).toBe(401);
+
+    const overview = await app.request("/admin/overview", {
+      headers: adminHeaders(),
+    });
+
+    expect(overview.status).toBe(200);
+    expect(await overview.json()).toMatchObject({
+      stats: {
+        users: 1,
+        computers: 1,
+        cloudComputers: 1,
+      },
+      users: [
+        {
+          email: "owner@example.com",
+          computerCount: 1,
+        },
+      ],
+      computers: [
+        {
+          id: computer.id,
+          name: "Owner VM",
+          ownerEmail: "owner@example.com",
+        },
+      ],
+      releases: [
+        {
+          target: "machine-server",
+          version: "1.0.0",
+        },
+      ],
+    });
+  });
+
+  it("lets admins delete any computer and terminates provider resources", async () => {
+    const { app, provisioner } = createTestApp();
+    const owner = await registerUser(app, "delete-owner@example.com");
+    const computer = await createComputer(app, owner.token, "Delete VM");
+
+    const deleted = await app.request(`/admin/computers/${computer.id}`, {
+      method: "DELETE",
+      headers: adminHeaders(),
+    });
+
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ ok: true });
+    expect(provisioner.actions).toContain("terminate");
+
+    const missing = await app.request(`/computers/${computer.id}`, {
+      headers: authHeaders(owner.token),
+    });
+    expect(missing.status).toBe(404);
+  });
+
   it("logs in with the correct password and rejects the wrong password", async () => {
     const { app } = createTestApp();
     await registerUser(app, "user@example.com", "password123");

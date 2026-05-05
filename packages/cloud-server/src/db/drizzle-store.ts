@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import type { DbClient } from "./client.js";
 import {
@@ -26,6 +26,10 @@ export class DrizzleCloudStore implements CloudStore {
   async createUser(input: { readonly email: string; readonly passwordHash: string }): Promise<UserRecord> {
     const [user] = await this.db.insert(users).values(input).returning();
     return user;
+  }
+
+  async listUsers(): Promise<UserRecord[]> {
+    return this.db.select().from(users).orderBy(desc(users.createdAt));
   }
 
   async getUserByEmail(email: string): Promise<UserRecord | null> {
@@ -64,6 +68,10 @@ export class DrizzleCloudStore implements CloudStore {
       .select()
       .from(computers)
       .where(eq(computers.ownerUserId, userId));
+  }
+
+  async listComputers(): Promise<ComputerRecord[]> {
+    return this.db.select().from(computers).orderBy(desc(computers.createdAt));
   }
 
   async createComputer(input: {
@@ -161,6 +169,14 @@ export class DrizzleCloudStore implements CloudStore {
     return deleted.length > 0;
   }
 
+  async deleteComputerById(computerId: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(computers)
+      .where(eq(computers.id, computerId))
+      .returning({ id: computers.id });
+    return deleted.length > 0;
+  }
+
   async createMachineIdentity(input: {
     readonly computerId: string;
     readonly bootstrapTokenHash: string;
@@ -248,6 +264,10 @@ export class DrizzleCloudStore implements CloudStore {
       ))
       .limit(1);
     return manifest ?? null;
+  }
+
+  async listReleaseManifests(): Promise<ReleaseManifestRecord[]> {
+    return this.db.select().from(releaseManifests).orderBy(desc(releaseManifests.releasedAt));
   }
 
   async upsertReleaseManifest(input: {

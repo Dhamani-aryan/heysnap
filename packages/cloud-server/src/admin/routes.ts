@@ -5,16 +5,18 @@ import { Hono } from "hono";
 import type { AuthService } from "../auth/service.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore } from "../db/types.js";
+import type { ComputerProvisioner } from "../provisioning/types.js";
 import { serializeReleaseManifest, readReleaseChannel, readReleasePlatform } from "../releases/routes.js";
 import type { AppVariables } from "../shared/context.js";
-import { unauthorized } from "../shared/errors.js";
-import { serializeUser } from "../shared/serialization.js";
+import { notFound, unauthorized } from "../shared/errors.js";
+import { serializeComputer, serializeUser } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
 
 export const createAdminRoutes = (
   store: CloudStore,
   authService: AuthService,
   config: CloudServerConfig,
+  provisioner: ComputerProvisioner,
 ): Hono<{ Variables: AppVariables }> => {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -43,6 +45,80 @@ export const createAdminRoutes = (
         updatedAt: user.updatedAt,
       }),
     }, 201);
+  });
+
+  app.get("/overview", async (context) => {
+    const [users, computers, releases] = await Promise.all([
+      store.listUsers(),
+      store.listComputers(),
+      store.listReleaseManifests(),
+    ]);
+
+    return context.json({
+      stats: {
+        users: users.length,
+        computers: computers.length,
+        cloudComputers: computers.filter((computer) => computer.kind === "cloud").length,
+        localComputers: computers.filter((computer) => computer.kind === "local").length,
+        activeComputers: computers.filter((computer) => computer.status === "online" || computer.status === "idle").length,
+      },
+      users: users.map((user) => ({
+        ...serializeUser(user),
+        computerCount: computers.filter((computer) => computer.ownerUserId === user.id).length,
+      })),
+      computers: computers.map((computer) => ({
+        ...serializeComputer(computer),
+        ownerEmail: users.find((user) => user.id === computer.ownerUserId)?.email ?? null,
+      })),
+      releases: releases.map(serializeReleaseManifest),
+    });
+  });
+
+  app.get("/users", async (context) => {
+    const [users, computers] = await Promise.all([
+      store.listUsers(),
+      store.listComputers(),
+    ]);
+
+    return context.json({
+      users: users.map((user) => ({
+        ...serializeUser(user),
+        computers: computers
+          .filter((computer) => computer.ownerUserId === user.id)
+          .map(serializeComputer),
+      })),
+    });
+  });
+
+  app.get("/computers", async (context) => {
+    const [users, computers] = await Promise.all([
+      store.listUsers(),
+      store.listComputers(),
+    ]);
+
+    return context.json({
+      computers: computers.map((computer) => ({
+        ...serializeComputer(computer),
+        ownerEmail: users.find((user) => user.id === computer.ownerUserId)?.email ?? null,
+      })),
+    });
+  });
+
+  app.delete("/computers/:computerId", async (context) => {
+    const computer = await store.getComputerById(context.req.param("computerId"));
+
+    if (computer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    await provisioner.terminateComputer(computer);
+    const deleted = await store.deleteComputerById(computer.id);
+
+    if (!deleted) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    return context.json({ ok: true });
   });
 
   app.post("/releases/desktop", async (context) => {

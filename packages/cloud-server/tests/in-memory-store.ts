@@ -34,6 +34,10 @@ export class InMemoryCloudStore implements CloudStore {
     return user;
   }
 
+  async listUsers(): Promise<UserRecord[]> {
+    return Array.from(this.users.values()).sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+  }
+
   async getUserByEmail(email: string): Promise<UserRecord | null> {
     return Array.from(this.users.values()).find((user) => user.email === email) ?? null;
   }
@@ -77,6 +81,10 @@ export class InMemoryCloudStore implements CloudStore {
 
   async listComputersForUser(userId: string): Promise<ComputerRecord[]> {
     return Array.from(this.computers.values()).filter((computer) => computer.ownerUserId === userId);
+  }
+
+  async listComputers(): Promise<ComputerRecord[]> {
+    return Array.from(this.computers.values()).sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
   }
 
   async createComputer(input: {
@@ -188,6 +196,10 @@ export class InMemoryCloudStore implements CloudStore {
     return true;
   }
 
+  async deleteComputerById(computerId: string): Promise<boolean> {
+    return this.computers.delete(computerId);
+  }
+
   async createMachineIdentity(input: {
     readonly computerId: string;
     readonly bootstrapTokenHash: string;
@@ -277,6 +289,11 @@ export class InMemoryCloudStore implements CloudStore {
     readonly platform: string;
   }): Promise<ReleaseManifestRecord | null> {
     return this.releaseManifests.get(releaseKey(input)) ?? null;
+  }
+
+  async listReleaseManifests(): Promise<ReleaseManifestRecord[]> {
+    return Array.from(this.releaseManifests.values())
+      .sort((left, right) => right.releasedAt.getTime() - left.releasedAt.getTime());
   }
 
   async upsertReleaseManifest(input: {

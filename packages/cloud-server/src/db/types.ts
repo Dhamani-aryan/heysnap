@@ -83,6 +83,7 @@ export interface CloudStore {
     readonly email: string;
     readonly passwordHash: string;
   }): Promise<UserRecord>;
+  listUsers(): Promise<UserRecord[]>;
   getUserByEmail(email: string): Promise<UserRecord | null>;
   getUserById(userId: string): Promise<UserRecord | null>;
 
@@ -95,6 +96,7 @@ export interface CloudStore {
   revokeSession(sessionId: string, revokedAt: Date): Promise<void>;
 
   listComputersForUser(userId: string): Promise<ComputerRecord[]>;
+  listComputers(): Promise<ComputerRecord[]>;
   createComputer(input: {
     readonly ownerUserId: string;
     readonly name: string;
@@ -130,6 +132,7 @@ export interface CloudStore {
     readonly userId: string;
     readonly computerId: string;
   }): Promise<boolean>;
+  deleteComputerById(computerId: string): Promise<boolean>;
 
   createMachineIdentity(input: {
     readonly computerId: string;
@@ -160,6 +163,7 @@ export interface CloudStore {
     readonly channel: string;
     readonly platform: string;
   }): Promise<ReleaseManifestRecord | null>;
+  listReleaseManifests(): Promise<ReleaseManifestRecord[]>;
   upsertReleaseManifest(input: {
     readonly target: ReleaseTarget;
     readonly channel: string;
