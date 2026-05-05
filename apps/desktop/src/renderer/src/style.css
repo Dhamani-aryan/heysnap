@@ -10,6 +10,49 @@ body,
   margin: 0;
 }
 
+body {
+  background: var(--cloud-bg);
+}
+
+.desktop-titlebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  background: var(--cloud-bg);
+  color: var(--cloud-muted);
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.desktop-titlebar-title {
+  pointer-events: none;
+}
+
+:root[data-desktop="true"] .cloud-floating-actions {
+  top: 38px;
+}
+
+:root[data-desktop="true"] .cloud-auth-shell,
+:root[data-desktop="true"] .cloud-shell {
+  padding-top: 38px;
+}
+
+button,
+input,
+textarea,
+select,
+a {
+  -webkit-app-region: no-drag;
+}
+
 .desktop-update-backdrop {
   position: fixed;
   inset: 0;

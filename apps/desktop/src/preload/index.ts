@@ -29,3 +29,10 @@ contextBridge.exposeInMainWorld("ank1015DesktopUpdates", {
     };
   },
 });
+
+contextBridge.exposeInMainWorld("ank1015DesktopWindow", {
+  setTitleBarTheme: (theme: "light" | "dark") =>
+    ipcRenderer.invoke("desktop-window:set-title-bar-theme", theme),
+  setTitleBarColor: (color: string) => ipcRenderer.invoke("desktop-window:set-title-bar-color", color),
+  toggleFullscreen: () => ipcRenderer.invoke("desktop-window:toggle-fullscreen"),
+});

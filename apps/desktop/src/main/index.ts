@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
 import { join } from "node:path";
 
 import { DesktopUpdateController } from "./desktop-updates.js";
@@ -7,11 +7,23 @@ import { LocalMachineController, type SyncCloudSessionInput } from "./local-mach
 const localMachine = new LocalMachineController(app);
 let desktopUpdates: DesktopUpdateController | null = null;
 let isQuitInProgress = false;
+const desktopTitle = "HeySnap";
+const titleBarBackgroundByTheme = {
+  light: "#ffffff",
+  dark: "#0f0f11",
+} as const;
+
+type Theme = keyof typeof titleBarBackgroundByTheme;
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
+    title: desktopTitle,
     width: 1100,
     height: 760,
+    backgroundColor: nativeTheme.shouldUseDarkColors
+      ? titleBarBackgroundByTheme.dark
+      : titleBarBackgroundByTheme.light,
+    titleBarStyle: "hiddenInset",
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       sandbox: true,
@@ -27,6 +39,8 @@ function createWindow() {
 }
 
 void app.whenReady().then(() => {
+  app.setName(desktopTitle);
+
   desktopUpdates = new DesktopUpdateController(app);
   desktopUpdates.start();
 
@@ -44,6 +58,32 @@ void app.whenReady().then(() => {
   ipcMain.handle("desktop-updates:dismiss", async (_event, version: string) =>
     await getDesktopUpdates().dismissUpdate(version)
   );
+  ipcMain.handle("desktop-window:set-title-bar-theme", (event, theme: Theme) => {
+    if (theme !== "light" && theme !== "dark") {
+      return;
+    }
+
+    nativeTheme.themeSource = theme;
+    const window = BrowserWindow.fromWebContents(event.sender);
+    window?.setBackgroundColor(titleBarBackgroundByTheme[theme]);
+  });
+  ipcMain.handle("desktop-window:set-title-bar-color", (event, color: string) => {
+    if (typeof color !== "string" || color.trim().length === 0) {
+      return;
+    }
+
+    const window = BrowserWindow.fromWebContents(event.sender);
+    window?.setBackgroundColor(color.trim());
+  });
+  ipcMain.handle("desktop-window:toggle-fullscreen", (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (window === null) {
+      return;
+    }
+
+    window.setFullScreen(!window.isFullScreen());
+  });
 
   createWindow();
 
