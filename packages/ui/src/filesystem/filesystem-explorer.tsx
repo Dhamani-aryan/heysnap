@@ -4,6 +4,9 @@ import { FolderAddIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AgentPanel } from "../agent/agent-panel";
+import { ThreadHistoryButton } from "../agent/thread-history";
+import type { AgentThreadSummary } from "../agent/types";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient } from "./filesystem-client";
@@ -50,10 +53,12 @@ type ContextMenuState =
 
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
+  readonly agentWebsocketUrl?: string;
 }
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
+  agentWebsocketUrl = "ws://localhost:4000/agent",
 }: FilesystemExplorerProps): React.ReactElement {
   const clientRef = useRef<FilesystemClient | null>(null);
   const [history, setHistory] = useState<string[]>([]);
@@ -65,6 +70,7 @@ export function FilesystemExplorer({
   const [isFetching, setIsFetching] = useState(true);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
+  const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
   const currentPath = listing?.path ?? "";
 
   useEffect(() => {
@@ -259,9 +265,17 @@ export function FilesystemExplorer({
         onForward={onForward}
         title={listing?.name ?? "Desktop"}
         isFetching={isFetching}
+        agentWebsocketUrl={agentWebsocketUrl}
+        selectedThreadId={selectedThread?.id ?? null}
+        onSelectThread={setSelectedThread}
       />
 
-      <DesktopSplitPane leftPaneRatio={leftPaneRatio} onLeftPaneRatioChange={setLeftPaneRatio}>
+      <DesktopSplitPane
+        leftPaneRatio={leftPaneRatio}
+        onLeftPaneRatioChange={setLeftPaneRatio}
+        agentWebsocketUrl={agentWebsocketUrl}
+        selectedThreadId={selectedThread?.id ?? null}
+      >
         <FinderBody
           error={listingError}
           isLoading={isFetching && listing === null}
@@ -300,6 +314,9 @@ const FinderToolbar = ({
   onForward,
   title,
   isFetching,
+  agentWebsocketUrl,
+  selectedThreadId,
+  onSelectThread,
 }: {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
@@ -307,6 +324,9 @@ const FinderToolbar = ({
   readonly onForward: () => void;
   readonly title: string;
   readonly isFetching: boolean;
+  readonly agentWebsocketUrl: string;
+  readonly selectedThreadId: string | null;
+  readonly onSelectThread: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => (
   <div className="finder-toolbar">
     <div className="toolbar-inner">
@@ -328,6 +348,11 @@ const FinderToolbar = ({
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
+      <ThreadHistoryButton
+        websocketUrl={agentWebsocketUrl}
+        selectedThreadId={selectedThreadId}
+        onSelectThread={onSelectThread}
+      />
       <ThemeToggle />
     </div>
   </div>
@@ -359,10 +384,14 @@ const DesktopSplitPane = ({
   children,
   leftPaneRatio,
   onLeftPaneRatioChange,
+  agentWebsocketUrl,
+  selectedThreadId,
 }: {
   readonly children: React.ReactNode;
   readonly leftPaneRatio: number;
   readonly onLeftPaneRatioChange: (ratio: number) => void;
+  readonly agentWebsocketUrl: string;
+  readonly selectedThreadId: string | null;
 }): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -425,7 +454,7 @@ const DesktopSplitPane = ({
       </div>
 
       <aside className="split-preview" aria-label="Preview panel">
-        <div className="finder-preview-placeholder" />
+        <AgentPanel websocketUrl={agentWebsocketUrl} selectedThreadId={selectedThreadId} />
       </aside>
     </div>
   );

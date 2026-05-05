@@ -6,6 +6,9 @@ import "./style.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <FilesystemExplorer websocketUrl={import.meta.env.VITE_FILESYSTEM_WS_URL} />
+    <FilesystemExplorer
+      websocketUrl={import.meta.env.VITE_FILESYSTEM_WS_URL}
+      agentWebsocketUrl={import.meta.env.VITE_AGENT_WS_URL}
+    />
   </React.StrictMode>,
 );

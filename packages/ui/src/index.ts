@@ -1,4 +1,11 @@
 export { AppShell } from "./app-shell";
 export { Button } from "./button";
+export { AgentPanel } from "./agent/agent-panel";
+export type { AgentPanelProps } from "./agent/agent-panel";
+export { AgentEmptyThread } from "./agent/empty-thread";
+export { RightPromptComposer } from "./agent/prompt-composer";
+export type { PromptAttachment, RightPromptComposerProps } from "./agent/prompt-composer";
+export { ThreadHistoryButton } from "./agent/thread-history";
+export type { ThreadHistoryButtonProps } from "./agent/thread-history";
 export { FilesystemExplorer } from "./filesystem/filesystem-explorer";
 export type { FilesystemExplorerProps } from "./filesystem/filesystem-explorer";
