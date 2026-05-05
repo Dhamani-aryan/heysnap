@@ -21,18 +21,26 @@ body {
   left: 0;
   z-index: 20;
   display: flex;
-  height: 38px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   background: var(--cloud-bg);
   color: var(--cloud-muted);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   user-select: none;
   -webkit-app-region: drag;
 }
 
 .desktop-titlebar-title {
+  pointer-events: none;
+}
+
+:root[data-cloud-screen="machines"] .desktop-titlebar-title {
+  display: none;
+}
+
+:root[data-cloud-screen="machines"] .desktop-titlebar {
   pointer-events: none;
 }
 
@@ -42,6 +50,22 @@ body {
 
 :root[data-desktop="true"] .cloud-auth-shell,
 :root[data-desktop="true"] .cloud-shell {
+  padding-top: 38px;
+}
+
+:root[data-desktop="true"][data-cloud-screen="machines"] .cloud-shell {
+  padding-top: 0;
+}
+
+:root[data-desktop="true"][data-cloud-screen="machines"] .cloud-topbar {
+  position: relative;
+  z-index: 21;
+  min-height: 34px;
+  padding-top: 8px;
+  padding-bottom: 0;
+}
+
+:root[data-desktop="true"][data-cloud-screen="machines"] .cloud-machines-page {
   padding-top: 38px;
 }
 
