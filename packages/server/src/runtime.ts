@@ -12,6 +12,7 @@ export interface StartServerOptions {
   readonly host?: string;
   readonly filesystemRoot?: string | FilesystemRoot;
   readonly codexBin?: string;
+  readonly version?: string;
 }
 
 export interface LocalServerUrls {
@@ -45,7 +46,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const filesystemRoot = normalizeFilesystemRoot(options.filesystemRoot);
   const host = options.host ?? "127.0.0.1";
   const requestedPort = options.port ?? 4000;
-  const version = process.env.MACHINE_SERVER_VERSION?.trim() || "development";
+  const version = options.version?.trim() || process.env.MACHINE_SERVER_VERSION?.trim() || "development";
   const server = createServer((request, response) => {
     if (request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json" });

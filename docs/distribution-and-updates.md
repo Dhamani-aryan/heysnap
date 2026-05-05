@@ -110,8 +110,7 @@ Workflow:
 .github/workflows/release-machine-server.yml
 ```
 
-Run when `packages/server` changes should be shipped to cloud VMs and Electron
-local sidecars.
+Run when `packages/server` changes should be shipped to cloud VMs.
 
 ```sh
 gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
@@ -131,11 +130,14 @@ What it does:
 Runtime update behavior:
 
 - VM heartbeat loop receives update info from `POST /machines/heartbeat`.
-- Electron main receives update info from local-machine heartbeat responses.
-- Both check the running machine server's `/status`.
+- The VM supervisor checks the running machine server's `/status`.
 - If `safeToRestart` is true, the supervisor pulls the new Docker image and
   restarts the container.
 - If sessions are active, the update is deferred to a later heartbeat.
+
+Electron embeds the machine server in the desktop app. Local desktop
+machine-server changes are delivered by the desktop release workflow, not by
+the machine-server Docker release workflow.
 
 Required GitHub variables/secrets:
 

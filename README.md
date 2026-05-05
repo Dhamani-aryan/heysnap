@@ -9,7 +9,7 @@ cloud VM or the local machine in the Electron desktop app.
 - `apps/web`: Next.js browser app for cloud machines.
 - `apps/desktop`: Electron desktop app for cloud machines and the local machine.
 - `packages/ui`: shared React UI, cloud client, filesystem UI, and agent UI.
-- `packages/server`: machine server that runs on VMs and local sidecars.
+- `packages/server`: machine server that runs on VMs and is embedded by desktop for local work.
 - `packages/cloud-server`: hosted Hono control plane, gateway, admin, and release API.
 
 Each app/package has its own README with local commands and responsibilities.
@@ -23,13 +23,9 @@ pnpm build
 pnpm typecheck
 ```
 
-`pnpm dev` starts only the web app and desktop app. The desktop app expects
-Docker to be running and a local machine-server image to exist:
-
-```sh
-pnpm --filter @ank1015-app/server docker:build
-pnpm dev
-```
+`pnpm dev` starts only the web app and desktop app. The desktop app starts the
+local machine server in-process, so Docker is not required for local desktop
+development.
 
 ## Documentation
 
