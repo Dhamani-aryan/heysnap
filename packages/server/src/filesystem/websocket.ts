@@ -5,6 +5,7 @@ import { watch, type FSWatcher } from "chokidar";
 import { FilesystemError, toFilesystemError } from "./errors.js";
 import { FilesystemService, type TrashFunction } from "./service.js";
 import { resolveClientPath } from "./paths.js";
+import { attachWebSocketUpgradeRoute } from "../websocket/upgrade-router.js";
 import type {
   FilesystemClientMessage,
   FilesystemListing,
@@ -24,19 +25,7 @@ export const attachFilesystemWebSocketServer = (
   options: FilesystemWebSocketOptions,
 ): WebSocketServer => {
   const socketServer = new WebSocketServer({ noServer: true });
-
-  server.on("upgrade", (request, socket, head) => {
-    const requestUrl = new URL(request.url ?? "/", "http://localhost");
-
-    if (requestUrl.pathname !== "/filesystem") {
-      socket.destroy();
-      return;
-    }
-
-    socketServer.handleUpgrade(request, socket, head, (webSocket) => {
-      socketServer.emit("connection", webSocket, request);
-    });
-  });
+  attachWebSocketUpgradeRoute(server, "/filesystem", socketServer);
 
   socketServer.on("connection", (webSocket, request) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
