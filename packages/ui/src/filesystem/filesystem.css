@@ -118,14 +118,22 @@ button:disabled {
 
 .toolbar-button {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 33px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   color: #000000;
   transition:
     background-color 120ms ease,
     color 120ms ease;
+}
+
+.nav-pill .toolbar-button:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.nav-pill .toolbar-button:last-child {
+  border-radius: 0 999px 999px 0;
 }
 
 :root.dark .toolbar-button {
@@ -150,17 +158,19 @@ button:disabled {
 }
 
 .directory-tab {
+  display: inline-flex;
   min-width: 0;
   flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   border-radius: 6px;
   padding: 4px 8px;
   color: rgba(0, 0, 0, 0.5);
   font-size: 14px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   text-align: left;
-  text-overflow: ellipsis;
   white-space: nowrap;
   transition: background-color 120ms ease;
 }
@@ -169,7 +179,27 @@ button:disabled {
   color: rgba(0, 0, 0, 0.78);
 }
 
-.directory-tab span {
+.directory-tab-status {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.directory-tab[data-connection-status="alive"] .directory-tab-status {
+  background: #18a058;
+  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.14);
+}
+
+.directory-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.directory-tab-location {
+  flex: 0 0 auto;
   color: rgba(0, 0, 0, 0.6);
 }
 
@@ -185,7 +215,16 @@ button:disabled {
   color: rgba(255, 255, 255, 0.82);
 }
 
-:root.dark .directory-tab span {
+:root.dark .directory-tab-status {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+:root.dark .directory-tab[data-connection-status="alive"] .directory-tab-status {
+  background: #32d074;
+  box-shadow: 0 0 0 2px rgba(50, 208, 116, 0.16);
+}
+
+:root.dark .directory-tab-location {
   color: rgba(255, 255, 255, 0.55);
 }
 
@@ -231,7 +270,8 @@ button:disabled {
   }
 }
 
-.theme-toggle {
+.theme-toggle,
+.new-thread-button {
   display: inline-flex;
   width: 32px;
   height: 32px;
@@ -244,16 +284,19 @@ button:disabled {
     color 120ms ease;
 }
 
-.theme-toggle:hover {
+.theme-toggle:hover,
+.new-thread-button:hover {
   background: #f5f5f5;
   color: #111111;
 }
 
-:root.dark .theme-toggle {
+:root.dark .theme-toggle,
+:root.dark .new-thread-button {
   color: #a3a3a3;
 }
 
-:root.dark .theme-toggle:hover {
+:root.dark .theme-toggle:hover,
+:root.dark .new-thread-button:hover {
   background: #1a1a1a;
   color: #f5f5f5;
 }
@@ -568,6 +611,7 @@ button:disabled {
 .agent-thread-scroll {
   min-height: 0;
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -575,6 +619,7 @@ button:disabled {
   display: flex;
   width: 100%;
   max-width: 820px;
+  min-width: 0;
   min-height: 100%;
   flex-direction: column;
   gap: 28px;
@@ -585,6 +630,7 @@ button:disabled {
 .agent-message-row {
   display: flex;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -600,6 +646,8 @@ button:disabled {
 
 .agent-user-bubble {
   max-width: min(76%, 520px);
+  min-width: 0;
+  overflow: hidden;
   border-radius: 16px;
   background: #f5f5f5;
   color: rgba(0, 0, 0, 0.82);
@@ -615,7 +663,9 @@ button:disabled {
 }
 
 .agent-user-text {
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .agent-user-attachments {
@@ -657,6 +707,7 @@ button:disabled {
 .agent-user-file-attachment span,
 .agent-user-file-attachment small {
   overflow: hidden;
+  max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -692,13 +743,73 @@ button:disabled {
   margin-left: 6px;
 }
 
+.agent-worked-label.live::after {
+  content: "";
+  margin-left: 0;
+}
+
+.agent-worked-label.live {
+  width: fit-content;
+  color: rgba(0, 0, 0, 0.58);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.42) 0%,
+      rgba(0, 0, 0, 0.9) 45%,
+      rgba(0, 0, 0, 0.42) 90%
+    );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: agent-status-shimmer 1.4s ease-in-out infinite;
+}
+
+:root.dark .agent-worked-label.live {
+  color: rgba(255, 255, 255, 0.68);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.46) 0%,
+      rgba(255, 255, 255, 0.96) 45%,
+      rgba(255, 255, 255, 0.46) 90%
+    );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+@keyframes agent-status-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-worked-label.live {
+    animation: none;
+    background-position: 0 0;
+  }
+}
+
 .agent-assistant-markdown {
   width: 100%;
   max-width: 680px;
+  min-width: 0;
   color: rgba(0, 0, 0, 0.82);
   font-size: 14px;
   font-weight: 400;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.agent-assistant-markdown * {
+  max-width: 100%;
 }
 
 :root.dark .agent-assistant-markdown {
@@ -713,6 +824,11 @@ button:disabled {
 .agent-assistant-markdown table {
   margin-top: 0;
   margin-bottom: 12px;
+}
+
+.agent-assistant-markdown table {
+  display: block;
+  overflow-x: auto;
 }
 
 .agent-assistant-markdown > *:last-child,
@@ -748,6 +864,7 @@ button:disabled {
 }
 
 .agent-assistant-markdown pre {
+  max-width: 100%;
   overflow-x: auto;
   border-radius: 8px;
   background: #f5f5f5;
@@ -763,6 +880,73 @@ button:disabled {
 .agent-assistant-markdown pre code {
   background: transparent;
   padding: 0;
+}
+
+.agent-assistant-markdown .code-block,
+.agent-assistant-markdown [data-streamdown="code-block"] {
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: #f5f5f5;
+  padding: 0;
+}
+
+:root.dark .agent-assistant-markdown .code-block,
+:root.dark .agent-assistant-markdown [data-streamdown="code-block"] {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #151515;
+}
+
+.agent-assistant-markdown .code-block-header,
+.agent-assistant-markdown .code-block-actions,
+.agent-assistant-markdown [data-streamdown="code-block-header"],
+.agent-assistant-markdown [data-streamdown="code-block-actions"] {
+  display: none !important;
+}
+
+.agent-assistant-markdown .code-block-body,
+.agent-assistant-markdown [data-streamdown="code-block-body"] {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  scrollbar-width: thin;
+}
+
+.agent-assistant-markdown .code-block-body::-webkit-scrollbar,
+.agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar {
+  height: 6px;
+}
+
+.agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb,
+.agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+:root.dark .agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb,
+:root.dark .agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.agent-assistant-markdown .code-block pre,
+.agent-assistant-markdown [data-streamdown="code-block"] pre {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+.agent-assistant-markdown .code-block pre code,
+.agent-assistant-markdown .code-block pre code span,
+.agent-assistant-markdown [data-streamdown="code-block-body"] code,
+.agent-assistant-markdown [data-streamdown="code-block-body"] code span {
+  background: transparent !important;
+  background-color: transparent !important;
+  text-shadow: none;
 }
 
 .agent-panel-state {
@@ -1089,12 +1273,32 @@ button:disabled {
   background: #0059d1;
 }
 
+.prompt-send-button.running {
+  background: #e54949;
+  color: #ffffff;
+}
+
+.prompt-send-button.running:hover {
+  background: #d63f3f;
+}
+
 :root.dark .prompt-send-button {
   color: rgba(255, 255, 255, 0.26);
 }
 
 :root.dark .prompt-send-button.active {
   color: #ffffff;
+}
+
+.agent-run-error {
+  margin: 0 0 8px;
+  color: #d44848;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+:root.dark .agent-run-error {
+  color: #ff7979;
 }
 
 .prompt-drop-overlay {
