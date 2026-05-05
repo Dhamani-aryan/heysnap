@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 
+import darkLogoUrl from "../../../../apps/assets/heysnap-dark-logo.gif";
+import lightLogoUrl from "../../../../apps/assets/heysnap-light-logo.gif";
 import { ThemeToggle } from "../filesystem/theme-toggle";
+
+type LogoAsset = string | { readonly src: string };
+
+const getLogoSrc = (asset: LogoAsset): string => {
+  return typeof asset === "string" ? asset : asset.src;
+};
 
 export interface LoginScreenProps {
   readonly error: string | null;
@@ -30,8 +38,18 @@ export function LoginScreen({
           void onSubmit({ email, password });
         }}
       >
-        <div className="cloud-auth-heading">
-          <h1>Sign in</h1>
+        <div className="cloud-auth-brand" aria-label="Heysnap">
+          <img
+            className="cloud-auth-logo cloud-auth-logo-light"
+            src={getLogoSrc(lightLogoUrl)}
+            alt=""
+          />
+          <img
+            className="cloud-auth-logo cloud-auth-logo-dark"
+            src={getLogoSrc(darkLogoUrl)}
+            alt=""
+          />
+          <div className="cloud-auth-wordmark">Welcome to Heysnap!</div>
         </div>
 
         <label className="cloud-field">

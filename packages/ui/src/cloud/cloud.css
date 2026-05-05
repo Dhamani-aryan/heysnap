@@ -15,6 +15,7 @@
   --cloud-border: #e5e5e5;
   --cloud-border-strong: #d7d7d7;
   --cloud-text: #1f1f1f;
+  --cloud-input-text: rgba(0, 0, 0, 0.82);
   --cloud-muted: rgba(0, 0, 0, 0.52);
   --cloud-danger: #b42318;
   --cloud-danger-bg: rgba(180, 35, 24, 0.08);
@@ -32,13 +33,14 @@
   --home-border: #2e2e2e;
   --home-input: #151515;
   --accent: #1a1a1a;
-  --cloud-bg: #202021;
-  --cloud-surface: #202021;
-  --cloud-surface-muted: #1a1a1a;
-  --cloud-border: #2e2e2e;
-  --cloud-border-strong: #3a3a3a;
+  --cloud-bg: #0f0f11;
+  --cloud-surface: #0f0f11;
+  --cloud-surface-muted: #121214;
+  --cloud-border: #242428;
+  --cloud-border-strong: #3b3b42;
   --cloud-text: #ffffff;
-  --cloud-muted: rgba(255, 255, 255, 0.56);
+  --cloud-input-text: rgba(255, 255, 255, 0.74);
+  --cloud-muted: rgba(255, 255, 255, 0.62);
   --cloud-danger: #ffb4ab;
   --cloud-danger-bg: rgba(255, 180, 171, 0.1);
   --cloud-accent: #f5f5f5;
@@ -98,7 +100,41 @@ button {
 .cloud-auth-panel {
   display: grid;
   width: min(100%, 380px);
-  gap: 18px;
+  gap: 28px;
+  transform: translateY(-48px);
+}
+
+.cloud-auth-brand {
+  display: grid;
+  gap: 20px;
+  justify-items: center;
+  margin-bottom: 40px;
+}
+
+.cloud-auth-logo {
+  width: min(78px, 25vw);
+  height: auto;
+  display: block;
+}
+
+.cloud-auth-logo-dark {
+  display: none;
+}
+
+:root.dark .cloud-auth-logo-light {
+  display: none;
+}
+
+:root.dark .cloud-auth-logo-dark {
+  display: block;
+}
+
+.cloud-auth-wordmark {
+  color: var(--cloud-text);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .cloud-auth-heading {
@@ -136,20 +172,22 @@ button {
   width: 100%;
   height: 42px;
   border: 1px solid var(--cloud-border);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--cloud-surface);
-  color: var(--cloud-text);
+  color: var(--cloud-input-text, var(--cloud-text));
+  font-size: 15px;
+  font-weight: 400;
   outline: none;
-  padding: 0 12px;
+  padding: 0 18px;
 }
 
 .cloud-field input:focus {
   border-color: var(--cloud-border-strong);
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
 }
 
 :root.dark .cloud-field input:focus {
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.07);
+  box-shadow: none;
 }
 
 .cloud-auth-error,
@@ -180,8 +218,9 @@ button {
   align-items: center;
   justify-content: center;
   background: var(--cloud-accent);
+  border-radius: 999px;
   color: var(--cloud-bg);
-  font-weight: 700;
+  font-weight: 400;
   padding: 0 14px;
 }
 
