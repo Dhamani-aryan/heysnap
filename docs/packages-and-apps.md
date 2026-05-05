@@ -21,7 +21,7 @@ Electron app for desktop users.
 
 - Renders the same shared `CloudApp` from `packages/ui`.
 - Supports cloud machines plus the local machine.
-- Manages the local machine-server Docker sidecar from Electron main.
+- Starts the embedded local machine server from Electron main.
 - Opens local workspaces through direct `127.0.0.1` WebSocket URLs.
 - Opens remote workspaces through the hosted gateway.
 - Checks desktop app updates with `electron-updater` and cloud release manifests.
@@ -47,7 +47,7 @@ Machine server that runs on every computer.
 - WebSocket `/filesystem`.
 - WebSocket `/agent`.
 - Outbound machine tunnel client for cloud VMs.
-- Docker image used by EC2 machines and the Electron local sidecar.
+- Docker image used by EC2 machines.
 - Released through `.github/workflows/release-machine-server.yml`.
 
 ### `packages/cloud-server`
@@ -73,11 +73,5 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm dev` starts only `apps/web` and `apps/desktop`. For desktop local-machine
-work, Docker Desktop must be running and the development machine-server image
-must exist:
-
-```sh
-pnpm --filter @ank1015-app/server docker:build
-pnpm dev
-```
+`pnpm dev` starts only `apps/web` and `apps/desktop`. The desktop app embeds
+the local machine server, so Docker is not required for local desktop work.

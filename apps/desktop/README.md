@@ -3,30 +3,24 @@
 Electron desktop app for HeySnap.
 
 The desktop app renders the same shared cloud UI as the web app, but also owns
-the local machine integration. The local machine server runs as a Docker
-sidecar managed by Electron main, not as an in-process server.
+the local machine integration. Electron main starts the machine server
+in-process for local desktop work, so users do not need Docker installed.
 
 ## Responsibilities
 
 - Desktop shell for macOS and Windows.
 - Logs in to `https://api.heysnap.xyz` and shows cloud machines.
 - Registers the local machine as a cloud inventory record.
-- Starts/stops the local machine-server Docker sidecar.
+- Starts/stops the embedded local machine server.
 - Opens local workspaces through direct `ws://127.0.0.1:<port>` URLs.
 - Opens cloud workspaces through hosted gateway access sessions.
 - Checks desktop app updates through cloud release manifests and `electron-updater`.
 
 ## Local Development
 
-Docker Desktop must be running. Build the local sidecar image once before
-starting Electron:
-
 ```sh
-pnpm --filter @ank1015-app/server docker:build
 pnpm --filter @ank1015-app/desktop dev
 ```
-
-The sidecar image defaults to `ank1015-machine-server:development`.
 
 ## Commands
 

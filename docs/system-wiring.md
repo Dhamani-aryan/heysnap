@@ -14,11 +14,11 @@ apps/desktop
   -> packages/ui
   -> packages/cloud-server at https://api.heysnap.xyz
   -> gateway WebSockets for remote machines
-  -> local Docker sidecar for the local machine
+  -> embedded packages/server runtime for the local machine
 
 packages/server
   -> runs on cloud VMs
-  -> runs as the Electron local sidecar
+  -> is embedded by Electron for the local machine
   -> exposes the same filesystem and agent WebSocket protocols everywhere
 ```
 
@@ -87,8 +87,8 @@ Electron main owns local machine lifecycle.
 
 ```text
 Electron starts
-  -> starts Docker sidecar from ank1015-machine-server image
-  -> sidecar exposes /filesystem and /agent on 127.0.0.1
+  -> starts packages/server in-process from Electron main
+  -> local server exposes /filesystem and /agent on 127.0.0.1
 
 User logs in
   -> renderer sends cloud session to Electron main
@@ -115,8 +115,8 @@ The local machine is not exposed through the cloud gateway yet.
 - `WS /filesystem`: filesystem listing and mutations.
 - `WS /agent`: agent thread retrieval and run streaming.
 
-The `/status` endpoint is important for updates. Supervisors only replace the
-machine-server container when `safeToRestart` is true.
+The `/status` endpoint is important for VM updates. VM supervisors only replace
+the machine-server container when `safeToRestart` is true.
 
 ## Admin Flow
 
