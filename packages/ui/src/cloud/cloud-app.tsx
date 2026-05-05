@@ -271,7 +271,7 @@ export function CloudApp({
     };
   }, [authState, clearSession, client, localWorkspaceUrls, selectedComputer, selectedComputerId, token]);
 
-  const login = async (input: { readonly email: string; readonly password: string }): Promise<void> => {
+  const login = async (input: { readonly email: string; readonly password: string }): Promise<boolean> => {
     setIsLoggingIn(true);
     setLoginError(null);
 
@@ -280,13 +280,18 @@ export function CloudApp({
       writeStoredToken(storageKey, response.session.token);
       setToken(response.session.token);
       setUser(response.user);
-      setAuthState("authenticated");
+      return true;
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Unable to sign in.");
+      return false;
     } finally {
       setIsLoggingIn(false);
     }
   };
+
+  const completeLogin = useCallback((): void => {
+    setAuthState("authenticated");
+  }, []);
 
   const logout = async (): Promise<void> => {
     const currentToken = token;
@@ -365,6 +370,7 @@ export function CloudApp({
       <LoginScreen
         error={loginError}
         isSubmitting={isLoggingIn}
+        onSuccessComplete={completeLogin}
         onSubmit={login}
       />
     );

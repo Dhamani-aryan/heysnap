@@ -102,6 +102,15 @@ button {
   width: min(100%, 380px);
   gap: 28px;
   transform: translateY(-48px);
+  transition:
+    width 720ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 720ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cloud-auth-panel[data-success-phase="welcome"],
+.cloud-auth-panel[data-success-phase="tagline"] {
+  width: min(100%, 640px);
+  transform: translateY(32px);
 }
 
 .cloud-auth-brand {
@@ -109,12 +118,29 @@ button {
   gap: 20px;
   justify-items: center;
   margin-bottom: 40px;
+  transition:
+    gap 720ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    margin-bottom 720ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 720ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-brand,
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-brand {
+  gap: 24px;
+  margin-bottom: 0;
+  transform: scale(1.08);
 }
 
 .cloud-auth-logo {
   width: min(78px, 25vw);
   height: auto;
   display: block;
+  transition: width 720ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-logo,
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-logo {
+  width: min(96px, 30vw);
 }
 
 .cloud-auth-logo-dark {
@@ -130,11 +156,48 @@ button {
 }
 
 .cloud-auth-wordmark {
+  display: grid;
   color: var(--cloud-text);
   font-size: 32px;
   font-weight: 400;
   line-height: 1;
   letter-spacing: 0;
+  text-align: center;
+  white-space: nowrap;
+  transition: font-size 720ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cloud-auth-wordmark-text {
+  grid-area: 1 / 1;
+  transition:
+    opacity 420ms ease,
+    transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cloud-auth-wordmark-welcome {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.cloud-auth-wordmark-tagline {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-wordmark,
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark {
+  font-size: 34px;
+}
+
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-welcome {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-tagline {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 320ms;
 }
 
 .cloud-auth-heading {
@@ -160,6 +223,23 @@ button {
 .cloud-field {
   display: grid;
   gap: 8px;
+}
+
+.cloud-auth-fields {
+  display: grid;
+  gap: 28px;
+  transition:
+    opacity 280ms ease,
+    transform 280ms ease,
+    visibility 0s linear 280ms;
+}
+
+.cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-fields,
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-fields {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(14px);
 }
 
 .cloud-field span {
