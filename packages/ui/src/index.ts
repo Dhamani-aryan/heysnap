@@ -1,5 +1,21 @@
 export { AppShell } from "./app-shell";
 export { Button } from "./button";
+export { CloudApp } from "./cloud/cloud-app";
+export type {
+  CloudAppProps,
+  LocalMachineBridge,
+  LocalMachineBridgeStatus,
+} from "./cloud/cloud-app";
+export { CloudClient, CloudApiError } from "./cloud/cloud-client";
+export type {
+  AuthResponse,
+  CloudComputer,
+  CloudSession,
+  CloudUser,
+  ComputerResponse,
+  ComputersResponse,
+  MeResponse,
+} from "./cloud/cloud-client";
 export { AgentPanel } from "./agent/agent-panel";
 export type { AgentPanelProps } from "./agent/agent-panel";
 export { AgentEmptyThread } from "./agent/empty-thread";

@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./cloud.css": "./src/cloud/cloud.css",
     "./filesystem.css": "./src/filesystem/filesystem.css"
   },
   "types": "./src/index.ts",
