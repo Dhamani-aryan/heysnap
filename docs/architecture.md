@@ -30,7 +30,8 @@ logical responsibilities:
   WebSocket proxying and tunnel management.
 
 The machine server is the same server on every computer. It runs on cloud VMs
-and on the local machine when the Electron app is used locally.
+as a Docker container and on the local machine as an Electron-managed Docker
+sidecar.
 
 ## Packages
 
@@ -54,9 +55,10 @@ Cloud computers are VMs/EC2 instances created by the control plane. They have
 persistent disk, a machine identity, a machine server, and an agent harness.
 
 The local computer is the user's own machine. It is available in the Electron
-app by starting the same machine server locally. In a later version, the local
-machine can register an outbound tunnel so it can also appear in the web app or
-mobile clients.
+app by starting the same machine server as a local Docker sidecar. Electron
+registers the local machine in cloud inventory, but local workspace traffic
+still uses direct `127.0.0.1` WebSocket URLs. A future tunnel can expose the
+local machine to the web app or mobile clients.
 
 Example computer states:
 
@@ -253,13 +255,13 @@ The Electron app has two kinds of computers:
 
 For remote computers, Electron uses the same flow as the web app.
 
-For the local machine, Electron starts or connects to a local machine server and
-uses local WebSocket URLs. The local machine does not need the cloud gateway for
-basic local work.
+For the local machine, Electron starts a Docker sidecar, registers the local
+device with the cloud server through `POST /computers/local`, sends machine
+heartbeats, and uses local WebSocket URLs. The local machine does not need the
+cloud gateway for basic local work.
 
-Later, Electron can optionally register the local machine with the cloud server
-and open an outbound tunnel. That would let the same local machine appear in the
-web app or future mobile app.
+Later, Electron can optionally open an outbound tunnel. That would let the same
+local machine appear in the web app or future mobile app.
 
 ## Data Ownership
 

@@ -38,7 +38,9 @@ VM user-data starts two systemd services:
   Docker image on the VM. The machine server waits for the machine token file
   and then opens the outbound gateway tunnel.
 - `ank1015-machine-heartbeat.service`: exchanges the bootstrap token for a
-  machine token, then reports heartbeat and capabilities to the cloud server.
+  machine token, reports heartbeat and capabilities to the cloud server, checks
+  release manifests, and restarts the machine-server container only when
+  `/status.safeToRestart` is true.
 
 Current v1 behavior:
 
@@ -51,13 +53,17 @@ Current v1 behavior:
   - `POST /computers/:computerId/restart`
   - `DELETE /computers/:computerId`
 
-The machine-server image is configured with:
+The initial machine-server image is configured with:
 
 ```sh
-MACHINE_SERVER_IMAGE=001961766272.dkr.ecr.ap-south-1.amazonaws.com/ank1015-machine-server:latest
-MACHINE_SERVER_VERSION=latest
+MACHINE_SERVER_IMAGE=001961766272.dkr.ecr.ap-south-1.amazonaws.com/ank1015-machine-server:stable
+MACHINE_SERVER_VERSION=stable
 AWS_MACHINE_INSTANCE_PROFILE_NAME=ank1015-machine-profile
 ```
+
+Machine-server releases are published by `release-machine-server.yml`. After a
+release, heartbeats receive the latest manifest and the host-side supervisor
+pulls the versioned image when the machine is idle.
 
 The machine instance profile only needs ECR read access for this step. The
 machine server is reached through the cloud gateway, so no public machine-server

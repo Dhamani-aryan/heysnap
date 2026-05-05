@@ -1,14 +1,20 @@
 # ank1015-app
 
-Simple pnpm monorepo with:
+HeySnap is a multi-machine coding-agent platform. Users log in, see their
+machines, and open the same filesystem plus agent workspace against either a
+cloud VM or the local machine in the Electron desktop app.
 
-- `apps/web`: Next.js app
-- `apps/desktop`: Electron app with a Vite React renderer
-- `packages/ui`: shared React components
-- `packages/server`: small Node server package
-- `packages/cloud-server`: hosted Hono control-plane and gateway server skeleton
+## Workspace
 
-## Commands
+- `apps/web`: Next.js browser app for cloud machines.
+- `apps/desktop`: Electron desktop app for cloud machines and the local machine.
+- `packages/ui`: shared React UI, cloud client, filesystem UI, and agent UI.
+- `packages/server`: machine server that runs on VMs and local sidecars.
+- `packages/cloud-server`: hosted Hono control plane, gateway, admin, and release API.
+
+Each app/package has its own README with local commands and responsibilities.
+
+## Common Commands
 
 ```sh
 pnpm install
@@ -17,6 +23,21 @@ pnpm build
 pnpm typecheck
 ```
 
-Cloud server database setup is documented in `docs/cloud-server-db.md`.
-Cloud server deployment setup is documented in `docs/cloud-server-deploy.md`.
-Cloud VM provisioning is documented in `docs/cloud-server-vms.md`.
+`pnpm dev` starts only the web app and desktop app. The desktop app expects
+Docker to be running and a local machine-server image to exist:
+
+```sh
+pnpm --filter @ank1015-app/server docker:build
+pnpm dev
+```
+
+## Documentation
+
+- `docs/README.md`: documentation index.
+- `docs/packages-and-apps.md`: what each workspace package/app owns.
+- `docs/system-wiring.md`: how auth, machines, gateway, and UI fit together.
+- `docs/distribution-and-updates.md`: GitHub Actions, releases, and update loops.
+- `docs/admin-operations.md`: admin dashboard and operational commands.
+- `docs/cloud-server-db.md`: Postgres and Drizzle setup.
+- `docs/cloud-server-deploy.md`: hosted cloud-server deployment.
+- `docs/cloud-server-vms.md`: EC2 VM provisioning details.
