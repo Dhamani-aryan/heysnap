@@ -1,4 +1,5 @@
 import type {
+  FilesystemEntry,
   FilesystemClientMessage,
   FilesystemListing,
   FilesystemServerMessage,
@@ -22,6 +23,7 @@ export interface FilesystemClientOptions {
   readonly onListing: (listing: FilesystemListing) => void;
   readonly onLoading: (loading: boolean) => void;
   readonly onError: (message: string | null) => void;
+  readonly onFileUpdates?: (updates: { readonly entries: FilesystemEntry[]; readonly missingPaths: string[] }) => void;
   readonly onOpen?: () => void;
   readonly onClose?: () => void;
   readonly onConnectionStatus?: (status: FilesystemConnectionStatus) => void;
@@ -41,6 +43,7 @@ export class FilesystemClient {
   private pendingHeartbeatRequestId: string | null = null;
   private pendingHeartbeatStartedAt = 0;
   private subscribedPath: string | undefined;
+  private watchedFilePaths: string[] = [];
   private readonly openWaiters: OpenWaiter[] = [];
   private shouldReconnect = false;
 
@@ -66,6 +69,7 @@ export class FilesystemClient {
       this.options.onOpen?.();
       this.resolveOpenWaiters();
       this.startHeartbeat(socket);
+      this.resendWatchedFiles();
     });
     socket.addEventListener("message", (event) => {
       this.handleMessage(event.data);
@@ -129,6 +133,15 @@ export class FilesystemClient {
     return this.request({ type: "trash", requestId: this.nextRequestId(), paths });
   }
 
+  watchFiles(paths: readonly string[]): Promise<void> {
+    this.watchedFilePaths = [...new Set(paths)].sort((left, right) => left.localeCompare(right));
+    return this.request({
+      type: "watchFiles",
+      requestId: this.nextRequestId(),
+      paths: this.watchedFilePaths,
+    }).then(() => undefined);
+  }
+
   private request(message: FilesystemClientMessage): Promise<unknown> {
     const socket = this.socket;
 
@@ -181,6 +194,12 @@ export class FilesystemClient {
           this.resolvePending(message.requestId, message.listing);
         }
         return;
+      case "fileUpdates":
+        this.options.onFileUpdates?.({
+          entries: message.entries,
+          missingPaths: message.missingPaths,
+        });
+        return;
       case "ack":
         this.resolvePending(message.requestId, message.result);
         return;
@@ -232,6 +251,18 @@ export class FilesystemClient {
     this.pendingHeartbeatRequestId = requestId;
     this.pendingHeartbeatStartedAt = Date.now();
     socket.send(JSON.stringify({ type: "ping", requestId }));
+  }
+
+  private resendWatchedFiles(): void {
+    if (this.watchedFilePaths.length === 0) {
+      return;
+    }
+
+    void this.watchFiles(this.watchedFilePaths).catch((error) => {
+      if (this.shouldReconnect) {
+        this.options.onError(error instanceof Error ? error.message : "Failed to watch open files.");
+      }
+    });
   }
 
   private stopHeartbeat(): void {

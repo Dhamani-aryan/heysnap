@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -129,6 +129,73 @@ describe("filesystem websocket", () => {
       type: "snapshot",
       reason: "watch",
       listing: { entries: [{ name: "new-file.txt", path: "new-file.txt" }] },
+    });
+  });
+
+  it("sends file updates for open files outside the active directory", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "open"), { recursive: true });
+    await mkdir(join(root, "current"), { recursive: true });
+    await writeFile(join(root, "open", "report.txt"), "old");
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({ type: "subscribe", requestId: "subscribe-current", path: "current" }));
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({
+      type: "watchFiles",
+      requestId: "watch-open-files",
+      paths: ["open/report.txt"],
+    }));
+
+    expect(await client.next("ack")).toMatchObject({
+      type: "ack",
+      requestId: "watch-open-files",
+      action: "watchFiles",
+    });
+    expect(await client.next("fileUpdates")).toMatchObject({
+      type: "fileUpdates",
+      reason: "subscription",
+      entries: [{ path: "open/report.txt", size: 3 }],
+    });
+
+    await writeFile(join(root, "open", "report.txt"), "new content");
+
+    expect(await client.next("fileUpdates")).toMatchObject({
+      type: "fileUpdates",
+      reason: "watch",
+      entries: [{ path: "open/report.txt", size: 11 }],
+    });
+  });
+
+  it("reports missing watched files", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "open"), { recursive: true });
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({
+      type: "watchFiles",
+      requestId: "watch-missing-files",
+      paths: ["open/missing.txt"],
+    }));
+
+    expect(await client.next("ack")).toMatchObject({
+      type: "ack",
+      requestId: "watch-missing-files",
+      action: "watchFiles",
+    });
+    expect(await client.next("fileUpdates")).toMatchObject({
+      type: "fileUpdates",
+      reason: "subscription",
+      missingPaths: ["open/missing.txt"],
     });
   });
 

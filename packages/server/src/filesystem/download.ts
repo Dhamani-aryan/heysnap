@@ -27,6 +27,7 @@ export const handleFilesystemDownloadRequest = async (
   if (targetPaths.length > 1) {
     const archive = await createMultiPathZip(root.absolutePath, targetPaths);
     response.writeHead(200, {
+      ...filesystemDownloadCorsHeaders,
       "content-type": "application/zip",
       "content-length": String(archive.byteLength),
       "content-disposition": contentDisposition("download.zip"),
@@ -46,6 +47,7 @@ export const handleFilesystemDownloadRequest = async (
 
   if (targetStats.isFile()) {
     response.writeHead(200, {
+      ...filesystemDownloadCorsHeaders,
       "content-type": "application/octet-stream",
       "content-length": String(targetStats.size),
       "content-disposition": contentDisposition(targetName),
@@ -58,6 +60,7 @@ export const handleFilesystemDownloadRequest = async (
     const archiveName = `${targetName}.zip`;
     const archive = await createDirectoryZip(root.absolutePath, targetPath, targetName);
     response.writeHead(200, {
+      ...filesystemDownloadCorsHeaders,
       "content-type": "application/zip",
       "content-length": String(archive.byteLength),
       "content-disposition": contentDisposition(archiveName),
@@ -76,12 +79,22 @@ export const sendFilesystemDownloadError = (
   const filesystemError = toFilesystemError(error);
   const status = filesystemError.code === "PATH_NOT_FOUND" ? 404 : 400;
 
-  response.writeHead(status, { "content-type": "application/json" });
+  response.writeHead(status, {
+    ...filesystemDownloadCorsHeaders,
+    "content-type": "application/json",
+  });
   response.end(JSON.stringify({
     code: filesystemError.code,
     message: filesystemError.message,
   }));
 };
+
+export const filesystemDownloadCorsHeaders = {
+  "access-control-allow-headers": "Range",
+  "access-control-allow-methods": "GET, OPTIONS",
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers": "Content-Disposition, Content-Length, Content-Range",
+} as const;
 
 const createDirectoryZip = async (
   rootPath: string,

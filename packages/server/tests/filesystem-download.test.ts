@@ -23,8 +23,21 @@ describe("filesystem download", () => {
     const response = await fetch(downloadUrl(server, "hello.txt"));
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("content-disposition")).toContain("hello.txt");
     expect(await response.text()).toBe("hello download");
+  });
+
+  it("answers download preflight requests", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "hello.txt"), "hello download");
+    const server = await startTestServer(root);
+
+    const response = await fetch(downloadUrl(server, "hello.txt"), { method: "OPTIONS" });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toBe("Range");
   });
 
   it("downloads a folder as a zip archive", async () => {

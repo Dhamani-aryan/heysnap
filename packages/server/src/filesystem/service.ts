@@ -100,7 +100,7 @@ export class FilesystemService {
     await this.ensurePathAvailable(folderPath);
     await mkdir(folderPath);
 
-    return this.getEntry(folderPath);
+    return this.getEntryFromAbsolutePath(folderPath);
   }
 
   async uploadFiles(
@@ -168,7 +168,7 @@ export class FilesystemService {
         }
       }
 
-      uploadedEntries.push(await this.getEntry(item.targetPath));
+      uploadedEntries.push(await this.getEntryFromAbsolutePath(item.targetPath));
     }
 
     for (const item of uploadItems) {
@@ -188,7 +188,7 @@ export class FilesystemService {
         }
       }
 
-      uploadedEntries.push(await this.getEntry(item.targetPath));
+      uploadedEntries.push(await this.getEntryFromAbsolutePath(item.targetPath));
     }
 
     return { entries: uploadedEntries };
@@ -202,13 +202,13 @@ export class FilesystemService {
     ensureWithinRoot(this.rootPath, nextPath);
 
     if (nextPath === targetPath) {
-      return this.getEntry(targetPath);
+      return this.getEntryFromAbsolutePath(targetPath);
     }
 
     await this.ensurePathAvailable(nextPath);
     await rename(targetPath, nextPath);
 
-    return this.getEntry(nextPath);
+    return this.getEntryFromAbsolutePath(nextPath);
   }
 
   async trashEntries(rawPaths: readonly string[]): Promise<{ readonly paths: string[] }> {
@@ -229,7 +229,11 @@ export class FilesystemService {
     return { paths: rawPaths.map((rawPath) => toClientPath(this.rootPath, resolveClientPath(this.rootPath, rawPath))) };
   }
 
-  private async getEntry(entryPath: string): Promise<FilesystemEntry> {
+  async getEntry(rawPath: string): Promise<FilesystemEntry> {
+    return this.getEntryFromAbsolutePath(resolveClientPath(this.rootPath, rawPath));
+  }
+
+  private async getEntryFromAbsolutePath(entryPath: string): Promise<FilesystemEntry> {
     let entryStats;
     let resolvedStats;
 
