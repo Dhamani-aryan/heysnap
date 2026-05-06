@@ -19,7 +19,7 @@ import type { ComputerProvisioner } from "./provisioning/types.js";
 import { createReleaseRoutes } from "./releases/routes.js";
 import { HttpError } from "./shared/errors.js";
 import type { AppVariables } from "./shared/context.js";
-import type { TunnelStatusRegistry } from "./gateway/tunnel.js";
+import type { GatewayHttpResponse, TunnelStatusRegistry } from "./gateway/tunnel.js";
 
 export type { TunnelStatusRegistry } from "./gateway/tunnel.js";
 
@@ -66,6 +66,38 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     options.config,
     tunnelRegistry,
   ));
+  app.get("/gateway/computers/:computerId/filesystem/download", async (context) => {
+    const computerId = context.req.param("computerId");
+    const requestUrl = new URL(context.req.url);
+    const token = readBearerToken(context.req.header("authorization"))
+      ?? requestUrl.searchParams.get("accessToken")
+      ?? requestUrl.searchParams.get("token")
+      ?? undefined;
+
+    if (token === undefined || token.length === 0) {
+      return context.json({ error: { code: "UNAUTHORIZED", message: "Gateway access token is required" } }, 401);
+    }
+
+    const accessSession = await gatewayAccessService.authenticateAccessToken({ token, computerId });
+
+    if (accessSession === null) {
+      return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
+    }
+
+    if (tunnelRegistry.proxyHttpRequest === undefined) {
+      return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+    }
+
+    const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
+      path: buildFilesystemDownloadTargetPath(requestUrl),
+    });
+
+    if (proxied === null) {
+      return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+    }
+
+    return toGatewayDownloadResponse(proxied);
+  });
   app.route("/machines", createMachineRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));
 
@@ -97,6 +129,53 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   });
 
   return app;
+};
+
+const buildFilesystemDownloadTargetPath = (requestUrl: URL): string => {
+  const query = new URLSearchParams(requestUrl.searchParams);
+  query.delete("accessToken");
+  query.delete("token");
+  const queryString = query.toString();
+
+  return `/filesystem/download${queryString.length > 0 ? `?${queryString}` : ""}`;
+};
+
+const toGatewayDownloadResponse = (proxied: GatewayHttpResponse): Response => {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(proxied.headers)) {
+    if (isForwardedDownloadHeader(name)) {
+      headers.set(name, value);
+    }
+  }
+
+  headers.set("content-length", String(proxied.body.byteLength));
+
+  return new Response(new Uint8Array(proxied.body), {
+    status: proxied.statusCode,
+    headers,
+  });
+};
+
+const isForwardedDownloadHeader = (name: string): boolean => {
+  const normalized = name.toLowerCase();
+  return normalized === "content-type" ||
+    normalized === "content-disposition" ||
+    normalized === "cache-control";
+};
+
+const readBearerToken = (authorization: string | undefined): string | undefined => {
+  if (authorization === undefined) {
+    return undefined;
+  }
+
+  const [scheme, token] = authorization.split(" ");
+
+  if (scheme?.toLowerCase() !== "bearer" || token === undefined || token.trim().length === 0) {
+    return undefined;
+  }
+
+  return token.trim();
 };
 
 const ADMIN_DIST_RELATIVE_FROM_SOURCE = "../admin-ui/dist";

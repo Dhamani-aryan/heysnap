@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CloudServerConfig } from "../src/config.js";
 import { hashToken } from "../src/auth/tokens.js";
 import { GatewayAccessService } from "../src/gateway/access-sessions.js";
-import { attachGatewayTunnelServer, normalizeWebSocketCloseCode } from "../src/gateway/tunnel.js";
+import { attachGatewayTunnelServer, MachineTunnelRegistry, normalizeWebSocketCloseCode } from "../src/gateway/tunnel.js";
 import { InMemoryCloudStore } from "./in-memory-store.js";
 
 const config: CloudServerConfig = {
@@ -104,6 +104,59 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
+  it("proxies HTTP download requests through the machine tunnel", async () => {
+    const { server, computer, machine, registry } = await startConnectedTunnel();
+    await waitForCondition(() => registry.isConnected(computer.id));
+    await delay(10);
+    const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
+    const proxyPromise = registry.proxyHttpRequest(computer.id, {
+      path: "/filesystem/download?path=Project",
+    });
+    const request = await requestPromise;
+
+    expect(request).toMatchObject({
+      type: "httpRequest",
+      path: "/filesystem/download?path=Project",
+    });
+
+    machine.send(JSON.stringify({
+      type: "httpResponse",
+      connectionId: request.connectionId,
+      statusCode: 200,
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": "attachment; filename=\"Project.zip\"",
+      },
+      bodyBase64: Buffer.from("zip-bytes", "utf8").toString("base64"),
+    }));
+
+    const response = await proxyPromise;
+
+    expect(response).not.toBeNull();
+    expect(response?.statusCode).toBe(200);
+    expect(response?.headers["content-type"]).toBe("application/zip");
+    expect(response?.body.toString("utf8")).toBe("zip-bytes");
+
+    machine.close();
+    await closeServer(server);
+  });
+
+  it("returns null for HTTP proxy requests without a connected tunnel", async () => {
+    const { server, store, registry } = await startTunnelServer();
+    const user = await store.createUser({ email: "user@example.com", passwordHash: "hash" });
+    const computer = await store.createComputer({
+      ownerUserId: user.id,
+      name: "VM",
+      kind: "cloud",
+      status: "idle",
+      providerMetadata: {},
+      capabilities: ["filesystem"],
+    });
+
+    await expect(registry.proxyHttpRequest(computer.id, { path: "/filesystem/download" })).resolves.toBeNull();
+    await closeServer(server);
+  });
+
   it("rejects gateway connections without a valid access token", async () => {
     const { server, baseUrl, store } = await startTunnelServer();
     const user = await store.createUser({ email: "user@example.com", passwordHash: "hash" });
@@ -142,18 +195,26 @@ interface CloudDataMessage {
   readonly data: string;
 }
 
+interface CloudHttpRequestMessage {
+  readonly type: "httpRequest";
+  readonly connectionId: string;
+  readonly path: string;
+}
+
 const startTunnelServer = async (): Promise<{
   readonly server: Server;
   readonly baseUrl: string;
   readonly store: InMemoryCloudStore;
+  readonly registry: MachineTunnelRegistry;
 }> => {
   const store = new InMemoryCloudStore();
+  const registry = new MachineTunnelRegistry();
   const server = createServer((_request, response) => {
     response.writeHead(404);
     response.end();
   });
   const gatewayAccessService = new GatewayAccessService(store, config);
-  attachGatewayTunnelServer(server, { store, config, gatewayAccessService });
+  attachGatewayTunnelServer(server, { store, config, gatewayAccessService, registry });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -164,7 +225,7 @@ const startTunnelServer = async (): Promise<{
     throw new Error("Expected TCP server address");
   }
 
-  return { server, baseUrl: `ws://127.0.0.1:${String(address.port)}`, store };
+  return { server, baseUrl: `ws://127.0.0.1:${String(address.port)}`, store, registry };
 };
 
 const startConnectedTunnel = async (): Promise<{
@@ -174,8 +235,9 @@ const startConnectedTunnel = async (): Promise<{
   readonly computer: { readonly id: string };
   readonly access: { readonly token: string };
   readonly machine: WebSocket;
+  readonly registry: MachineTunnelRegistry;
 }> => {
-  const { server, baseUrl, store } = await startTunnelServer();
+  const { server, baseUrl, store, registry } = await startTunnelServer();
   const user = await store.createUser({ email: "user@example.com", passwordHash: "hash" });
   const computer = await store.createComputer({
     ownerUserId: user.id,
@@ -202,7 +264,7 @@ const startConnectedTunnel = async (): Promise<{
     authorization: "Bearer machine-token",
   });
 
-  return { server, baseUrl, store, computer, access, machine };
+  return { server, baseUrl, store, computer, access, machine, registry };
 };
 
 const openWebSocket = (
@@ -230,6 +292,28 @@ const waitForJsonMessage = <TMessage>(webSocket: WebSocket): Promise<TMessage> =
       }
     });
   });
+
+const waitForCondition = (
+  condition: () => boolean,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (condition()) {
+        clearInterval(timer);
+        resolve();
+        return;
+      }
+
+      if (Date.now() - startedAt > 1000) {
+        clearInterval(timer);
+        reject(new Error("Timed out waiting for condition"));
+      }
+    }, 10);
+  });
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve, reject) => {

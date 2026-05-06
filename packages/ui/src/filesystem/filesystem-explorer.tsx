@@ -49,6 +49,44 @@ type SelectionBox = {
   readonly height: number;
 };
 
+type BrowserUploadSource =
+  | {
+      readonly type: "file";
+      readonly relativePath: string;
+      readonly file: File;
+    }
+  | {
+      readonly type: "directory";
+      readonly relativePath: string;
+    };
+
+type UploadProgressState = {
+  readonly title: string;
+  readonly detail: string;
+  readonly completedBytes: number;
+  readonly totalBytes: number;
+  readonly phase: "preparing" | "uploading";
+};
+
+type BrowserFileSystemHandle = {
+  readonly kind: "file" | "directory";
+  readonly name: string;
+};
+
+type BrowserFileHandle = BrowserFileSystemHandle & {
+  readonly kind: "file";
+  getFile(): Promise<File>;
+};
+
+type BrowserDirectoryHandle = BrowserFileSystemHandle & {
+  readonly kind: "directory";
+  values(): AsyncIterable<BrowserFileSystemHandle>;
+};
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (options?: { readonly mode?: "read" | "readwrite" }) => Promise<BrowserDirectoryHandle>;
+};
+
 type ContextMenuState =
   | {
       readonly kind: "background";
@@ -105,6 +143,7 @@ export function FilesystemExplorer({
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const currentPath = listing?.path ?? "";
 
   useEffect(() => {
@@ -308,20 +347,60 @@ export function FilesystemExplorer({
     downloadEntries([entry]);
   }, [downloadEntries, navigateTo]);
 
-  const uploadBrowserFiles = useCallback(async (
-    files: FileList | null,
-    options: { readonly includeFolderPath: boolean },
+  const uploadBrowserSources = useCallback(async (
+    sources: readonly BrowserUploadSource[],
+    title: string,
   ): Promise<void> => {
-    if (files === null || files.length === 0) {
+    if (sources.length === 0) {
       return;
     }
 
     try {
       setIsFetching(true);
       setListingError(null);
-      const uploadFiles = await Promise.all(
-        Array.from(files).map((file) => toFilesystemUploadFile(file, options.includeFolderPath)),
-      );
+      const totalBytes = sources.reduce((sum, source) => sum + (source.type === "file" ? source.file.size : 0), 0);
+      let completedBytes = 0;
+      const uploadFiles: FilesystemUploadFile[] = [];
+
+      setUploadProgress({
+        title,
+        detail: "Preparing upload...",
+        completedBytes: 0,
+        totalBytes,
+        phase: "preparing",
+      });
+
+      for (const source of sources) {
+        if (source.type === "directory") {
+          uploadFiles.push({ type: "directory", relativePath: source.relativePath });
+          continue;
+        }
+
+        setUploadProgress({
+          title,
+          detail: source.file.name,
+          completedBytes,
+          totalBytes,
+          phase: "preparing",
+        });
+        uploadFiles.push(await toFilesystemUploadFile(source));
+        completedBytes += source.file.size;
+        setUploadProgress({
+          title,
+          detail: source.file.name,
+          completedBytes,
+          totalBytes,
+          phase: "preparing",
+        });
+      }
+
+      setUploadProgress({
+        title,
+        detail: "Sending items to the machine...",
+        completedBytes: totalBytes,
+        totalBytes,
+        phase: "uploading",
+      });
       await clientRef.current?.upload(currentPath, uploadFiles);
       const uploadedPaths = getUploadSelectionPaths(currentPath, uploadFiles);
 
@@ -332,8 +411,49 @@ export function FilesystemExplorer({
     } catch (error) {
       setListingError(error instanceof Error ? error.message : "Failed to upload items.");
       setIsFetching(false);
+    } finally {
+      setUploadProgress(null);
     }
   }, [currentPath]);
+
+  const uploadBrowserFiles = useCallback(async (
+    files: FileList | null,
+    options: { readonly includeFolderPath: boolean },
+  ): Promise<void> => {
+    if (files === null || files.length === 0) {
+      return;
+    }
+
+    const sources = Array.from(files).map((file): BrowserUploadSource => ({
+      type: "file",
+      relativePath: options.includeFolderPath ? getBrowserRelativePath(file) : file.name,
+      file,
+    }));
+
+    await uploadBrowserSources(sources, options.includeFolderPath ? "Uploading folder" : "Uploading files");
+  }, [uploadBrowserSources]);
+
+  const chooseUploadFolder = useCallback((): void => {
+    const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
+
+    if (picker === undefined) {
+      uploadFolderInputRef.current?.click();
+      return;
+    }
+
+    void picker({ mode: "read" })
+      .then(async (directoryHandle) => {
+        const sources = await getDirectoryUploadSources(directoryHandle);
+        await uploadBrowserSources(sources, `Uploading ${directoryHandle.name}`);
+      })
+      .catch((error) => {
+        if (isAbortError(error)) {
+          return;
+        }
+
+        setListingError(error instanceof Error ? error.message : "Failed to upload folder.");
+      });
+  }, [uploadBrowserSources]);
 
   const selectEntry = useCallback(
     (entry: FilesystemEntry, event: React.MouseEvent) => {
@@ -432,7 +552,7 @@ export function FilesystemExplorer({
           }}
           onCreateNewFolder={() => void createNewFolder()}
           onUploadFiles={() => uploadFilesInputRef.current?.click()}
-          onUploadFolder={() => uploadFolderInputRef.current?.click()}
+          onUploadFolder={chooseUploadFolder}
           onRenameStart={(entry) => {
             setSelectedPaths([entry.path]);
             setSelectionAnchorPath(entry.path);
@@ -446,9 +566,52 @@ export function FilesystemExplorer({
           onDownloadEntries={downloadEntries}
         />
       </DesktopSplitPane>
+      {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
     </main>
   );
 }
+
+const UploadProgressDialog = ({
+  progress,
+}: {
+  readonly progress: UploadProgressState;
+}): React.ReactElement => {
+  const percent = progress.totalBytes === 0
+    ? 100
+    : Math.max(0, Math.min(100, (progress.completedBytes / progress.totalBytes) * 100));
+
+  return (
+    <div className="upload-progress-backdrop" role="presentation">
+      <div
+        className="upload-progress-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upload-progress-title"
+      >
+        <div className="upload-progress-heading">
+          <div>
+            <h2 id="upload-progress-title">{progress.title}</h2>
+            <p>{progress.phase === "uploading" ? "Finishing upload" : progress.detail}</p>
+          </div>
+          <Spinner />
+        </div>
+        <div
+          className="upload-progress-bar"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(percent)}
+        >
+          <span style={{ width: `${percent}%` }} />
+        </div>
+        <div className="upload-progress-meta">
+          <span>{Math.round(percent)}%</span>
+          <span>{formatBytes(progress.completedBytes)} / {formatBytes(progress.totalBytes)}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const FinderToolbar = ({
   canGoBack,
@@ -1473,14 +1636,52 @@ const isFilesystemEntry = (value: unknown): value is FilesystemEntry => {
   );
 };
 
-const toFilesystemUploadFile = async (
-  file: File,
-  includeFolderPath: boolean,
-): Promise<FilesystemUploadFile> => ({
-  relativePath: includeFolderPath ? getBrowserRelativePath(file) : file.name,
-  contentBase64: arrayBufferToBase64(await file.arrayBuffer()),
-  updatedAt: Number.isFinite(file.lastModified) ? new Date(file.lastModified).toISOString() : undefined,
+const toFilesystemUploadFile = async (source: Extract<BrowserUploadSource, { readonly type: "file" }>): Promise<FilesystemUploadFile> => ({
+  type: "file",
+  relativePath: source.relativePath,
+  contentBase64: arrayBufferToBase64(await source.file.arrayBuffer()),
+  updatedAt: Number.isFinite(source.file.lastModified) ? new Date(source.file.lastModified).toISOString() : undefined,
 });
+
+const getDirectoryUploadSources = async (directoryHandle: BrowserDirectoryHandle): Promise<BrowserUploadSource[]> => {
+  const sources: BrowserUploadSource[] = [{
+    type: "directory",
+    relativePath: directoryHandle.name,
+  }];
+
+  await appendDirectoryUploadSources(directoryHandle, directoryHandle.name, sources);
+
+  return sources;
+};
+
+const appendDirectoryUploadSources = async (
+  directoryHandle: BrowserDirectoryHandle,
+  relativePath: string,
+  sources: BrowserUploadSource[],
+): Promise<void> => {
+  for await (const childHandle of directoryHandle.values()) {
+    const childPath = `${relativePath}/${childHandle.name}`;
+
+    if (childHandle.kind === "directory") {
+      sources.push({
+        type: "directory",
+        relativePath: childPath,
+      });
+      await appendDirectoryUploadSources(childHandle as BrowserDirectoryHandle, childPath, sources);
+      continue;
+    }
+
+    const file = await (childHandle as BrowserFileHandle).getFile();
+    sources.push({
+      type: "file",
+      relativePath: childPath,
+      file,
+    });
+  }
+};
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === "AbortError";
 
 const getBrowserRelativePath = (file: File): string => {
   const relativePath = (file as File & { readonly webkitRelativePath?: string }).webkitRelativePath?.trim();

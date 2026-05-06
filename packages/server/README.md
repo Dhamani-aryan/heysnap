@@ -57,9 +57,11 @@ gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
   -f notes='Release notes'
 ```
 
-The workflow pushes a multi-arch image to ECR and updates the cloud-server
-machine-server latest-version manifest. VM supervisors pull and restart only
-when `/status.safeToRestart` is true.
+The workflow pushes a multi-arch image to ECR, updates the cloud-server
+machine-server latest-version manifest, and updates the cloud-server
+provisioning defaults for stable releases. Existing VM supervisors pull and
+restart only when `/status.safeToRestart` is true; new VMs boot from the
+released versioned image.
 
 The Electron local machine embeds this package directly, so local desktop
 machine-server changes ship through the desktop app release.

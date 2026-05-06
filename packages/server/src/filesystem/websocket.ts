@@ -302,7 +302,8 @@ const isUploadFiles = (value: unknown): boolean =>
 
     return (
       typeof record["relativePath"] === "string" &&
-      typeof record["contentBase64"] === "string" &&
+      (record["type"] === undefined || record["type"] === "file" || record["type"] === "directory") &&
+      (record["contentBase64"] === undefined || typeof record["contentBase64"] === "string") &&
       optionalString(record["updatedAt"])
     );
   });

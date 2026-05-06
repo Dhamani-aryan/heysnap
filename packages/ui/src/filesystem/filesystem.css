@@ -1589,3 +1589,107 @@ button:disabled {
 :root.dark .finder-empty-inline p {
   color: rgba(255, 255, 255, 0.32);
 }
+
+.upload-progress-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.34);
+  padding: 24px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+:root.dark .upload-progress-backdrop {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.upload-progress-dialog {
+  width: min(360px, 100%);
+  border: 0.5px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.18),
+    0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  color: #1f1f1f;
+  padding: 16px;
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+}
+
+:root.dark .upload-progress-dialog {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(32, 32, 33, 0.86);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.upload-progress-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.upload-progress-heading h2 {
+  margin: 0;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.upload-progress-heading p {
+  max-width: 270px;
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: rgba(0, 0, 0, 0.52);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root.dark .upload-progress-heading p {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.upload-progress-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.09);
+  margin-top: 14px;
+}
+
+:root.dark .upload-progress-bar {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.upload-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f7dff;
+  transition: width 140ms ease;
+}
+
+.upload-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+
+:root.dark .upload-progress-meta {
+  color: rgba(255, 255, 255, 0.5);
+}

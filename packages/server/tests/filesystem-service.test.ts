@@ -1,4 +1,4 @@
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
@@ -74,6 +74,35 @@ describe("FilesystemService", () => {
     ]);
     expect(await readFile(join(root, "target", "plain.txt"), "utf8")).toBe("plain");
     expect(await readFile(join(root, "target", "Folder", "nested.txt"), "utf8")).toBe("nested");
+  });
+
+  it("uploads folder entries with empty subfolders", async () => {
+    const root = await createRoot();
+    const service = new FilesystemService({ rootPath: root, trashFunction: removeEntriesForTest });
+
+    const result = await service.uploadFiles(undefined, [
+      {
+        type: "directory",
+        relativePath: "Project",
+      },
+      {
+        type: "directory",
+        relativePath: "Project/empty",
+      },
+      {
+        type: "file",
+        relativePath: "Project/src/index.txt",
+        contentBase64: Buffer.from("nested").toString("base64"),
+      },
+    ]);
+
+    expect(result.entries.map((entry) => entry.path).sort()).toEqual([
+      "Project",
+      "Project/empty",
+      "Project/src/index.txt",
+    ]);
+    await expect(stat(join(root, "Project", "empty")).then((entry) => entry.isDirectory())).resolves.toBe(true);
+    expect(await readFile(join(root, "Project", "src", "index.txt"), "utf8")).toBe("nested");
   });
 
   it("rejects upload paths that escape the target directory", async () => {

@@ -13,6 +13,17 @@ export type GatewayRoute = "filesystem" | "agent";
 
 export interface TunnelStatusRegistry {
   isConnected(computerId: string): boolean;
+  proxyHttpRequest?(computerId: string, input: GatewayHttpRequest): Promise<GatewayHttpResponse | null>;
+}
+
+export interface GatewayHttpRequest {
+  readonly path: string;
+}
+
+export interface GatewayHttpResponse {
+  readonly statusCode: number;
+  readonly headers: Record<string, string>;
+  readonly body: Buffer;
 }
 
 export interface GatewayTunnelServerOptions {
@@ -49,6 +60,16 @@ export class MachineTunnelRegistry {
 
   isConnected(computerId: string): boolean {
     return this.tunnels.has(computerId);
+  }
+
+  async proxyHttpRequest(computerId: string, input: GatewayHttpRequest): Promise<GatewayHttpResponse | null> {
+    const tunnel = this.tunnels.get(computerId);
+
+    if (tunnel === undefined) {
+      return null;
+    }
+
+    return tunnel.proxyHttpRequest(input);
   }
 
   connectedComputerIds(): string[] {
@@ -126,6 +147,7 @@ export const attachGatewayTunnelServer = (
 
 export class MachineTunnel {
   private readonly gatewayConnections = new Map<string, WebSocket>();
+  private readonly pendingHttpRequests = new Map<string, PendingHttpRequest>();
 
   constructor(
     readonly computerId: string,
@@ -137,10 +159,12 @@ export class MachineTunnel {
     });
     this.machineWebSocket.on("close", () => {
       this.closeGatewayConnections(1011, "Machine tunnel closed");
+      this.rejectPendingHttpRequests(new Error("Machine tunnel closed"));
       this.registry.delete(this.computerId, this);
     });
     this.machineWebSocket.on("error", () => {
       this.closeGatewayConnections(1011, "Machine tunnel errored");
+      this.rejectPendingHttpRequests(new Error("Machine tunnel errored"));
       this.registry.delete(this.computerId, this);
     });
   }
@@ -191,7 +215,26 @@ export class MachineTunnel {
 
   close(code: number, reason: string): void {
     this.closeGatewayConnections(code, reason);
+    this.rejectPendingHttpRequests(new Error(reason));
     this.machineWebSocket.close(code, reason);
+  }
+
+  proxyHttpRequest(input: GatewayHttpRequest): Promise<GatewayHttpResponse> {
+    const connectionId = randomUUID();
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingHttpRequests.delete(connectionId);
+        reject(new Error("Machine HTTP tunnel request timed out"));
+      }, HTTP_PROXY_TIMEOUT_MS);
+
+      this.pendingHttpRequests.set(connectionId, { resolve, reject, timeout });
+      this.sendToMachine({
+        type: "httpRequest",
+        connectionId,
+        path: input.path,
+      });
+    });
   }
 
   private handleMachineMessage(data: RawData): void {
@@ -199,6 +242,11 @@ export class MachineTunnel {
 
     if (message === null) {
       this.machineWebSocket.close(1003, "Invalid tunnel message");
+      return;
+    }
+
+    if (message.type === "httpResponse") {
+      this.resolveHttpResponse(message);
       return;
     }
 
@@ -243,18 +291,58 @@ export class MachineTunnel {
 
     this.gatewayConnections.clear();
   }
+
+  private resolveHttpResponse(message: MachineHttpResponseMessage): void {
+    const pending = this.pendingHttpRequests.get(message.connectionId);
+
+    if (pending === undefined) {
+      return;
+    }
+
+    clearTimeout(pending.timeout);
+    this.pendingHttpRequests.delete(message.connectionId);
+    pending.resolve({
+      statusCode: message.statusCode,
+      headers: message.headers,
+      body: Buffer.from(message.bodyBase64, "base64"),
+    });
+  }
+
+  private rejectPendingHttpRequests(error: Error): void {
+    for (const [connectionId, pending] of this.pendingHttpRequests.entries()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pendingHttpRequests.delete(connectionId);
+    }
+  }
+}
+
+interface PendingHttpRequest {
+  readonly resolve: (response: GatewayHttpResponse) => void;
+  readonly reject: (error: Error) => void;
+  readonly timeout: ReturnType<typeof setTimeout>;
 }
 
 type CloudTunnelMessage =
   | { readonly type: "open"; readonly connectionId: string; readonly route: GatewayRoute; readonly path: string }
+  | { readonly type: "httpRequest"; readonly connectionId: string; readonly path: string }
   | { readonly type: "data"; readonly connectionId: string; readonly data: string }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
 
 type MachineTunnelMessage =
   | { readonly type: "openResult"; readonly connectionId: string; readonly ok: true }
   | { readonly type: "openResult"; readonly connectionId: string; readonly ok: false; readonly error?: string }
+  | MachineHttpResponseMessage
   | { readonly type: "data"; readonly connectionId: string; readonly data: string }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
+
+type MachineHttpResponseMessage = {
+  readonly type: "httpResponse";
+  readonly connectionId: string;
+  readonly statusCode: number;
+  readonly headers: Record<string, string>;
+  readonly bodyBase64: string;
+};
 
 const authenticateMachineTunnel = async (
   store: CloudStore,
@@ -356,6 +444,16 @@ const parseMachineMessage = (data: RawData): MachineTunnelMessage | null => {
       return typeof message["data"] === "string"
         ? { type: "data", connectionId: message["connectionId"], data: message["data"] }
         : null;
+    case "httpResponse":
+      return isHttpResponseMessage(message)
+        ? {
+            type: "httpResponse",
+            connectionId: message["connectionId"],
+            statusCode: message["statusCode"],
+            headers: message["headers"],
+            bodyBase64: message["bodyBase64"],
+          }
+        : null;
     case "close":
       return {
         type: "close",
@@ -366,6 +464,29 @@ const parseMachineMessage = (data: RawData): MachineTunnelMessage | null => {
     default:
       return null;
   }
+};
+
+const isHttpResponseMessage = (message: Record<string, unknown>): message is {
+  readonly connectionId: string;
+  readonly statusCode: number;
+  readonly headers: Record<string, string>;
+  readonly bodyBase64: string;
+} => (
+  typeof message["connectionId"] === "string" &&
+  typeof message["statusCode"] === "number" &&
+  Number.isInteger(message["statusCode"]) &&
+  message["statusCode"] >= 100 &&
+  message["statusCode"] <= 599 &&
+  typeof message["bodyBase64"] === "string" &&
+  isStringRecord(message["headers"])
+);
+
+const isStringRecord = (value: unknown): value is Record<string, string> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every((entry) => typeof entry === "string");
 };
 
 const readBearerToken = (authorization: string | undefined): string | undefined => {
@@ -429,6 +550,8 @@ export const normalizeWebSocketCloseCode = (code: number | undefined): number =>
 
   return 1000;
 };
+
+const HTTP_PROXY_TIMEOUT_MS = 120_000;
 
 const rejectUpgrade = (socket: Duplex, status: number, message: string): void => {
   socket.write([

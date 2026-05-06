@@ -95,6 +95,9 @@ class MachineTunnelClient {
       case "open":
         this.openLocalConnection(message.connectionId, message.path);
         break;
+      case "httpRequest":
+        void this.handleHttpRequest(message.connectionId, message.path);
+        break;
       case "data": {
         const localConnection = this.localConnections.get(message.connectionId);
 
@@ -116,6 +119,31 @@ class MachineTunnelClient {
         );
         this.localConnections.delete(message.connectionId);
         break;
+    }
+  }
+
+  private async handleHttpRequest(connectionId: string, path: string): Promise<void> {
+    try {
+      const response = await fetch(`http://127.0.0.1:${String(this.options.localPort)}${path}`);
+      const body = Buffer.from(await response.arrayBuffer());
+      this.sendToCloud({
+        type: "httpResponse",
+        connectionId,
+        statusCode: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        bodyBase64: body.toString("base64"),
+      });
+    } catch (error) {
+      const body = Buffer.from(error instanceof Error ? error.message : "Failed to proxy HTTP request", "utf8");
+      this.sendToCloud({
+        type: "httpResponse",
+        connectionId,
+        statusCode: 502,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+        },
+        bodyBase64: body.toString("base64"),
+      });
     }
   }
 
@@ -185,12 +213,20 @@ interface LocalTunnelConnection {
 
 type CloudTunnelMessage =
   | { readonly type: "open"; readonly connectionId: string; readonly path: string }
+  | { readonly type: "httpRequest"; readonly connectionId: string; readonly path: string }
   | { readonly type: "data"; readonly connectionId: string; readonly data: string }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
 
 type MachineTunnelMessage =
   | { readonly type: "openResult"; readonly connectionId: string; readonly ok: true }
   | { readonly type: "openResult"; readonly connectionId: string; readonly ok: false; readonly error: string }
+  | {
+      readonly type: "httpResponse";
+      readonly connectionId: string;
+      readonly statusCode: number;
+      readonly headers: Record<string, string>;
+      readonly bodyBase64: string;
+    }
   | { readonly type: "data"; readonly connectionId: string; readonly data: string }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
 
@@ -223,6 +259,10 @@ const parseCloudMessage = (data: RawData): CloudTunnelMessage | null => {
     case "open":
       return typeof message["path"] === "string"
         ? { type: "open", connectionId: message["connectionId"], path: message["path"] }
+        : null;
+    case "httpRequest":
+      return typeof message["path"] === "string"
+        ? { type: "httpRequest", connectionId: message["connectionId"], path: message["path"] }
         : null;
     case "data":
       return typeof message["data"] === "string"

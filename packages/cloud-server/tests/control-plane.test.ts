@@ -579,6 +579,59 @@ describe("cloud server computer access sessions", () => {
 
     expect(response.status).toBe(404);
   });
+
+  it("proxies filesystem downloads through authenticated gateway access sessions", async () => {
+    const requestedPaths: string[] = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async (_computerId, input) => {
+        requestedPaths.push(input.path);
+        return {
+          statusCode: 200,
+          headers: {
+            "content-type": "application/zip",
+            "content-disposition": "attachment; filename=\"Project.zip\"",
+          },
+          body: Buffer.from("zip-bytes", "utf8"),
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "download-user@example.com");
+    const computer = await createComputer(app, auth.token, "Download VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/download?accessToken=${accessBody.accessSession.token}&path=Project`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    expect(response.headers.get("content-disposition")).toBe("attachment; filename=\"Project.zip\"");
+    expect(await response.text()).toBe("zip-bytes");
+    expect(requestedPaths).toEqual(["/filesystem/download?path=Project"]);
+  });
+
+  it("rejects filesystem downloads without gateway access tokens", async () => {
+    const { app } = createTestApp({
+      tunnelRegistry: {
+        isConnected: () => true,
+        proxyHttpRequest: async () => {
+          throw new Error("should not proxy unauthenticated downloads");
+        },
+      },
+    });
+    const auth = await registerUser(app, "download-no-token@example.com");
+    const computer = await createComputer(app, auth.token, "Download VM");
+
+    const response = await app.request(`/gateway/computers/${computer.id}/filesystem/download?path=Project`);
+
+    expect(response.status).toBe(401);
+  });
 });
 
 describe("cloud server release manifests", () => {

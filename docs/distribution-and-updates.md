@@ -126,6 +126,10 @@ What it does:
 - Pushes the image to ECR with `<version>` and `<channel>` tags.
 - Publishes the cloud release manifest through:
   `POST /admin/releases/machine-server`
+- For `stable` releases, updates the cloud-server host's
+  `MACHINE_SERVER_IMAGE` and `MACHINE_SERVER_VERSION` defaults, then recreates
+  the cloud-server container with the same cloud-server image so newly created
+  VMs boot directly into the released machine-server version.
 
 Runtime update behavior:
 
@@ -144,6 +148,8 @@ Required GitHub variables/secrets:
 - `AWS_REGION`
 - `MACHINE_SERVER_IMAGE_URI`
 - `AWS_MACHINE_SERVER_RELEASE_ROLE_ARN`
+- `AWS_CLOUD_SERVER_DEPLOY_ROLE_ARN`
+- `CLOUD_SERVER_INSTANCE_ID`
 - `CLOUD_SERVER_ADMIN_TOKEN`
 
 ## Current Hosted Release Sources
