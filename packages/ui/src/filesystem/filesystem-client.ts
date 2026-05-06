@@ -1,4 +1,9 @@
-import type { FilesystemClientMessage, FilesystemListing, FilesystemServerMessage } from "./types";
+import type {
+  FilesystemClientMessage,
+  FilesystemListing,
+  FilesystemServerMessage,
+  FilesystemUploadFile,
+} from "./types";
 
 export type FilesystemConnectionStatus = "connecting" | "alive" | "closed";
 
@@ -110,6 +115,10 @@ export class FilesystemClient {
 
   createFolder(path?: string): Promise<unknown> {
     return this.request({ type: "createFolder", requestId: this.nextRequestId(), path });
+  }
+
+  upload(path: string | undefined, files: FilesystemUploadFile[]): Promise<unknown> {
+    return this.request({ type: "upload", requestId: this.nextRequestId(), path, files });
   }
 
   rename(path: string, newName: string): Promise<unknown> {

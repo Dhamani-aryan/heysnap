@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -74,6 +74,36 @@ describe("filesystem websocket", () => {
       reason: "mutation",
       listing: { entries: [] },
     });
+  });
+
+  it("uploads files and publishes a mutation snapshot", async () => {
+    const root = await createRoot();
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({
+      type: "upload",
+      requestId: "upload-1",
+      files: [{
+        relativePath: "notes/today.txt",
+        contentBase64: Buffer.from("hello upload").toString("base64"),
+      }],
+    }));
+
+    expect(await client.next("ack")).toMatchObject({
+      type: "ack",
+      requestId: "upload-1",
+      action: "upload",
+    });
+    expect(await client.next("snapshot")).toMatchObject({
+      type: "snapshot",
+      reason: "mutation",
+      listing: { entries: [{ name: "notes", path: "notes", type: "directory" }] },
+    });
+    expect(await readFile(join(root, "notes", "today.txt"), "utf8")).toBe("hello upload");
   });
 
   it("sends a watch snapshot when the active directory changes", async () => {

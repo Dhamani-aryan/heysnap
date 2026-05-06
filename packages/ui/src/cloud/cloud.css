@@ -381,9 +381,9 @@ button {
 }
 
 .cloud-workspace .finder-toolbar {
-  height: 34px;
+  height: 40px;
   align-items: center;
-  padding: 0 8px;
+  padding: 6px 8px 0;
 }
 
 .cloud-workspace .toolbar-inner {

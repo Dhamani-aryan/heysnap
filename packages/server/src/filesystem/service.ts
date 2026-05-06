@@ -1,10 +1,10 @@
-import { lstat, mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { lstat, mkdir, readdir, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import path, { basename, dirname, join } from "node:path";
 
 import trash from "trash";
 import { FilesystemError } from "./errors.js";
 import { ensureWithinRoot, resolveClientPath, toClientPath, validateEntryName } from "./paths.js";
-import type { FilesystemEntry, FilesystemEntryType, FilesystemListing } from "./types.js";
+import type { FilesystemEntry, FilesystemEntryType, FilesystemListing, FilesystemUploadFile } from "./types.js";
 
 export type TrashFunction = (input: string | readonly string[]) => Promise<void>;
 
@@ -101,6 +101,65 @@ export class FilesystemService {
     await mkdir(folderPath);
 
     return this.getEntry(folderPath);
+  }
+
+  async uploadFiles(
+    rawDirectoryPath: string | undefined,
+    files: readonly FilesystemUploadFile[],
+  ): Promise<{ readonly entries: FilesystemEntry[] }> {
+    if (files.length === 0) {
+      throw new FilesystemError("INVALID_UPLOAD", "At least one file is required");
+    }
+
+    const directoryPath = resolveClientPath(this.rootPath, rawDirectoryPath);
+    const directoryStats = await this.getStats(directoryPath);
+
+    if (!directoryStats.isDirectory()) {
+      throw new FilesystemError("NOT_DIRECTORY", "Path is not a directory");
+    }
+
+    const targetPaths = files.map((file) => {
+      const relativePath = validateUploadRelativePath(file.relativePath);
+      const targetPath = join(directoryPath, ...relativePath.split("/"));
+      ensureWithinRoot(this.rootPath, targetPath);
+      ensureWithinRoot(directoryPath, targetPath);
+      return targetPath;
+    });
+
+    const uniquePaths = new Set(targetPaths);
+
+    if (uniquePaths.size !== targetPaths.length) {
+      throw new FilesystemError("DUPLICATE_UPLOAD_PATH", "Upload contains duplicate file paths");
+    }
+
+    await Promise.all(targetPaths.map((targetPath) => this.ensurePathAvailable(targetPath)));
+
+    const uploadedEntries: FilesystemEntry[] = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const targetPath = targetPaths[index];
+
+      if (file === undefined || targetPath === undefined) {
+        continue;
+      }
+
+      const content = decodeBase64(file.contentBase64);
+      await mkdir(dirname(targetPath), { recursive: true });
+      await writeFile(targetPath, content, { flag: "wx" });
+
+      if (file.updatedAt !== undefined) {
+        const updatedAt = new Date(file.updatedAt);
+
+        if (!Number.isNaN(updatedAt.getTime())) {
+          await utimes(targetPath, updatedAt, updatedAt);
+        }
+      }
+
+      uploadedEntries.push(await this.getEntry(targetPath));
+    }
+
+    return { entries: uploadedEntries };
   }
 
   async renameEntry(rawPath: string, rawNewName: string): Promise<FilesystemEntry> {
@@ -239,6 +298,34 @@ const compareEntries = (a: FilesystemEntry, b: FilesystemEntry): number => {
   }
 
   return a.name.localeCompare(b.name);
+};
+
+const validateUploadRelativePath = (rawPath: string): string => {
+  if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
+    throw new FilesystemError("INVALID_UPLOAD_PATH", "Upload path is required");
+  }
+
+  if (rawPath.includes("\0") || rawPath.startsWith("/") || rawPath.includes("\\")) {
+    throw new FilesystemError("INVALID_UPLOAD_PATH", "Upload path must be relative");
+  }
+
+  const normalizedPath = path.posix.normalize(rawPath);
+
+  if (normalizedPath === "." || normalizedPath.startsWith("../") || normalizedPath === "..") {
+    throw new FilesystemError("INVALID_UPLOAD_PATH", "Upload path cannot leave the target folder");
+  }
+
+  normalizedPath.split("/").forEach(validateEntryName);
+
+  return normalizedPath;
+};
+
+const decodeBase64 = (contentBase64: string): Buffer => {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(contentBase64) || contentBase64.length % 4 !== 0) {
+    throw new FilesystemError("INVALID_UPLOAD_CONTENT", "Upload content must be base64 encoded");
+  }
+
+  return Buffer.from(contentBase64, "base64");
 };
 
 const isNodeError = (value: unknown): value is NodeJS.ErrnoException =>

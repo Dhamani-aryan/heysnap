@@ -1,6 +1,11 @@
 "use client";
 
-import { Add01Icon, FolderAddIcon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  Download05Icon,
+  FolderAddIcon,
+  Upload05Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -11,7 +16,7 @@ import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient } from "./filesystem-client";
 import { ThemeToggle } from "./theme-toggle";
-import type { FilesystemEntry, FilesystemListing } from "./types";
+import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
 const HISTORY_LIMIT = 64;
 const DEFAULT_LEFT_PANE_RATIO = 0.5;
@@ -20,8 +25,13 @@ const MAX_PANE_RATIO = 0.75;
 const LEFT_PANE_RATIO_STORAGE_KEY = "filesystem-explorer:left-pane-ratio";
 const CONTEXT_MENU_WIDTH = 200;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
-const BACKGROUND_CONTEXT_MENU_HEIGHT = 268;
-const ENTRY_CONTEXT_MENU_HEIGHT = 268;
+const BACKGROUND_CONTEXT_MENU_HEIGHT = 148;
+const ENTRY_CONTEXT_MENU_HEIGHT = 148;
+const MULTI_ENTRY_CONTEXT_MENU_HEIGHT = 64;
+const folderPickerAttributes = {
+  webkitdirectory: "",
+  directory: "",
+} as React.InputHTMLAttributes<HTMLInputElement>;
 
 type SelectionRect = {
   readonly originX: number;
@@ -50,6 +60,12 @@ type ContextMenuState =
       readonly x: number;
       readonly y: number;
       readonly entry: FilesystemEntry;
+    }
+  | {
+      readonly kind: "selection";
+      readonly x: number;
+      readonly y: number;
+      readonly entries: FilesystemEntry[];
     };
 
 const clampPaneRatio = (ratio: number): number =>
@@ -77,6 +93,8 @@ export function FilesystemExplorer({
   onFilesystemOpen,
 }: FilesystemExplorerProps): React.ReactElement {
   const clientRef = useRef<FilesystemClient | null>(null);
+  const uploadFilesInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadFolderInputRef = useRef<HTMLInputElement | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
@@ -168,6 +186,20 @@ export function FilesystemExplorer({
     [navigateTo],
   );
 
+  const showEntryInfo = useCallback((entry: FilesystemEntry): void => {
+    const size = entry.size === null ? "Folder" : formatBytes(entry.size);
+    const updatedAt = new Date(entry.updatedAt);
+    const modified = Number.isNaN(updatedAt.getTime()) ? entry.updatedAt : updatedAt.toLocaleString();
+
+    window.alert([
+      `Name: ${entry.name}`,
+      `Kind: ${entry.type === "directory" ? "Folder" : "File"}`,
+      `Path: ${entry.path || "/"}`,
+      `Size: ${size}`,
+      `Modified: ${modified}`,
+    ].join("\n"));
+  }, []);
+
   const onBack = useCallback(() => {
     if (historyIndex <= 0) {
       return;
@@ -249,6 +281,60 @@ export function FilesystemExplorer({
     }
   }, []);
 
+  const downloadEntries = useCallback((entriesToDownload: readonly FilesystemEntry[]): void => {
+    if (entriesToDownload.length === 0) {
+      return;
+    }
+
+    try {
+      const downloadUrl = buildFilesystemDownloadUrl(websocketUrl, entriesToDownload.map((entry) => entry.path));
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = entriesToDownload.length === 1 ? entriesToDownload[0]?.name ?? "" : "download.zip";
+      document.body.append(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      setListingError(error instanceof Error ? error.message : "Failed to start download.");
+    }
+  }, [websocketUrl]);
+
+  const openEntry = useCallback((entry: FilesystemEntry): void => {
+    if (entry.type === "directory") {
+      navigateTo(entry.path);
+      return;
+    }
+
+    downloadEntries([entry]);
+  }, [downloadEntries, navigateTo]);
+
+  const uploadBrowserFiles = useCallback(async (
+    files: FileList | null,
+    options: { readonly includeFolderPath: boolean },
+  ): Promise<void> => {
+    if (files === null || files.length === 0) {
+      return;
+    }
+
+    try {
+      setIsFetching(true);
+      setListingError(null);
+      const uploadFiles = await Promise.all(
+        Array.from(files).map((file) => toFilesystemUploadFile(file, options.includeFolderPath)),
+      );
+      await clientRef.current?.upload(currentPath, uploadFiles);
+      const uploadedPaths = getUploadSelectionPaths(currentPath, uploadFiles);
+
+      if (uploadedPaths.length > 0) {
+        setSelectedPaths(uploadedPaths);
+        setSelectionAnchorPath(uploadedPaths[0] ?? null);
+      }
+    } catch (error) {
+      setListingError(error instanceof Error ? error.message : "Failed to upload items.");
+      setIsFetching(false);
+    }
+  }, [currentPath]);
+
   const selectEntry = useCallback(
     (entry: FilesystemEntry, event: React.MouseEvent) => {
       const entries = listing?.entries ?? [];
@@ -282,6 +368,31 @@ export function FilesystemExplorer({
 
   return (
     <main className="finder-shell">
+      <input
+        ref={uploadFilesInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          const input = event.currentTarget;
+          void uploadBrowserFiles(input.files, { includeFolderPath: false }).finally(() => {
+            input.value = "";
+          });
+        }}
+      />
+      <input
+        ref={uploadFolderInputRef}
+        type="file"
+        multiple
+        hidden
+        {...folderPickerAttributes}
+        onChange={(event) => {
+          const input = event.currentTarget;
+          void uploadBrowserFiles(input.files, { includeFolderPath: true }).finally(() => {
+            input.value = "";
+          });
+        }}
+      />
       <FinderToolbar
         canGoBack={historyIndex > 0}
         canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
@@ -320,6 +431,8 @@ export function FilesystemExplorer({
             setSelectionAnchorPath(null);
           }}
           onCreateNewFolder={() => void createNewFolder()}
+          onUploadFiles={() => uploadFilesInputRef.current?.click()}
+          onUploadFolder={() => uploadFolderInputRef.current?.click()}
           onRenameStart={(entry) => {
             setSelectedPaths([entry.path]);
             setSelectionAnchorPath(entry.path);
@@ -327,7 +440,10 @@ export function FilesystemExplorer({
           }}
           onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
           onRenameCancel={() => setRenamingPath(null)}
+          onOpenEntry={openEntry}
+          onGetInfo={showEntryInfo}
           onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
+          onDownloadEntries={downloadEntries}
         />
       </DesktopSplitPane>
     </main>
@@ -522,10 +638,15 @@ const FinderBody = ({
   onActivate,
   onBackgroundClick,
   onCreateNewFolder,
+  onUploadFiles,
+  onUploadFolder,
   onRenameStart,
   onRenameCommit,
   onRenameCancel,
+  onOpenEntry,
+  onGetInfo,
   onTrashEntries,
+  onDownloadEntries,
 }: {
   readonly error: string | null;
   readonly isLoading: boolean;
@@ -537,10 +658,15 @@ const FinderBody = ({
   readonly onActivate: (entry: FilesystemEntry) => void;
   readonly onBackgroundClick: () => void;
   readonly onCreateNewFolder: () => void;
+  readonly onUploadFiles: () => void;
+  readonly onUploadFolder: () => void;
   readonly onRenameStart: (entry: FilesystemEntry) => void;
   readonly onRenameCommit: (entry: FilesystemEntry, nextName: string) => void;
   readonly onRenameCancel: () => void;
+  readonly onOpenEntry: (entry: FilesystemEntry) => void;
+  readonly onGetInfo: (entry: FilesystemEntry) => void;
   readonly onTrashEntries: (entries: readonly FilesystemEntry[]) => void;
+  readonly onDownloadEntries: (entries: readonly FilesystemEntry[]) => void;
 }): React.ReactElement => {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const didDragSelectRef = useRef(false);
@@ -713,8 +839,14 @@ const FinderBody = ({
             event.preventDefault();
             event.stopPropagation();
 
-            if (selectedPaths.length > 1) {
-              setContextMenu(null);
+            if (selectedPaths.length > 1 && selectedPaths.includes(entry.path)) {
+              const selectedEntries = entries.filter((currentEntry) => selectedPaths.includes(currentEntry.path));
+
+              setContextMenu({
+                kind: "selection",
+                ...getContextMenuPosition(event.clientX, event.clientY, MULTI_ENTRY_CONTEXT_MENU_HEIGHT),
+                entries: selectedEntries,
+              });
               return;
             }
 
@@ -738,23 +870,53 @@ const FinderBody = ({
             setContextMenu(null);
             onCreateNewFolder();
           }}
+          onUploadFiles={() => {
+            setContextMenu(null);
+            onUploadFiles();
+          }}
+          onUploadFolder={() => {
+            setContextMenu(null);
+            onUploadFolder();
+          }}
         />
-      ) : (
+      ) : contextMenu.kind === "entry" ? (
         <DesktopEntryContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           entry={contextMenu.entry}
-          onView={(entry) => {
+          onOpen={(entry) => {
             setContextMenu(null);
-            onActivate(entry);
+            onOpenEntry(entry);
           }}
           onRename={(entry) => {
             setContextMenu(null);
             onRenameStart(entry);
           }}
+          onGetInfo={(entry) => {
+            setContextMenu(null);
+            onGetInfo(entry);
+          }}
           onTrash={(entry) => {
             setContextMenu(null);
             onTrashEntries([entry]);
+          }}
+          onDownload={(entry) => {
+            setContextMenu(null);
+            onDownloadEntries([entry]);
+          }}
+        />
+      ) : (
+        <DesktopSelectionContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          entries={contextMenu.entries}
+          onTrash={(selectedEntries) => {
+            setContextMenu(null);
+            onTrashEntries(selectedEntries);
+          }}
+          onDownload={(selectedEntries) => {
+            setContextMenu(null);
+            onDownloadEntries(selectedEntries);
           }}
         />
       )}
@@ -941,10 +1103,14 @@ const DesktopContextMenu = ({
   x,
   y,
   onCreateNewFolder,
+  onUploadFiles,
+  onUploadFolder,
 }: {
   readonly x: number;
   readonly y: number;
   readonly onCreateNewFolder: () => void;
+  readonly onUploadFiles: () => void;
+  readonly onUploadFolder: () => void;
 }): React.ReactElement => (
   <div
     className="desktop-context-menu"
@@ -968,14 +1134,17 @@ const DesktopContextMenu = ({
     </button>
     <div className="context-menu-separator" />
     <ContextMenuDummyItem icon={<InfoIcon />} label="Get Info" />
-    <ContextMenuDummyItem label="Change Wallpaper..." inset />
-    <ContextMenuDummyItem label="Edit Widgets..." inset />
-    <div className="context-menu-separator" />
-    <ContextMenuDummyItem icon={<StacksIcon />} label="Use Stacks" />
-    <ContextMenuDummyItem icon={<SortIcon />} label="Sort By" arrow />
-    <ContextMenuDummyItem icon={<GridIcon />} label="Clean Up" />
-    <ContextMenuDummyItem label="Clean Up By" arrow inset />
-    <ContextMenuDummyItem icon={<SettingsIcon />} label="Show View Options" />
+    <ContextMenuDummyItem label="Change Wallpaper" inset />
+    <ContextMenuActionItem
+      icon={<HugeiconsIcon icon={Upload05Icon} size={16} color="currentColor" strokeWidth={1.8} />}
+      label="Upload Files"
+      onSelect={onUploadFiles}
+    />
+    <ContextMenuActionItem
+      icon={<HugeiconsIcon icon={Upload05Icon} size={16} color="currentColor" strokeWidth={1.8} />}
+      label="Upload Folder"
+      onSelect={onUploadFolder}
+    />
   </div>
 );
 
@@ -983,16 +1152,20 @@ const DesktopEntryContextMenu = ({
   x,
   y,
   entry,
-  onView,
+  onOpen,
   onRename,
+  onGetInfo,
   onTrash,
+  onDownload,
 }: {
   readonly x: number;
   readonly y: number;
   readonly entry: FilesystemEntry;
-  readonly onView: (entry: FilesystemEntry) => void;
+  readonly onOpen: (entry: FilesystemEntry) => void;
   readonly onRename: (entry: FilesystemEntry) => void;
+  readonly onGetInfo: (entry: FilesystemEntry) => void;
   readonly onTrash: (entry: FilesystemEntry) => void;
+  readonly onDownload: (entry: FilesystemEntry) => void;
 }): React.ReactElement => (
   <div
     className="desktop-context-menu"
@@ -1001,17 +1174,45 @@ const DesktopEntryContextMenu = ({
     onClick={(event) => event.stopPropagation()}
     onContextMenu={(event) => event.preventDefault()}
   >
-    <ContextMenuActionItem icon={<ViewIcon />} label="View" onSelect={() => onView(entry)} />
+    <ContextMenuActionItem icon={<ViewIcon />} label="Open" onSelect={() => onOpen(entry)} />
     <ContextMenuActionItem icon={<RenameIcon />} label="Rename" onSelect={() => onRename(entry)} />
-    <ContextMenuDummyItem icon={<InfoIcon />} label="Get Info" />
-    <ContextMenuDummyItem icon={<DuplicateIcon />} label="Duplicate" />
-    <ContextMenuDummyItem icon={<AliasIcon />} label="Make Alias" />
+    <ContextMenuActionItem icon={<InfoIcon />} label="Get Info" onSelect={() => onGetInfo(entry)} />
     <div className="context-menu-separator" />
     <ContextMenuActionItem icon={<TrashIcon />} label="Trash" onSelect={() => onTrash(entry)} />
-    <div className="context-menu-separator" />
-    <ContextMenuDummyItem icon={<ViewIcon />} label={`Quick Look "${entry.name}"`} />
-    <ContextMenuDummyItem icon={<ShareIcon />} label="Share" arrow />
-    <ContextMenuDummyItem icon={<TagsIcon />} label="Tags..." />
+    <ContextMenuActionItem
+      icon={<HugeiconsIcon icon={Download05Icon} size={16} color="currentColor" strokeWidth={1.8} />}
+      label="Download"
+      onSelect={() => onDownload(entry)}
+    />
+  </div>
+);
+
+const DesktopSelectionContextMenu = ({
+  x,
+  y,
+  entries,
+  onTrash,
+  onDownload,
+}: {
+  readonly x: number;
+  readonly y: number;
+  readonly entries: FilesystemEntry[];
+  readonly onTrash: (entries: readonly FilesystemEntry[]) => void;
+  readonly onDownload: (entries: readonly FilesystemEntry[]) => void;
+}): React.ReactElement => (
+  <div
+    className="desktop-context-menu"
+    style={{ left: x, top: y }}
+    role="menu"
+    onClick={(event) => event.stopPropagation()}
+    onContextMenu={(event) => event.preventDefault()}
+  >
+    <ContextMenuActionItem icon={<TrashIcon />} label="Trash" onSelect={() => onTrash(entries)} />
+    <ContextMenuActionItem
+      icon={<HugeiconsIcon icon={Download05Icon} size={16} color="currentColor" strokeWidth={1.8} />}
+      label="Download"
+      onSelect={() => onDownload(entries)}
+    />
   </div>
 );
 
@@ -1177,68 +1378,11 @@ const TrashIcon = (): React.ReactElement => (
   </IconPath>
 );
 
-const DuplicateIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M8 8.5V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M5 9h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-  </IconPath>
-);
-
-const AliasIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M9 7H6.5A3.5 3.5 0 0 0 3 10.5v0A3.5 3.5 0 0 0 6.5 14H12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    <path d="M15 17h2.5A3.5 3.5 0 0 0 21 13.5v0a3.5 3.5 0 0 0-3.5-3.5H12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    <path d="M15 4v6h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-  </IconPath>
-);
-
-const ShareIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M12 15V4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    <path d="m8 8 4-4 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M6 11v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-  </IconPath>
-);
-
-const TagsIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M4.5 5.5h6.6a2 2 0 0 1 1.4.6l6.3 6.3a2 2 0 0 1 0 2.8l-3.6 3.6a2 2 0 0 1-2.8 0L6.1 12.5a2 2 0 0 1-.6-1.4V5.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-    <path d="M8.5 8.5h.01" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" />
-  </IconPath>
-);
-
 const InfoIcon = (): React.ReactElement => (
   <IconPath>
     <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
     <path d="M12 11v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     <path d="M12 8h.01" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
-  </IconPath>
-);
-
-const StacksIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    <path d="M8 5v4M12 5v4M16 5v4M8 10v4M12 10v4M16 10v4M8 15v4M12 15v4M16 15v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-  </IconPath>
-);
-
-const SortIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M8 4v16M8 20l-3-3M8 20l3-3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M16 20V4M16 4l-3 3M16 4l3 3" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-  </IconPath>
-);
-
-const GridIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M5 5h3v3H5zM10.5 5h3v3h-3zM16 5h3v3h-3zM5 10.5h3v3H5zM10.5 10.5h3v3h-3zM16 10.5h3v3h-3zM5 16h3v3H5zM10.5 16h3v3h-3zM16 16h3v3h-3z" stroke="currentColor" strokeWidth="1.5" />
-  </IconPath>
-);
-
-const SettingsIcon = (): React.ReactElement => (
-  <IconPath>
-    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" strokeWidth="1.7" />
-    <path d="M19 13.4v-2.8l-2.1-.7a5.8 5.8 0 0 0-.5-1.2l1-2-2-2-2 .9c-.4-.2-.8-.4-1.3-.5L11.4 3H8.6L8 5.1c-.5.1-.9.3-1.3.5l-2-.9-2 2 1 2c-.2.4-.4.8-.5 1.2L1 10.6v2.8l2.1.7c.1.4.3.8.5 1.2l-1 2 2 2 2-.9c.4.2.8.4 1.3.5l.7 2.1h2.8l.7-2.1c.5-.1.9-.3 1.3-.5l2 .9 2-2-1-2c.2-.4.4-.8.5-1.2l2.1-.7Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
   </IconPath>
 );
 
@@ -1327,4 +1471,91 @@ const isFilesystemEntry = (value: unknown): value is FilesystemEntry => {
     typeof record["path"] === "string" &&
     (record["type"] === "file" || record["type"] === "directory")
   );
+};
+
+const toFilesystemUploadFile = async (
+  file: File,
+  includeFolderPath: boolean,
+): Promise<FilesystemUploadFile> => ({
+  relativePath: includeFolderPath ? getBrowserRelativePath(file) : file.name,
+  contentBase64: arrayBufferToBase64(await file.arrayBuffer()),
+  updatedAt: Number.isFinite(file.lastModified) ? new Date(file.lastModified).toISOString() : undefined,
+});
+
+const getBrowserRelativePath = (file: File): string => {
+  const relativePath = (file as File & { readonly webkitRelativePath?: string }).webkitRelativePath?.trim();
+
+  return relativePath && relativePath.length > 0 ? relativePath : file.name;
+};
+
+const getUploadSelectionPaths = (
+  directoryPath: string,
+  files: readonly FilesystemUploadFile[],
+): string[] => {
+  const selectedTopLevelPaths = new Set<string>();
+
+  files.forEach((file) => {
+    const topLevelName = file.relativePath.split("/")[0];
+
+    if (topLevelName !== undefined && topLevelName.length > 0) {
+      selectedTopLevelPaths.add(joinClientPath(directoryPath, topLevelName));
+    }
+  });
+
+  return [...selectedTopLevelPaths];
+};
+
+const joinClientPath = (directoryPath: string, name: string): string =>
+  directoryPath.length === 0 ? name : `${directoryPath}/${name}`;
+
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${String(bytes)} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+};
+
+const buildFilesystemDownloadUrl = (
+  filesystemWebsocketUrl: string,
+  paths: readonly string[],
+): string => {
+  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const url = new URL(filesystemWebsocketUrl, baseUrl);
+
+  if (url.protocol === "ws:") {
+    url.protocol = "http:";
+  } else if (url.protocol === "wss:") {
+    url.protocol = "https:";
+  }
+
+  url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/download");
+  url.searchParams.delete("path");
+  url.searchParams.delete("showHidden");
+  paths.forEach((path) => {
+    url.searchParams.append("path", path);
+  });
+
+  return url.toString();
+};
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+
+  return window.btoa(binary);
 };
