@@ -65,6 +65,11 @@ Machine-server releases are published by `release-machine-server.yml`. After a
 release, heartbeats receive the latest manifest and the host-side supervisor
 pulls the versioned image when the machine is idle.
 
+For `stable` releases, the same workflow also updates the cloud-server host's
+machine-server defaults and recreates the cloud-server container. New VMs then
+boot directly from the released versioned image instead of waiting for their
+first heartbeat update.
+
 The machine instance profile only needs ECR read access for this step. The
 machine server is reached through the cloud gateway, so no public machine-server
 inbound port is required.
