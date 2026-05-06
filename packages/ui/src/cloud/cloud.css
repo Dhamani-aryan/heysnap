@@ -88,6 +88,11 @@ button {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  transition: opacity 820ms ease;
+}
+
+.cloud-auth-shell[data-success-phase="exiting"] {
+  opacity: 0;
 }
 
 .cloud-floating-actions {
@@ -95,6 +100,14 @@ button {
   top: 12px;
   right: 12px;
   z-index: 2;
+  transition: opacity 420ms ease;
+}
+
+.cloud-auth-shell[data-success-phase="welcome"] .cloud-floating-actions,
+.cloud-auth-shell[data-success-phase="tagline"] .cloud-floating-actions,
+.cloud-auth-shell[data-success-phase="exiting"] .cloud-floating-actions {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .cloud-auth-panel {
@@ -108,7 +121,8 @@ button {
 }
 
 .cloud-auth-panel[data-success-phase="welcome"],
-.cloud-auth-panel[data-success-phase="tagline"] {
+.cloud-auth-panel[data-success-phase="tagline"],
+.cloud-auth-panel[data-success-phase="exiting"] {
   width: min(100%, 640px);
   transform: translateY(32px);
 }
@@ -125,7 +139,8 @@ button {
 }
 
 .cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-brand,
-.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-brand {
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-brand,
+.cloud-auth-panel[data-success-phase="exiting"] .cloud-auth-brand {
   gap: 24px;
   margin-bottom: 0;
   transform: scale(1.08);
@@ -139,7 +154,8 @@ button {
 }
 
 .cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-logo,
-.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-logo {
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-logo,
+.cloud-auth-panel[data-success-phase="exiting"] .cloud-auth-logo {
   width: min(96px, 30vw);
 }
 
@@ -170,8 +186,8 @@ button {
 .cloud-auth-wordmark-text {
   grid-area: 1 / 1;
   transition:
-    opacity 420ms ease,
-    transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    opacity 920ms ease,
+    transform 920ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .cloud-auth-wordmark-welcome {
@@ -185,19 +201,22 @@ button {
 }
 
 .cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-wordmark,
-.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark {
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark,
+.cloud-auth-panel[data-success-phase="exiting"] .cloud-auth-wordmark {
   font-size: 28px;
 }
 
-.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-welcome {
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-welcome,
+.cloud-auth-panel[data-success-phase="exiting"] .cloud-auth-wordmark-welcome {
   opacity: 0;
   transform: translateY(-8px);
 }
 
-.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-tagline {
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-wordmark-tagline,
+.cloud-auth-panel[data-success-phase="exiting"] .cloud-auth-wordmark-tagline {
   opacity: 1;
   transform: translateY(0);
-  transition-delay: 320ms;
+  transition-delay: 1220ms;
 }
 
 .cloud-auth-heading {
@@ -235,7 +254,8 @@ button {
 }
 
 .cloud-auth-panel[data-success-phase="welcome"] .cloud-auth-fields,
-.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-fields {
+.cloud-auth-panel[data-success-phase="tagline"] .cloud-auth-fields,
+.cloud-auth-panel[data-success-phase="exiting"] .cloud-auth-fields {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
@@ -304,6 +324,7 @@ button {
 }
 
 .cloud-primary-button,
+.cloud-local-onboarding-button,
 .cloud-text-button,
 .cloud-icon-button,
 .cloud-machine-row {
@@ -312,7 +333,8 @@ button {
   cursor: pointer;
 }
 
-.cloud-primary-button {
+.cloud-primary-button,
+.cloud-local-onboarding-button {
   display: flex;
   height: 42px;
   align-items: center;
@@ -324,11 +346,13 @@ button {
   padding: 0 14px;
 }
 
-.cloud-primary-button:not(:disabled):hover {
+.cloud-primary-button:not(:disabled):hover,
+.cloud-local-onboarding-button:not(:disabled):hover {
   background: var(--cloud-accent-strong);
 }
 
 .cloud-primary-button:disabled,
+.cloud-local-onboarding-button:disabled,
 .cloud-icon-button:disabled,
 .cloud-machine-row:disabled,
 .cloud-text-button:disabled {
@@ -357,7 +381,9 @@ button {
 
 .cloud-shell {
   display: grid;
+  height: 100dvh;
   grid-template-rows: auto 1fr;
+  overflow: hidden;
 }
 
 .cloud-workspace {
@@ -445,6 +471,125 @@ button {
   gap: 6px;
 }
 
+.cloud-local-onboarding {
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  padding: 0 24px 72px;
+}
+
+.cloud-local-onboarding-content {
+  display: grid;
+  width: min(100%, 420px);
+  justify-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+.cloud-local-onboarding h1 {
+  margin: 0;
+  color: #252629;
+  font-size: 28px;
+  font-weight: 350;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+:root.dark .cloud-local-onboarding h1 {
+  color: #e3e4e6;
+}
+
+.cloud-local-onboarding-art {
+  position: relative;
+  width: min(78vw, 280px);
+  aspect-ratio: 1;
+  margin: 4px 0 -10px;
+}
+
+.cloud-local-onboarding-art::before {
+  position: absolute;
+  inset: 4%;
+  content: "";
+  opacity: 0.36;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(74, 80, 92, 0.52) 1.45px, transparent 1.65px);
+  background-position: center;
+  background-size: 14px 14px;
+  mask-image: radial-gradient(circle at center, black 0%, black 56%, transparent 88%);
+}
+
+:root.dark .cloud-local-onboarding-art::before {
+  opacity: 0.64;
+  background-image: radial-gradient(circle, rgba(148, 163, 184, 0.56) 1.45px, transparent 1.65px);
+}
+
+.cloud-local-onboarding-image {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cloud-local-onboarding-image-dark {
+  display: none;
+}
+
+:root.dark .cloud-local-onboarding-image-light {
+  display: none;
+}
+
+:root.dark .cloud-local-onboarding-image-dark {
+  display: block;
+}
+
+.cloud-local-onboarding-name {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #37383b;
+  font-size: 18px;
+  font-weight: 350;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+:root.dark .cloud-local-onboarding-name {
+  color: #d0d0d3;
+}
+
+.cloud-local-onboarding-error {
+  width: 100%;
+  border: 1px solid rgba(180, 35, 24, 0.22);
+  border-radius: 8px;
+  background: var(--cloud-danger-bg);
+  color: var(--cloud-danger);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.cloud-local-onboarding-button {
+  width: 100%;
+  max-width: 280px;
+  margin-top: 18px;
+}
+
+.cloud-local-onboarding-loader {
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: cloud-local-onboarding-loader-spin 720ms linear infinite;
+}
+
+@keyframes cloud-local-onboarding-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .cloud-icon-button,
 .cloud-text-button {
   display: inline-flex;
@@ -517,6 +662,265 @@ button {
 
 .cloud-machines-subtitle span {
   color: #999fde;
+}
+
+.cloud-machines-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 32px;
+  margin: 80px 0 0;
+}
+
+.cloud-machine-card-placeholder {
+  aspect-ratio: 4 / 3;
+  border: 2px dashed var(--cloud-border);
+  border-radius: 12px;
+}
+
+.cloud-machine-card-placeholder-device {
+  position: relative;
+  appearance: none;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  background: #fbfbfb;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.cloud-machine-status-dot {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.86);
+  border-radius: 999px;
+  background: #9ca3af;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+}
+
+:root.dark .cloud-machine-status-dot {
+  border-color: rgba(17, 17, 19, 0.9);
+}
+
+.cloud-machine-status-dot[data-status="online"],
+.cloud-machine-status-dot[data-status="idle"] {
+  background: #22c55e;
+}
+
+.cloud-machine-status-dot[data-status="creating"],
+.cloud-machine-status-dot[data-status="starting"] {
+  background: #f59e0b;
+}
+
+.cloud-machine-status-dot[data-status="failed"] {
+  background: #ef4444;
+}
+
+.cloud-machine-status-dot[data-status="sleeping"],
+.cloud-machine-status-dot[data-status="offline"],
+.cloud-machine-status-dot[data-status="deleted"] {
+  background: #9ca3af;
+}
+
+.cloud-machine-status-tooltip {
+  position: absolute;
+  top: 7px;
+  left: 31px;
+  z-index: 4;
+  display: flex;
+  height: 22px;
+  align-items: center;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #37383b;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+  opacity: 0;
+  padding: 0 8px;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  white-space: nowrap;
+}
+
+:root.dark .cloud-machine-status-tooltip {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(24, 24, 27, 0.88);
+  color: #d0d0d3;
+}
+
+.cloud-machine-card-placeholder-device:hover .cloud-machine-status-tooltip,
+.cloud-machine-card-placeholder-device:focus-visible .cloud-machine-status-tooltip {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.cloud-machine-card-art {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  padding: 28px;
+}
+
+.cloud-machine-card-art::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  opacity: 0.38;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(74, 80, 92, 0.55) 1.45px, transparent 1.65px);
+  background-position: center;
+  background-size: 14px 14px;
+  mask-image: radial-gradient(circle at center, black 0%, black 56%, transparent 90%);
+}
+
+.cloud-machine-card-art::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  opacity: 0.32;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(143, 153, 178, 0.36), transparent 28%),
+    radial-gradient(circle at 44% 54%, rgba(112, 144, 196, 0.18), transparent 36%);
+  mask-image: radial-gradient(circle at center, black 0%, black 46%, transparent 86%);
+}
+
+:root.dark .cloud-machine-card-placeholder-device {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: #111113;
+}
+
+:root.dark .cloud-machine-card-art::before {
+  opacity: 0.68;
+  background-image: radial-gradient(circle, rgba(148, 163, 184, 0.58) 1.45px, transparent 1.65px);
+}
+
+:root.dark .cloud-machine-card-art::after {
+  opacity: 0.22;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(70, 130, 180, 0.24), transparent 28%),
+    radial-gradient(circle at 44% 54%, rgba(153, 159, 222, 0.14), transparent 36%);
+}
+
+.cloud-machine-card-image {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: min(74%, 300px);
+  max-height: 86%;
+  margin: auto;
+  object-fit: contain;
+}
+
+.cloud-machine-card-image-new {
+  width: min(66%, 260px);
+  max-height: 78%;
+}
+
+.cloud-machine-card-footer {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 18px;
+  color: #37383b;
+  font-size: 16px;
+  font-weight: 350;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+:root.dark .cloud-machine-card-footer {
+  color: #d0d0d3;
+}
+
+.cloud-machine-card-footer svg {
+  flex: 0 0 auto;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.cloud-machine-card-footer span {
+  min-width: 0;
+}
+
+.cloud-machine-card-placeholder-device:hover .cloud-machine-card-footer svg,
+.cloud-machine-card-placeholder-device:focus-within .cloud-machine-card-footer svg {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.cloud-machine-card-image-dark {
+  display: none;
+}
+
+:root.dark .cloud-machine-card-image-light {
+  display: none;
+}
+
+:root.dark .cloud-machine-card-image-dark {
+  display: block;
+}
+
+.cloud-machine-card-placeholder-add {
+  appearance: none;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 0;
+  background: #f1f1f1;
+  color: var(--cloud-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.cloud-machine-card-add-art {
+  display: grid;
+  min-height: 0;
+  place-items: center;
+}
+
+:root.dark .cloud-machine-card-placeholder-add {
+  background: #171719;
+}
+
+.cloud-machine-card-placeholder-add:hover,
+.cloud-machine-card-placeholder-add:focus-visible {
+  color: var(--cloud-text);
+}
+
+.cloud-remote-create-field {
+  width: 100%;
+  max-width: 280px;
+  margin-top: -4px;
+  text-align: left;
+}
+
+@media (max-width: 680px) {
+  .cloud-machines-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-top: 64px;
+  }
 }
 
 .cloud-machines-error {
