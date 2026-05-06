@@ -7,7 +7,11 @@ import lightLogoUrl from "../../../../apps/assets/heysnap-light-logo.gif";
 import { ThemeToggle } from "../filesystem/theme-toggle";
 
 type LogoAsset = string | { readonly src: string };
-type SuccessPhase = "idle" | "welcome" | "tagline";
+type SuccessPhase = "idle" | "welcome" | "tagline" | "exiting";
+
+const TAGLINE_PHASE_DELAY_MS = 1600;
+const EXIT_PHASE_DELAY_MS = 5000;
+const EXIT_DURATION_MS = 820;
 
 const getLogoSrc = (asset: LogoAsset): string => {
   return typeof asset === "string" ? asset : asset.src;
@@ -60,19 +64,23 @@ export function LoginScreen({
 
     const taglineTimeout = window.setTimeout(() => {
       setSuccessPhase("tagline");
-    }, 1600);
+    }, TAGLINE_PHASE_DELAY_MS);
+    const exitTimeout = window.setTimeout(() => {
+      setSuccessPhase("exiting");
+    }, EXIT_PHASE_DELAY_MS);
     const completeTimeout = window.setTimeout(() => {
       onSuccessComplete();
-    }, 5000);
+    }, EXIT_PHASE_DELAY_MS + EXIT_DURATION_MS);
 
     return () => {
       window.clearTimeout(taglineTimeout);
+      window.clearTimeout(exitTimeout);
       window.clearTimeout(completeTimeout);
     };
   }, [isSuccessAnimating, onSuccessComplete]);
 
   return (
-    <main className="cloud-auth-shell">
+    <main className="cloud-auth-shell" data-success-phase={successPhase}>
       <div className="cloud-floating-actions">
         <ThemeToggle />
       </div>
