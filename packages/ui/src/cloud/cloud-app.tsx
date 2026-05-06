@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 import {
   CloudClient,
@@ -18,6 +19,8 @@ const DEFAULT_CLOUD_SERVER_URL = "https://api.heysnap.xyz";
 const DEFAULT_STORAGE_KEY = "ank1015:cloud-session-token";
 const MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX = ":machines-onboarding-shown";
 const MACHINES_REFRESH_INTERVAL_MS = 5000;
+const ACCESS_SESSION_REFRESH_BUFFER_MS = 60_000;
+const CLOUD_SCREEN_TRANSITION = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
 export interface CloudAppProps {
   readonly cloudServerUrl?: string;
@@ -83,6 +86,7 @@ export function CloudApp({
   const [hasLoadedMachines, setHasLoadedMachines] = useState(false);
   const [selectedComputerId, setSelectedComputerId] = useState<string | null>(initialComputerId ?? null);
   const [accessSession, setAccessSession] = useState<ComputerAccessSessionResponse | null>(null);
+  const [accessSessionRefreshTick, setAccessSessionRefreshTick] = useState(0);
   const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [machinesError, setMachinesError] = useState<string | null>(null);
@@ -99,6 +103,7 @@ export function CloudApp({
   const selectedComputer = selectedComputerId === null
     ? null
     : computers.find((computer) => computer.id === selectedComputerId) ?? null;
+  const selectedComputerKind = selectedComputer?.kind ?? null;
   const localComputerForThisDevice = useMemo(() => {
     if (localMachinePreview === null) {
       return null;
@@ -344,6 +349,27 @@ export function CloudApp({
   }, [initialComputerId]);
 
   useEffect(() => {
+    if (accessSession === null) {
+      return;
+    }
+
+    const expiresAt = Date.parse(accessSession.accessSession.expiresAt);
+
+    if (!Number.isFinite(expiresAt)) {
+      return;
+    }
+
+    const refreshDelay = Math.max(0, expiresAt - Date.now() - ACCESS_SESSION_REFRESH_BUFFER_MS);
+    const refreshTimer = window.setTimeout(() => {
+      setAccessSessionRefreshTick((currentTick) => currentTick + 1);
+    }, refreshDelay);
+
+    return () => {
+      window.clearTimeout(refreshTimer);
+    };
+  }, [accessSession]);
+
+  useEffect(() => {
     if (authState !== "authenticated" || token === null || selectedComputerId === null) {
       return;
     }
@@ -359,10 +385,18 @@ export function CloudApp({
       return;
     }
 
+    if (isAccessSessionUsable(accessSession, selectedComputerId)) {
+      setIsLoadingWorkspace(false);
+      setWorkspaceError(null);
+      return;
+    }
+
     let isCurrent = true;
     setIsLoadingWorkspace(true);
     setWorkspaceError(null);
-    setAccessSession(null);
+    if (accessSession?.accessSession.computerId !== selectedComputerId) {
+      setAccessSession(null);
+    }
 
     void client.createComputerAccessSession(token, selectedComputerId)
       .then((response) => {
@@ -391,7 +425,17 @@ export function CloudApp({
     return () => {
       isCurrent = false;
     };
-  }, [authState, clearSession, client, localWorkspaceUrls, selectedComputer, selectedComputerId, token]);
+  }, [
+    accessSession,
+    accessSessionRefreshTick,
+    authState,
+    clearSession,
+    client,
+    localWorkspaceUrls,
+    selectedComputerId,
+    selectedComputerKind,
+    token,
+  ]);
 
   const login = async (input: { readonly email: string; readonly password: string }): Promise<boolean> => {
     setIsLoggingIn(true);
@@ -520,16 +564,19 @@ export function CloudApp({
     setIsRemoteMachineCreateVisible(false);
   };
 
+  let screenKey: string;
+  let screenContent: React.ReactElement;
+
   if (authState === "checking") {
-    return (
+    screenKey = "auth-checking";
+    screenContent = (
       <main className="cloud-shell">
         <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
-  }
-
-  if (authState === "unauthenticated" || user === null) {
-    return (
+  } else if (authState === "unauthenticated" || user === null) {
+    screenKey = "login";
+    screenContent = (
       <LoginScreen
         error={loginError}
         isSubmitting={isLoggingIn}
@@ -537,18 +584,16 @@ export function CloudApp({
         onSubmit={login}
       />
     );
-  }
-
-  if (isPreparingLocalMachineGate || isPreparingFirstRemoteMachineGate) {
-    return (
+  } else if (isPreparingLocalMachineGate || isPreparingFirstRemoteMachineGate) {
+    screenKey = "preparing";
+    screenContent = (
       <main className="cloud-shell">
         <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
-  }
-
-  if (shouldShowLocalMachineOnboarding && localMachinePreview !== null) {
-    return (
+  } else if (shouldShowLocalMachineOnboarding && localMachinePreview !== null) {
+    screenKey = "local-machine-onboarding";
+    screenContent = (
       <LocalMachineOnboardingScreen
         error={localMachineRegistrationError}
         hasExistingMachines={computers.length > 0}
@@ -558,10 +603,9 @@ export function CloudApp({
         onLogout={logout}
       />
     );
-  }
-
-  if (shouldShowFirstRemoteMachineCreate || isRemoteMachineCreateVisible) {
-    return (
+  } else if (shouldShowFirstRemoteMachineCreate || isRemoteMachineCreateVisible) {
+    screenKey = "remote-machine-create";
+    screenContent = (
       <RemoteMachineCreateScreen
         error={machinesError}
         isSubmitting={isCreatingMachine}
@@ -571,22 +615,19 @@ export function CloudApp({
         showBackButton={!shouldShowFirstRemoteMachineCreate}
       />
     );
-  }
-
-  if (selectedComputerId !== null) {
+  } else if (selectedComputerId !== null) {
     if (selectedComputer !== null && localWorkspaceUrls !== null) {
-      return (
+      screenKey = `local-workspace:${selectedComputer.id}`;
+      screenContent = (
         <MachineWorkspace
           agentWebsocketUrl={localWorkspaceUrls.agentWebSocketUrl}
           computer={selectedComputer}
           filesystemWebsocketUrl={localWorkspaceUrls.filesystemWebSocketUrl}
-          onBack={closeMachine}
         />
       );
-    }
-
-    if (selectedComputer === null || accessSession === null) {
-      return (
+    } else if (selectedComputer === null || accessSession === null) {
+      screenKey = "workspace-state";
+      screenContent = (
         <main className="cloud-shell">
           <div className="cloud-workspace-state">
             <button className="cloud-text-button" type="button" onClick={closeMachine}>Machines</button>
@@ -596,41 +637,57 @@ export function CloudApp({
           </div>
         </main>
       );
+    } else {
+      screenKey = `remote-workspace:${selectedComputer.id}`;
+      screenContent = (
+        <MachineWorkspace
+          agentWebsocketUrl={buildGatewayWebsocketUrl({
+            baseUrl: client.baseUrl,
+            path: accessSession.routes.agentWebSocketUrl,
+            token: accessSession.accessSession.token,
+          })}
+          computer={selectedComputer}
+          filesystemWebsocketUrl={buildGatewayWebsocketUrl({
+            baseUrl: client.baseUrl,
+            path: accessSession.routes.filesystemWebSocketUrl,
+            token: accessSession.accessSession.token,
+          })}
+        />
+      );
     }
-
-    return (
-      <MachineWorkspace
-        agentWebsocketUrl={buildGatewayWebsocketUrl({
-          baseUrl: client.baseUrl,
-          path: accessSession.routes.agentWebSocketUrl,
-          token: accessSession.accessSession.token,
-        })}
-        computer={selectedComputer}
-        filesystemWebsocketUrl={buildGatewayWebsocketUrl({
-          baseUrl: client.baseUrl,
-          path: accessSession.routes.filesystemWebSocketUrl,
-          token: accessSession.accessSession.token,
-        })}
-        onBack={closeMachine}
+  } else {
+    screenKey = "machines";
+    screenContent = (
+      <MyMachinesScreen
+        activeLocalComputerId={activeLocalComputerId}
+        computers={computers}
+        error={machinesError ?? localMachineRegistrationError}
+        isCreatingMachine={isCreatingMachine}
+        isLoading={isLoadingMachines}
+        onOpenMachine={openMachine}
+        onLogout={logout}
+        onDismissOnboarding={dismissMachinesOnboarding}
+        onRefresh={refreshMachines}
+        onStartCreateMachine={startRemoteMachineCreate}
+        showOnboardingModal={!hasSeenMachinesOnboarding}
+        user={user}
       />
     );
   }
 
   return (
-    <MyMachinesScreen
-      activeLocalComputerId={activeLocalComputerId}
-      computers={computers}
-      error={machinesError ?? localMachineRegistrationError}
-      isCreatingMachine={isCreatingMachine}
-      isLoading={isLoadingMachines}
-      onOpenMachine={openMachine}
-      onLogout={logout}
-      onDismissOnboarding={dismissMachinesOnboarding}
-      onRefresh={refreshMachines}
-      onStartCreateMachine={startRemoteMachineCreate}
-      showOnboardingModal={!hasSeenMachinesOnboarding}
-      user={user}
-    />
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={screenKey}
+        className="cloud-screen-transition"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={CLOUD_SCREEN_TRANSITION}
+      >
+        {screenContent}
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -712,6 +769,19 @@ const isAuthFailure = (error: unknown): boolean =>
   error !== null &&
   "status" in error &&
   (error as { readonly status?: unknown }).status === 401;
+
+const isAccessSessionUsable = (
+  response: ComputerAccessSessionResponse | null,
+  computerId: string,
+): boolean => {
+  if (response === null || response.accessSession.computerId !== computerId) {
+    return false;
+  }
+
+  const expiresAt = Date.parse(response.accessSession.expiresAt);
+
+  return Number.isFinite(expiresAt) && expiresAt - Date.now() > ACCESS_SESSION_REFRESH_BUFFER_MS;
+};
 
 const buildGatewayWebsocketUrl = (input: {
   readonly baseUrl: string;

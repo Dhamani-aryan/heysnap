@@ -9,7 +9,7 @@ import { ThreadHistoryButton } from "../agent/thread-history";
 import type { AgentThreadSummary } from "../agent/types";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
-import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
+import { FilesystemClient } from "./filesystem-client";
 import { ThemeToggle } from "./theme-toggle";
 import type { FilesystemEntry, FilesystemListing } from "./types";
 
@@ -68,11 +68,13 @@ const getInitialLeftPaneRatio = (): number => {
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentWebsocketUrl?: string;
+  readonly onFilesystemOpen?: () => void;
 }
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentWebsocketUrl = "ws://localhost:4000/agent",
+  onFilesystemOpen,
 }: FilesystemExplorerProps): React.ReactElement {
   const clientRef = useRef<FilesystemClient | null>(null);
   const [history, setHistory] = useState<string[]>([]);
@@ -85,8 +87,6 @@ export function FilesystemExplorer({
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
-  const [filesystemConnectionStatus, setFilesystemConnectionStatus] =
-    useState<FilesystemConnectionStatus>("connecting");
   const currentPath = listing?.path ?? "";
 
   useEffect(() => {
@@ -96,7 +96,7 @@ export function FilesystemExplorer({
       },
       onLoading: setIsFetching,
       onError: setListingError,
-      onConnectionStatus: setFilesystemConnectionStatus,
+      onOpen: onFilesystemOpen,
     });
 
     clientRef.current = client;
@@ -106,7 +106,7 @@ export function FilesystemExplorer({
       client.close();
       clientRef.current = null;
     };
-  }, [websocketUrl]);
+  }, [onFilesystemOpen, websocketUrl]);
 
   const handleLeftPaneRatioChange = useCallback((ratio: number): void => {
     const nextRatio = clampPaneRatio(ratio);
@@ -289,7 +289,6 @@ export function FilesystemExplorer({
         onForward={onForward}
         title={listing?.name ?? "Desktop"}
         isFetching={isFetching}
-        filesystemConnectionStatus={filesystemConnectionStatus}
         agentWebsocketUrl={agentWebsocketUrl}
         selectedThreadId={selectedThread?.id ?? null}
         onSelectThread={setSelectedThread}
@@ -342,7 +341,6 @@ const FinderToolbar = ({
   onForward,
   title,
   isFetching,
-  filesystemConnectionStatus,
   agentWebsocketUrl,
   selectedThreadId,
   onSelectThread,
@@ -354,7 +352,6 @@ const FinderToolbar = ({
   readonly onForward: () => void;
   readonly title: string;
   readonly isFetching: boolean;
-  readonly filesystemConnectionStatus: FilesystemConnectionStatus;
   readonly agentWebsocketUrl: string;
   readonly selectedThreadId: string | null;
   readonly onSelectThread: (thread: AgentThreadSummary) => void;
@@ -374,13 +371,10 @@ const FinderToolbar = ({
       <div className="tab-strip-wrap">
         <button
           type="button"
-          title={`${title} - Local`}
+          title={title}
           className="directory-tab active"
-          data-connection-status={filesystemConnectionStatus}
         >
-          <span className="directory-tab-status" aria-hidden="true" />
           <span className="directory-tab-title">{title}</span>
-          <span className="directory-tab-location">- Local</span>
         </button>
 
         <div className="tab-strip" />
