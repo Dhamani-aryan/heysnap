@@ -118,13 +118,29 @@ export class FilesystemService {
       throw new FilesystemError("NOT_DIRECTORY", "Path is not a directory");
     }
 
-    const targetPaths = files.map((file) => {
+    const uploadItems = files.map((file) => {
       const relativePath = validateUploadRelativePath(file.relativePath);
+      const type = file.type ?? "file";
+
+      if (type !== "file" && type !== "directory") {
+        throw new FilesystemError("INVALID_UPLOAD", "Upload item type is invalid");
+      }
+
+      if (type === "file" && typeof file.contentBase64 !== "string") {
+        throw new FilesystemError("INVALID_UPLOAD_CONTENT", "Upload file content is required");
+      }
+
+      if (type === "directory" && file.contentBase64 !== undefined) {
+        throw new FilesystemError("INVALID_UPLOAD_CONTENT", "Upload folders cannot include file content");
+      }
+
       const targetPath = join(directoryPath, ...relativePath.split("/"));
       ensureWithinRoot(this.rootPath, targetPath);
       ensureWithinRoot(directoryPath, targetPath);
-      return targetPath;
+
+      return { file, targetPath, type };
     });
+    const targetPaths = uploadItems.map((item) => item.targetPath);
 
     const uniquePaths = new Set(targetPaths);
 
@@ -136,27 +152,43 @@ export class FilesystemService {
 
     const uploadedEntries: FilesystemEntry[] = [];
 
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      const targetPath = targetPaths[index];
+    const directoryItems = uploadItems
+      .filter((item) => item.type === "directory")
+      .sort((left, right) => getPathDepth(left.file.relativePath) - getPathDepth(right.file.relativePath));
 
-      if (file === undefined || targetPath === undefined) {
-        continue;
-      }
+    for (const item of directoryItems) {
 
-      const content = decodeBase64(file.contentBase64);
-      await mkdir(dirname(targetPath), { recursive: true });
-      await writeFile(targetPath, content, { flag: "wx" });
+      await mkdir(item.targetPath);
 
-      if (file.updatedAt !== undefined) {
-        const updatedAt = new Date(file.updatedAt);
+      if (item.file.updatedAt !== undefined) {
+        const updatedAt = new Date(item.file.updatedAt);
 
         if (!Number.isNaN(updatedAt.getTime())) {
-          await utimes(targetPath, updatedAt, updatedAt);
+          await utimes(item.targetPath, updatedAt, updatedAt);
         }
       }
 
-      uploadedEntries.push(await this.getEntry(targetPath));
+      uploadedEntries.push(await this.getEntry(item.targetPath));
+    }
+
+    for (const item of uploadItems) {
+      if (item.type !== "file") {
+        continue;
+      }
+
+      const content = decodeBase64(item.file.contentBase64 ?? "");
+      await mkdir(dirname(item.targetPath), { recursive: true });
+      await writeFile(item.targetPath, content, { flag: "wx" });
+
+      if (item.file.updatedAt !== undefined) {
+        const updatedAt = new Date(item.file.updatedAt);
+
+        if (!Number.isNaN(updatedAt.getTime())) {
+          await utimes(item.targetPath, updatedAt, updatedAt);
+        }
+      }
+
+      uploadedEntries.push(await this.getEntry(item.targetPath));
     }
 
     return { entries: uploadedEntries };
@@ -327,6 +359,9 @@ const decodeBase64 = (contentBase64: string): Buffer => {
 
   return Buffer.from(contentBase64, "base64");
 };
+
+const getPathDepth = (relativePath: string): number =>
+  relativePath.split("/").length;
 
 const isNodeError = (value: unknown): value is NodeJS.ErrnoException =>
   value instanceof Error && "code" in value;
