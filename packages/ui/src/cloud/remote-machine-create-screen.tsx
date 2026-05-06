@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings03Icon } from "@hugeicons/core-free-icons";
+import { ArrowLeft01Icon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 
@@ -20,6 +20,7 @@ export interface RemoteMachineCreateScreenProps {
   readonly onBack: () => void;
   readonly onCreateMachine: (input: { readonly name: string }) => Promise<void>;
   readonly onLogout: () => Promise<void>;
+  readonly showBackButton?: boolean;
 }
 
 export function RemoteMachineCreateScreen({
@@ -28,6 +29,7 @@ export function RemoteMachineCreateScreen({
   onBack,
   onCreateMachine,
   onLogout,
+  showBackButton = true,
 }: RemoteMachineCreateScreenProps): React.ReactElement {
   const [name, setName] = useState("");
   const trimmedName = name.trim();
@@ -41,12 +43,9 @@ export function RemoteMachineCreateScreen({
   }, []);
 
   return (
-    <main className="cloud-shell">
+    <main className="cloud-shell cloud-remote-create-shell" data-has-back={showBackButton ? "true" : "false"}>
       <header className="cloud-topbar">
         <div className="cloud-topbar-actions">
-          <button className="cloud-text-button" type="button" onClick={onBack}>
-            Machines
-          </button>
           <ThemeToggle />
           <button
             aria-label="Settings"
@@ -60,7 +59,18 @@ export function RemoteMachineCreateScreen({
         </div>
       </header>
 
-      <section className="cloud-local-onboarding" aria-labelledby="cloud-remote-create-title">
+      {showBackButton ? (
+        <div className="cloud-remote-create-back-row">
+          <button className="cloud-remote-create-back" type="button" aria-label="Back to machines" onClick={onBack}>
+            <HugeiconsIcon icon={ArrowLeft01Icon} size={24} color="currentColor" strokeWidth={1.8} />
+          </button>
+        </div>
+      ) : null}
+
+      <section
+        className="cloud-local-onboarding cloud-remote-create-onboarding"
+        aria-labelledby="cloud-remote-create-title"
+      >
         <form
           className="cloud-local-onboarding-content"
           onSubmit={(event) => {
