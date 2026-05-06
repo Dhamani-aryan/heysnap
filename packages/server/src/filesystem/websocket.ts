@@ -122,6 +122,12 @@ class FilesystemSocketSession {
           await this.publishSnapshot("mutation", message.requestId);
           break;
         }
+        case "upload": {
+          const result = await this.service.uploadFiles(message.path ?? this.activePath, message.files);
+          this.send({ type: "ack", requestId: message.requestId, action: "upload", result });
+          await this.publishSnapshot("mutation", message.requestId);
+          break;
+        }
         case "rename": {
           const entry = await this.service.renameEntry(message.path, message.newName);
           this.send({ type: "ack", requestId: message.requestId, action: "rename", result: entry });
@@ -268,6 +274,8 @@ const isClientMessage = (value: unknown): value is FilesystemClientMessage => {
       return true;
     case "createFolder":
       return optionalString(record["path"]) && optionalString(record["name"]);
+    case "upload":
+      return optionalString(record["path"]) && isUploadFiles(record["files"]);
     case "rename":
       return typeof record["path"] === "string" && typeof record["newName"] === "string";
     case "trash":
@@ -282,6 +290,22 @@ const optionalString = (value: unknown): boolean =>
 
 const optionalBoolean = (value: unknown): boolean =>
   value === undefined || typeof value === "boolean";
+
+const isUploadFiles = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.every((file) => {
+    if (typeof file !== "object" || file === null) {
+      return false;
+    }
+
+    const record = file as Record<string, unknown>;
+
+    return (
+      typeof record["relativePath"] === "string" &&
+      typeof record["contentBase64"] === "string" &&
+      optionalString(record["updatedAt"])
+    );
+  });
 
 const parseBoolean = (rawValue: string | null): boolean => {
   if (rawValue === null) {
