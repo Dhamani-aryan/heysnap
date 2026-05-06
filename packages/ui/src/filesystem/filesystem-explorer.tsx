@@ -3,8 +3,9 @@
 import {
   Add01Icon,
   Download05Icon,
+  FileUploadIcon,
   FolderAddIcon,
-  Upload05Icon,
+  FolderUploadIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +18,22 @@ import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient } from "./filesystem-client";
 import { ThemeToggle } from "./theme-toggle";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
+
+type ReactPdfModule = typeof import("react-pdf");
+type ReactPdfComponents = Pick<ReactPdfModule, "Document" | "Page">;
+type DocxPreviewModule = typeof import("docx-preview");
+type MonacoEditorModule = typeof import("@monaco-editor/react");
+type PromiseWithResolversResult<T> = {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+  readonly reject: (reason?: unknown) => void;
+};
+type PromiseWithResolvers = <T>() => PromiseWithResolversResult<T>;
+
+const PDF_WORKER_SRC = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
 
 const HISTORY_LIMIT = 64;
 const DEFAULT_LEFT_PANE_RATIO = 0.5;
@@ -66,6 +83,13 @@ type UploadProgressState = {
   readonly completedBytes: number;
   readonly totalBytes: number;
   readonly phase: "preparing" | "uploading";
+};
+
+type OpenFileTab = {
+  readonly name: string;
+  readonly path: string;
+  readonly size: number | null;
+  readonly updatedAt: string;
 };
 
 type BrowserFileSystemHandle = {
@@ -144,12 +168,25 @@ export function FilesystemExplorer({
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+  const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const currentPath = listing?.path ?? "";
+  const activeFileTab = activeFilePath === null
+    ? null
+    : openFileTabs.find((tab) => tab.path === activeFilePath) ?? null;
+  const openFileWatchKey = useMemo(
+    () => openFileTabs.map((tab) => tab.path).sort((left, right) => left.localeCompare(right)).join("\0"),
+    [openFileTabs],
+  );
 
   useEffect(() => {
     const client = new FilesystemClient(websocketUrl, {
       onListing: (nextListing) => {
         setListing(nextListing);
+        setOpenFileTabs((currentTabs) => syncOpenFileTabsFromListing(currentTabs, nextListing));
+      },
+      onFileUpdates: ({ entries }) => {
+        setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
       },
       onLoading: setIsFetching,
       onError: setListingError,
@@ -165,6 +202,14 @@ export function FilesystemExplorer({
     };
   }, [onFilesystemOpen, websocketUrl]);
 
+  useEffect(() => {
+    const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
+
+    void clientRef.current?.watchFiles(paths).catch((error) => {
+      setListingError(error instanceof Error ? error.message : "Failed to watch open files.");
+    });
+  }, [openFileWatchKey]);
+
   const handleLeftPaneRatioChange = useCallback((ratio: number): void => {
     const nextRatio = clampPaneRatio(ratio);
 
@@ -175,6 +220,7 @@ export function FilesystemExplorer({
   const subscribeTo = useCallback(async (nextPath: string, shouldPushHistory: boolean): Promise<void> => {
     setIsFetching(true);
     setListingError(null);
+    setActiveFilePath(null);
     await clientRef.current?.subscribe(nextPath);
     setSelectedPaths([]);
     setSelectionAnchorPath(null);
@@ -216,13 +262,54 @@ export function FilesystemExplorer({
     [subscribeTo],
   );
 
+  const openFileTab = useCallback((entry: FilesystemEntry): void => {
+    if (entry.type !== "file") {
+      return;
+    }
+
+    setOpenFileTabs((currentTabs) => {
+      if (currentTabs.some((tab) => tab.path === entry.path)) {
+        return currentTabs.map((tab) => (
+          tab.path === entry.path ? toOpenFileTab(entry) : tab
+        ));
+      }
+
+      return [...currentTabs, toOpenFileTab(entry)];
+    });
+    setActiveFilePath(entry.path);
+  }, []);
+
+  const closeFileTab = useCallback((path: string): void => {
+    setOpenFileTabs((currentTabs) => {
+      const closedIndex = currentTabs.findIndex((tab) => tab.path === path);
+
+      if (closedIndex < 0) {
+        return currentTabs;
+      }
+
+      const nextTabs = currentTabs.filter((tab) => tab.path !== path);
+      setActiveFilePath((currentActivePath) => {
+        if (currentActivePath !== path) {
+          return currentActivePath;
+        }
+
+        return nextTabs[closedIndex]?.path ?? nextTabs[closedIndex - 1]?.path ?? null;
+      });
+
+      return nextTabs;
+    });
+  }, []);
+
   const handleEntryDoubleClick = useCallback(
     (entry: FilesystemEntry) => {
       if (entry.type === "directory") {
         navigateTo(entry.path);
+        return;
       }
+
+      openFileTab(entry);
     },
-    [navigateTo],
+    [navigateTo, openFileTab],
   );
 
   const showEntryInfo = useCallback((entry: FilesystemEntry): void => {
@@ -294,6 +381,13 @@ export function FilesystemExplorer({
       setSelectedPaths([renamed?.path ?? entry.path]);
       setSelectionAnchorPath(renamed?.path ?? entry.path);
       setRenamingPath(null);
+
+      if (entry.type === "file" && renamed?.type === "file") {
+        setOpenFileTabs((currentTabs) => currentTabs.map((tab) => (
+          tab.path === entry.path ? toOpenFileTab(renamed) : tab
+        )));
+        setActiveFilePath((currentActivePath) => currentActivePath === entry.path ? renamed.path : currentActivePath);
+      }
     } catch (error) {
       setListingError(error instanceof Error ? error.message : "Failed to rename item.");
     }
@@ -314,6 +408,10 @@ export function FilesystemExplorer({
       );
       setRenamingPath((currentRenamingPath) =>
         currentRenamingPath !== null && pathsToTrash.includes(currentRenamingPath) ? null : currentRenamingPath,
+      );
+      setOpenFileTabs((currentTabs) => currentTabs.filter((tab) => !pathsToTrash.includes(tab.path)));
+      setActiveFilePath((currentActivePath) =>
+        currentActivePath !== null && pathsToTrash.includes(currentActivePath) ? null : currentActivePath,
       );
     } catch (error) {
       setListingError(error instanceof Error ? error.message : "Failed to move items to Trash.");
@@ -344,8 +442,8 @@ export function FilesystemExplorer({
       return;
     }
 
-    downloadEntries([entry]);
-  }, [downloadEntries, navigateTo]);
+    openFileTab(entry);
+  }, [navigateTo, openFileTab]);
 
   const uploadBrowserSources = useCallback(async (
     sources: readonly BrowserUploadSource[],
@@ -524,6 +622,11 @@ export function FilesystemExplorer({
         selectedThreadId={selectedThread?.id ?? null}
         onSelectThread={setSelectedThread}
         onNewThread={() => setSelectedThread(null)}
+        openFileTabs={openFileTabs}
+        activeFilePath={activeFileTab?.path ?? null}
+        onShowDirectory={() => setActiveFilePath(null)}
+        onSelectFileTab={setActiveFilePath}
+        onCloseFileTab={closeFileTab}
       />
 
       <DesktopSplitPane
@@ -534,37 +637,41 @@ export function FilesystemExplorer({
         currentPath={currentPath}
         onSelectThread={setSelectedThread}
       >
-        <FinderBody
-          error={listingError}
-          isLoading={isFetching && listing === null}
-          entries={listing?.entries ?? []}
-          selectedPaths={selectedPaths}
-          renamingPath={renamingPath}
-          onSelect={selectEntry}
-          onSelectionChange={(paths) => {
-            setSelectedPaths(paths);
-            setSelectionAnchorPath(paths[0] ?? null);
-          }}
-          onActivate={handleEntryDoubleClick}
-          onBackgroundClick={() => {
-            setSelectedPaths([]);
-            setSelectionAnchorPath(null);
-          }}
-          onCreateNewFolder={() => void createNewFolder()}
-          onUploadFiles={() => uploadFilesInputRef.current?.click()}
-          onUploadFolder={chooseUploadFolder}
-          onRenameStart={(entry) => {
-            setSelectedPaths([entry.path]);
-            setSelectionAnchorPath(entry.path);
-            setRenamingPath(entry.path);
-          }}
-          onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
-          onRenameCancel={() => setRenamingPath(null)}
-          onOpenEntry={openEntry}
-          onGetInfo={showEntryInfo}
-          onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
-          onDownloadEntries={downloadEntries}
-        />
+        {activeFileTab === null ? (
+          <FinderBody
+            error={listingError}
+            isLoading={isFetching && listing === null}
+            entries={listing?.entries ?? []}
+            selectedPaths={selectedPaths}
+            renamingPath={renamingPath}
+            onSelect={selectEntry}
+            onSelectionChange={(paths) => {
+              setSelectedPaths(paths);
+              setSelectionAnchorPath(paths[0] ?? null);
+            }}
+            onActivate={handleEntryDoubleClick}
+            onBackgroundClick={() => {
+              setSelectedPaths([]);
+              setSelectionAnchorPath(null);
+            }}
+            onCreateNewFolder={() => void createNewFolder()}
+            onUploadFiles={() => uploadFilesInputRef.current?.click()}
+            onUploadFolder={chooseUploadFolder}
+            onRenameStart={(entry) => {
+              setSelectedPaths([entry.path]);
+              setSelectionAnchorPath(entry.path);
+              setRenamingPath(entry.path);
+            }}
+            onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
+            onRenameCancel={() => setRenamingPath(null)}
+            onOpenEntry={openEntry}
+            onGetInfo={showEntryInfo}
+            onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
+            onDownloadEntries={downloadEntries}
+          />
+        ) : (
+          <FileViewer file={activeFileTab} websocketUrl={websocketUrl} />
+        )}
       </DesktopSplitPane>
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
     </main>
@@ -624,6 +731,11 @@ const FinderToolbar = ({
   selectedThreadId,
   onSelectThread,
   onNewThread,
+  openFileTabs,
+  activeFilePath,
+  onShowDirectory,
+  onSelectFileTab,
+  onCloseFileTab,
 }: {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
@@ -635,6 +747,11 @@ const FinderToolbar = ({
   readonly selectedThreadId: string | null;
   readonly onSelectThread: (thread: AgentThreadSummary) => void;
   readonly onNewThread: () => void;
+  readonly openFileTabs: OpenFileTab[];
+  readonly activeFilePath: string | null;
+  readonly onShowDirectory: () => void;
+  readonly onSelectFileTab: (path: string) => void;
+  readonly onCloseFileTab: (path: string) => void;
 }): React.ReactElement => (
   <div className="finder-toolbar">
     <div className="toolbar-inner">
@@ -651,12 +768,23 @@ const FinderToolbar = ({
         <button
           type="button"
           title={title}
-          className="directory-tab active"
+          className={activeFilePath === null ? "directory-tab active" : "directory-tab"}
+          onClick={onShowDirectory}
         >
           <span className="directory-tab-title">{title}</span>
         </button>
 
-        <div className="tab-strip" />
+        <div className="tab-strip" role="tablist" aria-label="Open files">
+          {openFileTabs.map((tab) => (
+            <FileTab
+              key={tab.path}
+              tab={tab}
+              isActive={tab.path === activeFilePath}
+              onSelect={() => onSelectFileTab(tab.path)}
+              onClose={() => onCloseFileTab(tab.path)}
+            />
+          ))}
+        </div>
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
@@ -676,6 +804,42 @@ const FinderToolbar = ({
       />
       <ThemeToggle />
     </div>
+  </div>
+);
+
+const FileTab = ({
+  tab,
+  isActive,
+  onSelect,
+  onClose,
+}: {
+  readonly tab: OpenFileTab;
+  readonly isActive: boolean;
+  readonly onSelect: () => void;
+  readonly onClose: () => void;
+}): React.ReactElement => (
+  <div className={isActive ? "file-tab active" : "file-tab"} role="tab" aria-selected={isActive}>
+    <button
+      type="button"
+      className="file-tab-activate"
+      title={tab.path}
+      onClick={onSelect}
+      tabIndex={isActive ? 0 : -1}
+    >
+      <span className="file-tab-title">{tab.name}</span>
+    </button>
+    <button
+      type="button"
+      className="file-tab-close"
+      aria-label={`Close ${tab.name}`}
+      title="Close tab"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <CloseIcon />
+    </button>
   </div>
 );
 
@@ -699,6 +863,817 @@ const ToolbarButton = ({
   >
     {children}
   </button>
+);
+
+const FileViewer = ({
+  file,
+  websocketUrl,
+}: {
+  readonly file: OpenFileTab;
+  readonly websocketUrl: string;
+}): React.ReactElement => {
+  const fileVersion = getOpenFileTabVersion(file);
+
+  if (isPdfFile(file.name)) {
+    return (
+      <PdfViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isDocxFile(file.name)) {
+    return (
+      <DocxViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isSpreadsheetFile(file.name)) {
+    return (
+      <PreviewPdfViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
+      />
+    );
+  }
+
+  if (isDelimitedTextFile(file.name)) {
+    return (
+      <DelimitedTextViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+        delimiter={getDelimitedTextDelimiter(file.name)}
+      />
+    );
+  }
+
+  if (isImageFile(file.name)) {
+    return (
+      <ImageViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isCodeFile(file.name)) {
+    return (
+      <CodeViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isPlainTextFile(file.name)) {
+    return (
+      <PlainTextViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isAudioFile(file.name)) {
+    return (
+      <AudioViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isVideoFile(file.name)) {
+    return (
+      <VideoViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  return <FileViewerPlaceholder file={file} />;
+};
+
+const FileViewerPlaceholder = ({
+  file,
+}: {
+  readonly file: OpenFileTab;
+}): React.ReactElement => (
+  <section className="file-viewer-placeholder" aria-label={file.name}>
+    <h1>{file.name}</h1>
+  </section>
+);
+
+const PdfViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [numPages, setNumPages] = useState(0);
+  const [pageWidth, setPageWidth] = useState(720);
+  const [reactPdf, setReactPdf] = useState<ReactPdfComponents | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+
+    if (viewport === null) {
+      return;
+    }
+
+    const updateWidth = (): void => {
+      const nextWidth = Math.floor(viewport.getBoundingClientRect().width - 48);
+      setPageWidth(Math.max(240, nextWidth));
+    };
+
+    updateWidth();
+    const resizeObserver = new ResizeObserver(updateWidth);
+    resizeObserver.observe(viewport);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    installPdfJsPolyfills();
+    void import("react-pdf")
+      .then((module) => {
+        module.pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER_SRC;
+
+        if (!isCancelled) {
+          setReactPdf({
+            Document: module.Document,
+            Page: module.Page,
+          });
+          setLoadError(null);
+        }
+      })
+      .catch((error) => {
+        if (!isCancelled) {
+          setLoadError(toViewerErrorMessage(error, "Failed to load PDF viewer."));
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setNumPages(0);
+  }, [fileUrl]);
+
+  if (loadError !== null) {
+    return (
+      <section ref={viewportRef} className="pdf-viewer" aria-label={fileName}>
+        <PdfViewerState message={loadError} variant="error" />
+      </section>
+    );
+  }
+
+  if (reactPdf === null) {
+    return (
+      <section ref={viewportRef} className="pdf-viewer" aria-label={fileName}>
+        <PdfViewerState message="Loading PDF viewer..." />
+      </section>
+    );
+  }
+
+  const { Document: PdfDocument, Page: PdfPage } = reactPdf;
+
+  return (
+    <section ref={viewportRef} className="pdf-viewer" aria-label={fileName}>
+      <PdfDocument
+        key={fileUrl}
+        file={fileUrl}
+        loading={<PdfViewerState message="Loading PDF..." />}
+        error={<PdfViewerState message="Failed to load PDF." variant="error" />}
+        onLoadSuccess={(document) => setNumPages(document.numPages)}
+        onLoadError={() => setNumPages(0)}
+      >
+        <div className="pdf-pages">
+          {Array.from({ length: numPages }, (_, index) => (
+            <PdfPage
+              key={`${fileUrl}:${String(index + 1)}`}
+              pageNumber={index + 1}
+              width={pageWidth}
+              renderAnnotationLayer={false}
+              renderTextLayer={false}
+              loading={<div className="pdf-page-loading">Loading page...</div>}
+            />
+          ))}
+        </div>
+      </PdfDocument>
+    </section>
+  );
+};
+
+const PdfViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "pdf-viewer-state error" : "pdf-viewer-state"}>
+    <p>{message}</p>
+  </div>
+);
+
+const PreviewPdfViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let objectUrl: string | null = null;
+    let isCancelled = false;
+
+    setPdfUrl(null);
+    setError(null);
+
+    const fetchPreview = async (): Promise<void> => {
+      const response = await fetch(fileUrl, { signal: abortController.signal });
+
+      if (!response.ok) {
+        throw new Error(await readPreviewErrorMessage(response, fileUrl));
+      }
+
+      const blob = await response.blob();
+      objectUrl = URL.createObjectURL(blob);
+
+      if (!isCancelled) {
+        setPdfUrl(objectUrl);
+      }
+    };
+
+    void fetchPreview().catch((fetchError) => {
+      if (!isCancelled && !isAbortError(fetchError)) {
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to load preview.");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+
+      if (objectUrl !== null) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [fileUrl]);
+
+  if (error !== null) {
+    return (
+      <section className="pdf-viewer" aria-label={fileName}>
+        <PdfViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (pdfUrl === null) {
+    return (
+      <section className="pdf-viewer" aria-label={fileName}>
+        <PdfViewerState message="Preparing spreadsheet preview..." />
+      </section>
+    );
+  }
+
+  return <PdfViewer fileName={fileName} fileUrl={pdfUrl} />;
+};
+
+const DocxViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const styleRef = useRef<HTMLDivElement | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    const bodyContainer = bodyRef.current;
+    const styleContainer = styleRef.current;
+
+    if (bodyContainer === null || styleContainer === null) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    bodyContainer.replaceChildren();
+    styleContainer.replaceChildren();
+    setStatus("loading");
+
+    const renderDocument = async (): Promise<void> => {
+      const [module, response] = await Promise.all([
+        import("docx-preview") as Promise<DocxPreviewModule>,
+        fetch(fileUrl, { signal: abortController.signal }),
+      ]);
+
+      if (!response.ok) {
+        throw new Error("Failed to load DOCX.");
+      }
+
+      const blob = await response.blob();
+
+      if (isCancelled) {
+        return;
+      }
+
+      await module.renderAsync(blob, bodyContainer, styleContainer, {
+        className: "docx-document",
+        inWrapper: true,
+      });
+
+      if (!isCancelled) {
+        setStatus("ready");
+      }
+    };
+
+    void renderDocument().catch((error) => {
+      if (!isCancelled && !isAbortError(error)) {
+        bodyContainer.replaceChildren();
+        styleContainer.replaceChildren();
+        setStatus("error");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+      bodyContainer.replaceChildren();
+      styleContainer.replaceChildren();
+    };
+  }, [fileUrl]);
+
+  return (
+    <section className="docx-viewer" aria-label={fileName}>
+      <div ref={styleRef} className="docx-style-host" />
+      {status === "loading" ? <DocxViewerState message="Loading DOCX..." /> : null}
+      {status === "error" ? <DocxViewerState message="Failed to load DOCX." variant="error" /> : null}
+      <div ref={bodyRef} className="docx-body" aria-hidden={status !== "ready" ? "true" : undefined} />
+    </section>
+  );
+};
+
+const DocxViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "docx-viewer-state error" : "docx-viewer-state"}>
+    <p>{message}</p>
+  </div>
+);
+
+const DelimitedTextViewer = ({
+  fileName,
+  fileUrl,
+  delimiter,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+  readonly delimiter: "," | "\t";
+}): React.ReactElement => {
+  const [rows, setRows] = useState<string[][] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    setRows(null);
+    setError(null);
+
+    const loadRows = async (): Promise<void> => {
+      const response = await fetch(fileUrl, { signal: abortController.signal });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load ${delimiter === "\t" ? "TSV" : "CSV"} (${String(response.status)}).`);
+      }
+
+      const text = await response.text();
+      const parsedRows = parseDelimitedText(text, delimiter);
+
+      if (!isCancelled) {
+        setRows(parsedRows);
+      }
+    };
+
+    void loadRows().catch((loadError) => {
+      if (!isCancelled && !isAbortError(loadError)) {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load file.");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [delimiter, fileUrl]);
+
+  if (error !== null) {
+    return (
+      <section className="delimited-viewer" aria-label={fileName}>
+        <DelimitedViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (rows === null) {
+    return (
+      <section className="delimited-viewer" aria-label={fileName}>
+        <DelimitedViewerState message={`Loading ${delimiter === "\t" ? "TSV" : "CSV"}...`} />
+      </section>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <section className="delimited-viewer" aria-label={fileName}>
+        <DelimitedViewerState message="This file is empty." />
+      </section>
+    );
+  }
+
+  const columnCount = Math.max(...rows.map((row) => row.length));
+
+  return (
+    <section className="delimited-viewer" aria-label={fileName}>
+      <div className="delimited-table-wrap">
+        <table className="delimited-table">
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={`row:${String(rowIndex)}`}>
+                {Array.from({ length: columnCount }, (_, columnIndex) => (
+                  <td key={`cell:${String(rowIndex)}:${String(columnIndex)}`}>
+                    {row[columnIndex] ?? ""}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+};
+
+const DelimitedViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "delimited-viewer-state error" : "delimited-viewer-state"}>
+    <p>{message}</p>
+  </div>
+);
+
+const ImageViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [fileUrl]);
+
+  if (hasError) {
+    return (
+      <section className="image-viewer" aria-label={fileName}>
+        <ImageViewerState message="Failed to load image." variant="error" />
+      </section>
+    );
+  }
+
+  return (
+    <section className="image-viewer" aria-label={fileName}>
+      <img
+        src={fileUrl}
+        alt={fileName}
+        className="image-viewer-image"
+        draggable={false}
+        onError={() => setHasError(true)}
+      />
+    </section>
+  );
+};
+
+const ImageViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "image-viewer-state error" : "image-viewer-state"}>
+    <p>{message}</p>
+  </div>
+);
+
+const PlainTextViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    setText(null);
+    setError(null);
+
+    const loadText = async (): Promise<void> => {
+      const response = await fetch(fileUrl, { signal: abortController.signal });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load text (${String(response.status)}).`);
+      }
+
+      const nextText = await response.text();
+
+      if (!isCancelled) {
+        setText(nextText);
+      }
+    };
+
+    void loadText().catch((loadError) => {
+      if (!isCancelled && !isAbortError(loadError)) {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load text.");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [fileUrl]);
+
+  if (error !== null) {
+    return (
+      <section className="text-viewer" aria-label={fileName}>
+        <TextViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (text === null) {
+    return (
+      <section className="text-viewer" aria-label={fileName}>
+        <TextViewerState message="Loading text..." />
+      </section>
+    );
+  }
+
+  return (
+    <section className="text-viewer" aria-label={fileName}>
+      <pre className="text-viewer-content">{text}</pre>
+    </section>
+  );
+};
+
+const TextViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "text-viewer-state error" : "text-viewer-state"}>
+    <p>{message}</p>
+  </div>
+);
+
+const CodeViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editorModule, setEditorModule] = useState<MonacoEditorModule | null>(null);
+  const theme = useResolvedTheme();
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    void import("@monaco-editor/react")
+      .then((module) => {
+        if (!isCancelled) {
+          setEditorModule(module);
+        }
+      })
+      .catch((loadError) => {
+        if (!isCancelled) {
+          setError(toViewerErrorMessage(loadError, "Failed to load code editor."));
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    setCode(null);
+    setError(null);
+
+    const loadCode = async (): Promise<void> => {
+      const response = await fetch(fileUrl, { signal: abortController.signal });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load code (${String(response.status)}).`);
+      }
+
+      const nextCode = await response.text();
+
+      if (!isCancelled) {
+        setCode(nextCode);
+      }
+    };
+
+    void loadCode().catch((loadError) => {
+      if (!isCancelled && !isAbortError(loadError)) {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load code.");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [fileUrl]);
+
+  if (error !== null) {
+    return (
+      <section className="code-viewer" aria-label={fileName}>
+        <CodeViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (editorModule === null || code === null) {
+    return (
+      <section className="code-viewer" aria-label={fileName}>
+        <CodeViewerState message="Loading code..." />
+      </section>
+    );
+  }
+
+  const Editor = editorModule.default;
+
+  return (
+    <section className="code-viewer" aria-label={fileName}>
+      <Editor
+        value={code}
+        language={getCodeLanguage(fileName)}
+        theme={theme === "dark" ? "vs-dark" : "vs"}
+        options={{
+          readOnly: true,
+          minimap: { enabled: false },
+          fontFamily: "var(--font-geist-mono), ui-monospace, Menlo, Monaco, Consolas, monospace",
+          fontSize: 12,
+          lineHeight: 19,
+          renderLineHighlight: "none",
+          scrollBeyondLastLine: false,
+          wordWrap: "on",
+          automaticLayout: true,
+        }}
+      />
+    </section>
+  );
+};
+
+const CodeViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "code-viewer-state error" : "code-viewer-state"}>
+    <p>{message}</p>
+  </div>
+);
+
+const AudioViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [fileUrl]);
+
+  if (hasError) {
+    return (
+      <section className="media-viewer" aria-label={fileName}>
+        <MediaViewerState message="Failed to load audio." variant="error" />
+      </section>
+    );
+  }
+
+  return (
+    <section className="media-viewer" aria-label={fileName}>
+      <div className="audio-player-shell">
+        <p>{fileName}</p>
+        <audio
+          src={fileUrl}
+          controls
+          className="audio-player"
+          onError={() => setHasError(true)}
+        />
+      </div>
+    </section>
+  );
+};
+
+const VideoViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [fileUrl]);
+
+  if (hasError) {
+    return (
+      <section className="media-viewer" aria-label={fileName}>
+        <MediaViewerState message="Failed to load video." variant="error" />
+      </section>
+    );
+  }
+
+  return (
+    <section className="media-viewer" aria-label={fileName}>
+      <video
+        src={fileUrl}
+        controls
+        className="video-player"
+        onError={() => setHasError(true)}
+      />
+    </section>
+  );
+};
+
+const MediaViewerState = ({
+  message,
+  variant = "info",
+}: {
+  readonly message: string;
+  readonly variant?: "info" | "error";
+}): React.ReactElement => (
+  <div className={variant === "error" ? "media-viewer-state error" : "media-viewer-state"}>
+    <p>{message}</p>
+  </div>
 );
 
 const DesktopSplitPane = ({
@@ -1299,12 +2274,12 @@ const DesktopContextMenu = ({
     <ContextMenuDummyItem icon={<InfoIcon />} label="Get Info" />
     <ContextMenuDummyItem label="Change Wallpaper" inset />
     <ContextMenuActionItem
-      icon={<HugeiconsIcon icon={Upload05Icon} size={16} color="currentColor" strokeWidth={1.8} />}
+      icon={<HugeiconsIcon icon={FileUploadIcon} size={16} color="currentColor" strokeWidth={1.8} />}
       label="Upload Files"
       onSelect={onUploadFiles}
     />
     <ContextMenuActionItem
-      icon={<HugeiconsIcon icon={Upload05Icon} size={16} color="currentColor" strokeWidth={1.8} />}
+      icon={<HugeiconsIcon icon={FolderUploadIcon} size={16} color="currentColor" strokeWidth={1.8} />}
       label="Upload Folder"
       onSelect={onUploadFolder}
     />
@@ -1549,6 +2524,17 @@ const InfoIcon = (): React.ReactElement => (
   </IconPath>
 );
 
+const CloseIcon = (): React.ReactElement => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+    <path
+      d="m3.2 3.2 5.6 5.6M8.8 3.2 3.2 8.8"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 const getContentPoint = (
   event: React.PointerEvent<HTMLElement>,
   container: HTMLElement,
@@ -1636,6 +2622,59 @@ const isFilesystemEntry = (value: unknown): value is FilesystemEntry => {
   );
 };
 
+const toOpenFileTab = (entry: FilesystemEntry): OpenFileTab => ({
+  name: entry.name,
+  path: entry.path,
+  size: entry.size,
+  updatedAt: entry.updatedAt,
+});
+
+const syncOpenFileTabsFromListing = (
+  currentTabs: OpenFileTab[],
+  listing: FilesystemListing,
+): OpenFileTab[] => syncOpenFileTabsFromEntries(currentTabs, listing.entries);
+
+const syncOpenFileTabsFromEntries = (
+  currentTabs: OpenFileTab[],
+  entries: readonly FilesystemEntry[],
+): OpenFileTab[] => {
+  if (currentTabs.length === 0) {
+    return currentTabs;
+  }
+
+  const fileEntriesByPath = new Map(
+    entries
+      .filter((entry) => entry.type === "file")
+      .map((entry) => [entry.path, entry]),
+  );
+  let didChange = false;
+  const nextTabs = currentTabs.map((tab) => {
+    const entry = fileEntriesByPath.get(tab.path);
+
+    if (entry === undefined) {
+      return tab;
+    }
+
+    const nextTab = toOpenFileTab(entry);
+
+    if (
+      tab.name === nextTab.name &&
+      tab.path === nextTab.path &&
+      tab.size === nextTab.size &&
+      tab.updatedAt === nextTab.updatedAt
+    ) {
+      return tab;
+    }
+
+    didChange = true;
+    return nextTab;
+  });
+
+  return didChange ? nextTabs : currentTabs;
+};
+
+const getOpenFileTabVersion = (file: OpenFileTab): string => `${file.updatedAt}:${String(file.size ?? "")}`;
+
 const toFilesystemUploadFile = async (source: Extract<BrowserUploadSource, { readonly type: "file" }>): Promise<FilesystemUploadFile> => ({
   type: "file",
   relativePath: source.relativePath,
@@ -1709,6 +2748,235 @@ const getUploadSelectionPaths = (
 const joinClientPath = (directoryPath: string, name: string): string =>
   directoryPath.length === 0 ? name : `${directoryPath}/${name}`;
 
+const isPdfFile = (fileName: string): boolean =>
+  fileName.toLowerCase().endsWith(".pdf");
+
+const isDocxFile = (fileName: string): boolean =>
+  fileName.toLowerCase().endsWith(".docx");
+
+const isSpreadsheetFile = (fileName: string): boolean =>
+  /\.(xls|xlsx)$/iu.test(fileName);
+
+const isDelimitedTextFile = (fileName: string): boolean =>
+  /\.(csv|tsv)$/iu.test(fileName);
+
+const isImageFile = (fileName: string): boolean =>
+  /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/iu.test(fileName);
+
+const isCodeFile = (fileName: string): boolean =>
+  /\.(c|cc|conf|cpp|cs|css|env|go|h|hpp|html?|ini|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|xml|ya?ml)$/iu.test(fileName);
+
+const isPlainTextFile = (fileName: string): boolean =>
+  /\.(log|text|txt)$/iu.test(fileName);
+
+const isAudioFile = (fileName: string): boolean =>
+  /\.(aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav|weba)$/iu.test(fileName);
+
+const isVideoFile = (fileName: string): boolean =>
+  /\.(m4v|mov|mp4|mpeg|mpg|ogv|webm)$/iu.test(fileName);
+
+const getCodeLanguage = (fileName: string): string => {
+  const extension = getFileExtension(fileName);
+  const languageByExtension: Record<string, string> = {
+    c: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    cs: "csharp",
+    css: "css",
+    go: "go",
+    h: "cpp",
+    hpp: "cpp",
+    htm: "html",
+    html: "html",
+    java: "java",
+    js: "javascript",
+    json: "json",
+    jsx: "javascript",
+    md: "markdown",
+    mjs: "javascript",
+    py: "python",
+    rb: "ruby",
+    rs: "rust",
+    sh: "shell",
+    sql: "sql",
+    ts: "typescript",
+    tsx: "typescript",
+    xml: "xml",
+    yaml: "yaml",
+    yml: "yaml",
+  };
+
+  return languageByExtension[extension] ?? "plaintext";
+};
+
+const getFileExtension = (fileName: string): string => {
+  const extensionIndex = fileName.lastIndexOf(".");
+
+  return extensionIndex >= 0 ? fileName.slice(extensionIndex + 1).toLowerCase() : "";
+};
+
+const useResolvedTheme = (): "light" | "dark" => {
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof document !== "undefined" && document.documentElement.classList.contains("dark")) {
+      return "dark";
+    }
+
+    return "light";
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const updateTheme = (): void => {
+      setTheme(root.classList.contains("dark") ? "dark" : "light");
+    };
+    const observer = new MutationObserver(updateTheme);
+
+    updateTheme();
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  return theme;
+};
+
+const getDelimitedTextDelimiter = (fileName: string): "," | "\t" =>
+  fileName.toLowerCase().endsWith(".tsv") ? "\t" : ",";
+
+const parseDelimitedText = (text: string, delimiter: "," | "\t"): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let index = 0;
+  let isQuoted = false;
+
+  while (index < text.length) {
+    const character = text[index];
+    const nextCharacter = text[index + 1];
+
+    if (isQuoted) {
+      if (character === "\"" && nextCharacter === "\"") {
+        cell += "\"";
+        index += 2;
+        continue;
+      }
+
+      if (character === "\"") {
+        isQuoted = false;
+        index += 1;
+        continue;
+      }
+
+      cell += character;
+      index += 1;
+      continue;
+    }
+
+    if (character === "\"" && cell.length === 0) {
+      isQuoted = true;
+      index += 1;
+      continue;
+    }
+
+    if (character === delimiter) {
+      row.push(cell);
+      cell = "";
+      index += 1;
+      continue;
+    }
+
+    if (character === "\n" || character === "\r") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      index += character === "\r" && nextCharacter === "\n" ? 2 : 1;
+      continue;
+    }
+
+    cell += character;
+    index += 1;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+};
+
+const installPdfJsPolyfills = (): void => {
+  const promiseConstructor = Promise as PromiseConstructor & {
+    withResolvers?: PromiseWithResolvers;
+  };
+
+  if (promiseConstructor.withResolvers !== undefined) {
+    return;
+  }
+
+  promiseConstructor.withResolvers = <T,>(): PromiseWithResolversResult<T> => {
+    let resolveValue: (value: T | PromiseLike<T>) => void = () => {};
+    let rejectValue: (reason?: unknown) => void = () => {};
+    const promise = new Promise<T>((resolve, reject) => {
+      resolveValue = resolve;
+      rejectValue = reject;
+    });
+
+    return {
+      promise,
+      resolve: resolveValue,
+      reject: rejectValue,
+    };
+  };
+};
+
+const readPreviewErrorMessage = async (response: Response, url: string): Promise<string> => {
+  try {
+    const body = await response.json() as {
+      readonly code?: unknown;
+      readonly message?: unknown;
+      readonly error?: {
+        readonly code?: unknown;
+        readonly message?: unknown;
+      };
+    };
+
+    if (typeof body.message === "string" && body.message.length > 0) {
+      return body.message;
+    }
+
+    if (typeof body.error?.message === "string" && body.error.message.length > 0) {
+      if (response.status === 404 && url.includes("/filesystem/preview")) {
+        return "Spreadsheet preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
+      }
+
+      return body.error.message;
+    }
+  } catch {
+    // Fall through to the status-based message when the response is not JSON.
+  }
+
+  if (response.status === 404 && url.includes("/filesystem/preview")) {
+    return "Spreadsheet preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
+  }
+
+  return `Failed to load preview (${String(response.status)}).`;
+};
+
+const toViewerErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message.length > 0) {
+    return `${fallback}: ${error.message}`;
+  }
+
+  return fallback;
+};
+
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) {
     return `${String(bytes)} B`;
@@ -1729,6 +2997,7 @@ const formatBytes = (bytes: number): string => {
 const buildFilesystemDownloadUrl = (
   filesystemWebsocketUrl: string,
   paths: readonly string[],
+  version?: string,
 ): string => {
   const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
   const url = new URL(filesystemWebsocketUrl, baseUrl);
@@ -1742,9 +3011,41 @@ const buildFilesystemDownloadUrl = (
   url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/download");
   url.searchParams.delete("path");
   url.searchParams.delete("showHidden");
+  url.searchParams.delete("v");
   paths.forEach((path) => {
     url.searchParams.append("path", path);
   });
+  if (version !== undefined) {
+    url.searchParams.set("v", version);
+  }
+
+  return url.toString();
+};
+
+const buildFilesystemPreviewUrl = (
+  filesystemWebsocketUrl: string,
+  path: string,
+  format: "pdf",
+  version?: string,
+): string => {
+  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const url = new URL(filesystemWebsocketUrl, baseUrl);
+
+  if (url.protocol === "ws:") {
+    url.protocol = "http:";
+  } else if (url.protocol === "wss:") {
+    url.protocol = "https:";
+  }
+
+  url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/preview");
+  url.searchParams.delete("path");
+  url.searchParams.delete("showHidden");
+  url.searchParams.delete("v");
+  url.searchParams.set("path", path);
+  url.searchParams.set("format", format);
+  if (version !== undefined) {
+    url.searchParams.set("v", version);
+  }
 
   return url.toString();
 };
