@@ -87,10 +87,17 @@ describe("filesystem websocket", () => {
     client.socket.send(JSON.stringify({
       type: "upload",
       requestId: "upload-1",
-      files: [{
-        relativePath: "notes/today.txt",
-        contentBase64: Buffer.from("hello upload").toString("base64"),
-      }],
+      files: [
+        {
+          type: "directory",
+          relativePath: "notes",
+        },
+        {
+          type: "file",
+          relativePath: "notes/today.txt",
+          contentBase64: Buffer.from("hello upload").toString("base64"),
+        },
+      ],
     }));
 
     expect(await client.next("ack")).toMatchObject({
