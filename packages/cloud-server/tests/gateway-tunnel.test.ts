@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CloudServerConfig } from "../src/config.js";
 import { hashToken } from "../src/auth/tokens.js";
 import { GatewayAccessService } from "../src/gateway/access-sessions.js";
-import { attachGatewayTunnelServer } from "../src/gateway/tunnel.js";
+import { attachGatewayTunnelServer, normalizeWebSocketCloseCode } from "../src/gateway/tunnel.js";
 import { InMemoryCloudStore } from "./in-memory-store.js";
 
 const config: CloudServerConfig = {
@@ -118,6 +118,14 @@ describe("gateway tunnel", () => {
 
     await expect(openWebSocket(`${baseUrl}/gateway/computers/${computer.id}/filesystem`)).rejects.toThrow();
     await closeServer(server);
+  });
+
+  it("normalizes reserved websocket close codes before forwarding them", () => {
+    expect(normalizeWebSocketCloseCode(1005)).toBe(1000);
+    expect(normalizeWebSocketCloseCode(1006)).toBe(1000);
+    expect(normalizeWebSocketCloseCode(1015)).toBe(1000);
+    expect(normalizeWebSocketCloseCode(1011)).toBe(1011);
+    expect(normalizeWebSocketCloseCode(4000)).toBe(4000);
   });
 });
 
