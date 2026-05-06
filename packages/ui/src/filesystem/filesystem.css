@@ -179,28 +179,10 @@ button:disabled {
   color: rgba(0, 0, 0, 0.78);
 }
 
-.directory-tab-status {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.22);
-}
-
-.directory-tab[data-connection-status="alive"] .directory-tab-status {
-  background: #18a058;
-  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.14);
-}
-
 .directory-tab-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.directory-tab-location {
-  flex: 0 0 auto;
-  color: rgba(0, 0, 0, 0.6);
 }
 
 .directory-tab:hover {
@@ -213,19 +195,6 @@ button:disabled {
 
 :root.dark .directory-tab.active {
   color: rgba(255, 255, 255, 0.82);
-}
-
-:root.dark .directory-tab-status {
-  background: rgba(255, 255, 255, 0.28);
-}
-
-:root.dark .directory-tab[data-connection-status="alive"] .directory-tab-status {
-  background: #32d074;
-  box-shadow: 0 0 0 2px rgba(50, 208, 116, 0.16);
-}
-
-:root.dark .directory-tab-location {
-  color: rgba(255, 255, 255, 0.55);
 }
 
 :root.dark .directory-tab:hover {

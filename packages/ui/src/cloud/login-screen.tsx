@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 import darkLogoUrl from "../../../../apps/assets/heysnap-dark-logo.gif";
 import lightLogoUrl from "../../../../apps/assets/heysnap-light-logo.gif";
@@ -12,6 +13,9 @@ type SuccessPhase = "idle" | "welcome" | "tagline" | "exiting";
 const TAGLINE_PHASE_DELAY_MS = 1600;
 const EXIT_PHASE_DELAY_MS = 5000;
 const EXIT_DURATION_MS = 820;
+const PANEL_EASE = [0.2, 0.8, 0.2, 1] as const;
+const PANEL_TRANSITION = { duration: 0.72, ease: PANEL_EASE };
+const TEXT_TRANSITION = { duration: 0.92, ease: PANEL_EASE };
 
 const getLogoSrc = (asset: LogoAsset): string => {
   return typeof asset === "string" ? asset : asset.src;
@@ -35,6 +39,10 @@ export function LoginScreen({
   const [isInvalidFeedbackVisible, setIsInvalidFeedbackVisible] = useState(false);
   const [successPhase, setSuccessPhase] = useState<SuccessPhase>("idle");
   const isSuccessAnimating = successPhase !== "idle";
+  const successCopy = successPhase === "tagline" || successPhase === "exiting"
+    ? "Get your work done in a snap!"
+    : "Welcome to Heysnap!";
+  const successCopyKey = successPhase === "tagline" || successPhase === "exiting" ? "tagline" : "welcome";
 
   useEffect(() => {
     if (error === null) {
@@ -84,10 +92,13 @@ export function LoginScreen({
       <div className="cloud-floating-actions">
         <ThemeToggle />
       </div>
-      <form
+      <motion.form
         className="cloud-auth-panel"
         data-invalid-feedback={isInvalidFeedbackVisible ? "true" : undefined}
         data-success-phase={successPhase}
+        initial={false}
+        animate={{ y: isSuccessAnimating ? 32 : -48 }}
+        transition={PANEL_TRANSITION}
         onSubmit={(event) => {
           event.preventDefault();
           if (isSuccessAnimating) {
@@ -102,7 +113,13 @@ export function LoginScreen({
           });
         }}
       >
-        <div className="cloud-auth-brand" aria-label="Heysnap">
+        <motion.div
+          className="cloud-auth-brand"
+          aria-label="Heysnap"
+          initial={false}
+          animate={{ scale: isSuccessAnimating ? 1.08 : 1 }}
+          transition={PANEL_TRANSITION}
+        >
           <img
             className="cloud-auth-logo cloud-auth-logo-light"
             src={getLogoSrc(lightLogoUrl)}
@@ -114,14 +131,23 @@ export function LoginScreen({
             alt=""
           />
           <div className="cloud-auth-wordmark" aria-live="polite">
-            <span className="cloud-auth-wordmark-text cloud-auth-wordmark-welcome">
-              Welcome to Heysnap!
-            </span>
-            <span className="cloud-auth-wordmark-text cloud-auth-wordmark-tagline">
-              Get your work done in a snap!
-            </span>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={successCopyKey}
+                className="cloud-auth-wordmark-text"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{
+                  ...TEXT_TRANSITION,
+                  delay: successCopyKey === "tagline" ? 0.3 : 0,
+                }}
+              >
+                {successCopy}
+              </motion.span>
+            </AnimatePresence>
           </div>
-        </div>
+        </motion.div>
 
         <div className="cloud-auth-fields" aria-hidden={isSuccessAnimating ? "true" : undefined}>
           <label className="cloud-field">
@@ -161,7 +187,7 @@ export function LoginScreen({
             {isSubmitting ? "Signing in..." : "Sign in"}
           </button>
         </div>
-      </form>
+      </motion.form>
     </main>
   );
 }
