@@ -110,7 +110,10 @@ class MachineTunnelClient {
         break;
       }
       case "close":
-        this.localConnections.get(message.connectionId)?.webSocket.close(message.code ?? 1000, message.reason);
+        this.localConnections.get(message.connectionId)?.webSocket.close(
+          normalizeWebSocketCloseCode(message.code),
+          message.reason,
+        );
         this.localConnections.delete(message.connectionId);
         break;
     }
@@ -141,7 +144,7 @@ class MachineTunnelClient {
       this.sendToCloud({
         type: "close",
         connectionId,
-        code,
+        code: normalizeWebSocketCloseCode(code),
         reason: reason.toString("utf8"),
       });
     });
@@ -267,4 +270,20 @@ const rawDataToBase64 = (data: RawData): string => {
   }
 
   return Buffer.concat(data).toString("base64");
+};
+
+export const normalizeWebSocketCloseCode = (code: number | undefined): number => {
+  if (code === undefined) {
+    return 1000;
+  }
+
+  if (code === 1000 || (code >= 3000 && code <= 4999)) {
+    return code;
+  }
+
+  if (code >= 1001 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) {
+    return code;
+  }
+
+  return 1000;
 };
