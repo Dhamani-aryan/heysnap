@@ -16,6 +16,8 @@ import { RemoteMachineCreateScreen } from "./remote-machine-create-screen";
 
 const DEFAULT_CLOUD_SERVER_URL = "https://api.heysnap.xyz";
 const DEFAULT_STORAGE_KEY = "ank1015:cloud-session-token";
+const MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX = ":machines-onboarding-shown";
+const MACHINES_REFRESH_INTERVAL_MS = 5000;
 
 export interface CloudAppProps {
   readonly cloudServerUrl?: string;
@@ -69,10 +71,14 @@ export function CloudApp({
   storageKey = DEFAULT_STORAGE_KEY,
 }: CloudAppProps): React.ReactElement {
   const client = useMemo(() => new CloudClient(cloudServerUrl), [cloudServerUrl]);
+  const machinesOnboardingStorageKey = `${storageKey}${MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX}`;
   const shouldManageLocalMachine = includeLocalMachine && localMachineBridge !== undefined;
   const lastLocalSyncKeyRef = useRef<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<CloudUser | null>(null);
+  const [hasSeenMachinesOnboarding, setHasSeenMachinesOnboarding] = useState(() =>
+    readStoredBoolean(machinesOnboardingStorageKey),
+  );
   const [computers, setComputers] = useState<CloudComputer[]>([]);
   const [hasLoadedMachines, setHasLoadedMachines] = useState(false);
   const [selectedComputerId, setSelectedComputerId] = useState<string | null>(initialComputerId ?? null);
@@ -110,18 +116,27 @@ export function CloudApp({
   const isPreparingLocalMachineGate = shouldManageLocalMachine &&
     authState === "authenticated" &&
     (hasLoadedMachines === false || (localMachinePreview === null && localMachineRegistrationError === null));
+  const isPreparingFirstRemoteMachineGate = !includeLocalMachine &&
+    authState === "authenticated" &&
+    hasLoadedMachines === false;
   const shouldShowLocalMachineOnboarding = shouldManageLocalMachine &&
     hasLoadedMachines &&
     localMachinePreview !== null &&
     localComputerForThisDevice === null &&
     (localMachineStatus === null || localMachineStatus.cloud.computer === null) &&
     machinesError === null;
+  const shouldShowFirstRemoteMachineCreate = !includeLocalMachine &&
+    hasLoadedMachines &&
+    computers.length === 0 &&
+    machinesError === null;
 
   const clearSession = useCallback(() => {
     removeStoredToken(storageKey);
+    removeStoredBoolean(machinesOnboardingStorageKey);
     lastLocalSyncKeyRef.current = null;
     setToken(null);
     setUser(null);
+    setHasSeenMachinesOnboarding(false);
     setComputers([]);
     setHasLoadedMachines(false);
     setSelectedComputerId(null);
@@ -132,7 +147,7 @@ export function CloudApp({
     setLocalMachineRegistrationError(null);
     setIsAddingLocalMachine(false);
     setAuthState("unauthenticated");
-  }, [storageKey]);
+  }, [machinesOnboardingStorageKey, storageKey]);
 
   const upsertComputer = useCallback((computer: CloudComputer): void => {
     setComputers((currentComputers) => [
@@ -187,6 +202,10 @@ export function CloudApp({
 
     return status;
   }, [client.baseUrl, localMachineBridge, token, upsertComputer]);
+
+  useEffect(() => {
+    setHasSeenMachinesOnboarding(readStoredBoolean(machinesOnboardingStorageKey));
+  }, [machinesOnboardingStorageKey]);
 
   useEffect(() => {
     const storedToken = readStoredToken(storageKey);
@@ -305,21 +324,18 @@ export function CloudApp({
   ]);
 
   useEffect(() => {
-    if (
-      authState !== "authenticated" ||
-      !computers.some((computer) => isTransitionalStatus(computer.status))
-    ) {
+    if (authState !== "authenticated") {
       return;
     }
 
     const interval = window.setInterval(() => {
       void refreshMachines();
-    }, 5000);
+    }, MACHINES_REFRESH_INTERVAL_MS);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [authState, computers, refreshMachines]);
+  }, [authState, refreshMachines]);
 
   useEffect(() => {
     setSelectedComputerId(initialComputerId ?? null);
@@ -399,6 +415,11 @@ export function CloudApp({
     setAuthState("authenticated");
   }, []);
 
+  const dismissMachinesOnboarding = useCallback((): void => {
+    writeStoredBoolean(machinesOnboardingStorageKey, true);
+    setHasSeenMachinesOnboarding(true);
+  }, [machinesOnboardingStorageKey]);
+
   const logout = async (): Promise<void> => {
     const currentToken = token;
     clearSession();
@@ -419,6 +440,7 @@ export function CloudApp({
     }
 
     setIsCreatingMachine(true);
+    setIsRemoteMachineCreateVisible(true);
     setMachinesError(null);
 
     try {
@@ -517,7 +539,7 @@ export function CloudApp({
     );
   }
 
-  if (isPreparingLocalMachineGate) {
+  if (isPreparingLocalMachineGate || isPreparingFirstRemoteMachineGate) {
     return (
       <main className="cloud-shell">
         <div className="cloud-loading" role="status" aria-label="Loading" />
@@ -538,7 +560,7 @@ export function CloudApp({
     );
   }
 
-  if (isRemoteMachineCreateVisible) {
+  if (shouldShowFirstRemoteMachineCreate || isRemoteMachineCreateVisible) {
     return (
       <RemoteMachineCreateScreen
         error={machinesError}
@@ -546,6 +568,7 @@ export function CloudApp({
         onBack={closeRemoteMachineCreate}
         onCreateMachine={createMachine}
         onLogout={logout}
+        showBackButton={!shouldShowFirstRemoteMachineCreate}
       />
     );
   }
@@ -602,8 +625,10 @@ export function CloudApp({
       isLoading={isLoadingMachines}
       onOpenMachine={openMachine}
       onLogout={logout}
+      onDismissOnboarding={dismissMachinesOnboarding}
       onRefresh={refreshMachines}
       onStartCreateMachine={startRemoteMachineCreate}
+      showOnboardingModal={!hasSeenMachinesOnboarding}
       user={user}
     />
   );
@@ -646,14 +671,47 @@ const removeStoredToken = (storageKey: string): void => {
   }
 };
 
+const readStoredBoolean = (storageKey: string): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(storageKey) === "true";
+  } catch {
+    return false;
+  }
+};
+
+const writeStoredBoolean = (storageKey: string, value: boolean): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(storageKey, value ? "true" : "false");
+  } catch {
+    // Showing the modal again is acceptable when storage is unavailable.
+  }
+};
+
+const removeStoredBoolean = (storageKey: string): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Nothing else to clear.
+  }
+};
+
 const isAuthFailure = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
   "status" in error &&
   (error as { readonly status?: unknown }).status === 401;
-
-const isTransitionalStatus = (status: string): boolean =>
-  status === "creating" || status === "starting";
 
 const buildGatewayWebsocketUrl = (input: {
   readonly baseUrl: string;
