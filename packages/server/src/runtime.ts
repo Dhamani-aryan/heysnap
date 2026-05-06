@@ -4,7 +4,16 @@ import { basename, resolve } from "node:path";
 import { attachAgentWebSocketServer } from "./agent/websocket.js";
 import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
 import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
-import { handleFilesystemDownloadRequest, sendFilesystemDownloadError } from "./filesystem/download.js";
+import {
+  filesystemDownloadCorsHeaders,
+  handleFilesystemDownloadRequest,
+  sendFilesystemDownloadError,
+} from "./filesystem/download.js";
+import {
+  handleFilesystemPreviewRequest,
+  sendFilesystemPreviewError,
+  type FilesystemPreviewOptions,
+} from "./filesystem/preview.js";
 import { resolveFilesystemRoot } from "./filesystem/paths.js";
 import type { FilesystemRoot } from "./filesystem/types.js";
 
@@ -14,6 +23,7 @@ export interface StartServerOptions {
   readonly filesystemRoot?: string | FilesystemRoot;
   readonly codexBin?: string;
   readonly version?: string;
+  readonly filesystemPreview?: FilesystemPreviewOptions;
 }
 
 export interface LocalServerUrls {
@@ -52,8 +62,27 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
 
     if (requestUrl.pathname === "/filesystem/download") {
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, filesystemDownloadCorsHeaders);
+        response.end();
+        return;
+      }
+
       void handleFilesystemDownloadRequest(request, response, filesystemRoot).catch((error) => {
         sendFilesystemDownloadError(response, error);
+      });
+      return;
+    }
+
+    if (requestUrl.pathname === "/filesystem/preview") {
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, filesystemDownloadCorsHeaders);
+        response.end();
+        return;
+      }
+
+      void handleFilesystemPreviewRequest(request, response, filesystemRoot, options.filesystemPreview).catch((error) => {
+        sendFilesystemPreviewError(response, error);
       });
       return;
     }
