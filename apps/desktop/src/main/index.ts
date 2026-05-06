@@ -49,6 +49,9 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle("local-machine:get-status", () => localMachine.getStatus());
+  ipcMain.handle("local-machine:get-registration-preview", async () =>
+    await localMachine.getRegistrationPreview()
+  );
   ipcMain.handle("local-machine:sync-cloud-session", async (_event, input: SyncCloudSessionInput) =>
     await localMachine.syncCloudSession(input)
   );

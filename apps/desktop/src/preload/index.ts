@@ -8,7 +8,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
 contextBridge.exposeInMainWorld("ank1015LocalMachine", {
   getStatus: () => ipcRenderer.invoke("local-machine:get-status"),
-  syncCloudSession: (input: { readonly cloudServerUrl: string; readonly sessionToken: string }) =>
+  getRegistrationPreview: () => ipcRenderer.invoke("local-machine:get-registration-preview"),
+  syncCloudSession: (input: { readonly cloudServerUrl: string; readonly sessionToken: string; readonly name?: string }) =>
     ipcRenderer.invoke("local-machine:sync-cloud-session", input),
 });
 
