@@ -5,6 +5,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
+type DesktopWindowBridge = {
+  readonly setTitleBarTheme?: (theme: Theme) => Promise<void>;
+  readonly setTitleBarColor?: (color: string) => Promise<void>;
+};
 
 const getInitialTheme = (): Theme => {
   if (typeof window === "undefined") {
@@ -29,6 +33,17 @@ export function ThemeToggle(): React.ReactElement {
     document.documentElement.classList.toggle("dark", theme === "dark");
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("theme", theme);
+    const desktopWindow = (window as Window & { readonly ank1015DesktopWindow?: DesktopWindowBridge })
+      .ank1015DesktopWindow;
+    const cloudBackground = getComputedStyle(document.documentElement)
+      .getPropertyValue("--cloud-bg")
+      .trim();
+
+    void desktopWindow?.setTitleBarTheme?.(theme);
+
+    if (cloudBackground.length > 0) {
+      void desktopWindow?.setTitleBarColor?.(cloudBackground);
+    }
   }, [theme]);
 
   return (

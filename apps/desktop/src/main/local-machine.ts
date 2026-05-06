@@ -1,5 +1,6 @@
 import type { App } from "electron";
 import { startServer, type RunningServer } from "@ank1015-app/server";
+import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -54,6 +55,12 @@ export interface LocalMachineStatus {
 export interface SyncCloudSessionInput {
   readonly cloudServerUrl: string;
   readonly sessionToken: string;
+  readonly name?: string;
+}
+
+export interface LocalMachineRegistrationPreview {
+  readonly localDeviceId: string;
+  readonly name: string;
 }
 
 interface LocalDeviceIdentity {
@@ -108,6 +115,15 @@ export class LocalMachineController {
     };
   }
 
+  async getRegistrationPreview(): Promise<LocalMachineRegistrationPreview> {
+    const localDevice = await this.readLocalDeviceIdentity();
+
+    return {
+      localDeviceId: localDevice.localDeviceId,
+      name: this.readPrettyMachineName(),
+    };
+  }
+
   async syncCloudSession(input: SyncCloudSessionInput): Promise<LocalMachineStatus> {
     if (this.serverState.state !== "running") {
       await this.start();
@@ -125,6 +141,7 @@ export class LocalMachineController {
     try {
       const localDevice = await this.readLocalDeviceIdentity();
       const machineServerVersion = this.readMachineServerVersion();
+      const name = input.name?.trim() || this.readPrettyMachineName();
       const response = await this.request<LocalMachineSyncResponse>(
         cloudServerUrl,
         "/computers/local",
@@ -132,7 +149,7 @@ export class LocalMachineController {
         {
           localDeviceId: localDevice.localDeviceId,
           replacedLocalDeviceIds: localDevice.replacedLocalDeviceIds,
-          name: `${hostname() || "Local"} Machine`,
+          name,
           capabilities: ["filesystem", "agent", "local"],
           machineServerVersion,
         },
@@ -269,6 +286,34 @@ export class LocalMachineController {
   private readMachineServerVersion(): string {
     const appVersion = this.electronApp.getVersion()?.trim();
     return appVersion.length > 0 ? `desktop-${appVersion}` : "desktop-development";
+  }
+
+  private readPrettyMachineName(): string {
+    try {
+      if (process.platform === "darwin") {
+        const name = execSync("scutil --get ComputerName", {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+
+        if (name.length > 0) {
+          return name;
+        }
+      }
+
+      if (process.platform === "win32") {
+        const name = process.env.COMPUTERNAME?.trim();
+
+        if (name !== undefined && name.length > 0) {
+          return name;
+        }
+      }
+    } catch {
+      // Fall back to the OS hostname when the platform-specific name is unavailable.
+    }
+
+    const fallbackName = hostname().trim();
+    return fallbackName.length > 0 ? fallbackName : "Local";
   }
 
   private async readLocalDeviceIdentity(): Promise<LocalDeviceIdentity> {

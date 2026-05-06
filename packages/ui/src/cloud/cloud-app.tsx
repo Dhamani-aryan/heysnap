@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CloudClient,
@@ -8,9 +8,11 @@ import {
   type CloudUser,
   type ComputerAccessSessionResponse,
 } from "./cloud-client";
+import { LocalMachineOnboardingScreen } from "./local-machine-onboarding-screen";
 import { LoginScreen } from "./login-screen";
 import { MachineWorkspace } from "./machine-workspace";
 import { MyMachinesScreen } from "./my-machines-screen";
+import { RemoteMachineCreateScreen } from "./remote-machine-create-screen";
 
 const DEFAULT_CLOUD_SERVER_URL = "https://api.heysnap.xyz";
 const DEFAULT_STORAGE_KEY = "ank1015:cloud-session-token";
@@ -26,10 +28,17 @@ export interface CloudAppProps {
 
 export interface LocalMachineBridge {
   getStatus(): Promise<LocalMachineBridgeStatus>;
+  getRegistrationPreview(): Promise<LocalMachineRegistrationPreview>;
   syncCloudSession(input: {
     readonly cloudServerUrl: string;
     readonly sessionToken: string;
+    readonly name?: string;
   }): Promise<LocalMachineBridgeStatus>;
+}
+
+export interface LocalMachineRegistrationPreview {
+  readonly localDeviceId: string;
+  readonly name: string;
 }
 
 export interface LocalMachineBridgeStatus {
@@ -53,16 +62,19 @@ export interface LocalMachineBridgeStatus {
 
 export function CloudApp({
   cloudServerUrl = DEFAULT_CLOUD_SERVER_URL,
-  includeLocalMachine: _includeLocalMachine = false,
+  includeLocalMachine = false,
   initialComputerId,
   localMachineBridge,
   machineRouteBasePath,
   storageKey = DEFAULT_STORAGE_KEY,
 }: CloudAppProps): React.ReactElement {
   const client = useMemo(() => new CloudClient(cloudServerUrl), [cloudServerUrl]);
+  const shouldManageLocalMachine = includeLocalMachine && localMachineBridge !== undefined;
+  const lastLocalSyncKeyRef = useRef<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<CloudUser | null>(null);
   const [computers, setComputers] = useState<CloudComputer[]>([]);
+  const [hasLoadedMachines, setHasLoadedMachines] = useState(false);
   const [selectedComputerId, setSelectedComputerId] = useState<string | null>(initialComputerId ?? null);
   const [accessSession, setAccessSession] = useState<ComputerAccessSessionResponse | null>(null);
   const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
@@ -73,25 +85,61 @@ export function CloudApp({
   const [isLoadingMachines, setIsLoadingMachines] = useState(false);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [isCreatingMachine, setIsCreatingMachine] = useState(false);
+  const [isRemoteMachineCreateVisible, setIsRemoteMachineCreateVisible] = useState(false);
   const [localMachineStatus, setLocalMachineStatus] = useState<LocalMachineBridgeStatus | null>(null);
+  const [localMachinePreview, setLocalMachinePreview] = useState<LocalMachineRegistrationPreview | null>(null);
+  const [localMachineRegistrationError, setLocalMachineRegistrationError] = useState<string | null>(null);
+  const [isAddingLocalMachine, setIsAddingLocalMachine] = useState(false);
   const selectedComputer = selectedComputerId === null
     ? null
     : computers.find((computer) => computer.id === selectedComputerId) ?? null;
+  const localComputerForThisDevice = useMemo(() => {
+    if (localMachinePreview === null) {
+      return null;
+    }
+
+    return computers.find((computer) =>
+      computer.kind === "local" &&
+      readProviderMetadataString(computer.providerMetadata, "localDeviceId") === localMachinePreview.localDeviceId
+    ) ?? null;
+  }, [computers, localMachinePreview]);
   const localWorkspaceUrls = getLocalWorkspaceUrls(selectedComputer, localMachineStatus);
   const activeLocalComputerId = localMachineStatus?.server.state === "running"
     ? localMachineStatus.cloud.computer?.id ?? null
     : null;
+  const isPreparingLocalMachineGate = shouldManageLocalMachine &&
+    authState === "authenticated" &&
+    (hasLoadedMachines === false || (localMachinePreview === null && localMachineRegistrationError === null));
+  const shouldShowLocalMachineOnboarding = shouldManageLocalMachine &&
+    hasLoadedMachines &&
+    localMachinePreview !== null &&
+    localComputerForThisDevice === null &&
+    (localMachineStatus === null || localMachineStatus.cloud.computer === null) &&
+    machinesError === null;
 
   const clearSession = useCallback(() => {
     removeStoredToken(storageKey);
+    lastLocalSyncKeyRef.current = null;
     setToken(null);
     setUser(null);
     setComputers([]);
+    setHasLoadedMachines(false);
     setSelectedComputerId(null);
     setAccessSession(null);
+    setIsRemoteMachineCreateVisible(false);
     setLocalMachineStatus(null);
+    setLocalMachinePreview(null);
+    setLocalMachineRegistrationError(null);
+    setIsAddingLocalMachine(false);
     setAuthState("unauthenticated");
   }, [storageKey]);
+
+  const upsertComputer = useCallback((computer: CloudComputer): void => {
+    setComputers((currentComputers) => [
+      computer,
+      ...currentComputers.filter((currentComputer) => currentComputer.id !== computer.id),
+    ]);
+  }, []);
 
   const refreshMachines = useCallback(async () => {
     if (token === null) {
@@ -104,17 +152,41 @@ export function CloudApp({
     try {
       const response = await client.listComputers(token);
       setComputers(response.computers);
+      setHasLoadedMachines(true);
     } catch (error) {
       if (isAuthFailure(error)) {
         clearSession();
         return;
       }
 
+      setHasLoadedMachines(true);
       setMachinesError(error instanceof Error ? error.message : "Failed to load machines.");
     } finally {
       setIsLoadingMachines(false);
     }
   }, [clearSession, client, token]);
+
+  const syncLocalMachine = useCallback(async (
+    preview: LocalMachineRegistrationPreview,
+  ): Promise<LocalMachineBridgeStatus | null> => {
+    if (token === null || localMachineBridge === undefined) {
+      return null;
+    }
+
+    const status = await localMachineBridge.syncCloudSession({
+      cloudServerUrl: client.baseUrl,
+      sessionToken: token,
+      name: preview.name,
+    });
+
+    setLocalMachineStatus(status);
+
+    if (status.cloud.computer !== null) {
+      upsertComputer(status.cloud.computer);
+    }
+
+    return status;
+  }, [client.baseUrl, localMachineBridge, token, upsertComputer]);
 
   useEffect(() => {
     const storedToken = readStoredToken(storageKey);
@@ -157,11 +229,12 @@ export function CloudApp({
   }, [authState, refreshMachines]);
 
   useEffect(() => {
-    if (authState !== "authenticated" || token === null || localMachineBridge === undefined) {
+    if (authState !== "authenticated" || !shouldManageLocalMachine || localMachineBridge === undefined) {
       return;
     }
 
     let isCurrent = true;
+    setLocalMachineRegistrationError(null);
 
     void localMachineBridge.getStatus()
       .then((status) => {
@@ -170,33 +243,66 @@ export function CloudApp({
         }
       })
       .catch(() => {
-        // The sync call below will surface the useful error if the bridge is unavailable.
+        // Registration preview below provides the actionable error for this gate.
       });
 
-    void localMachineBridge.syncCloudSession({
-      cloudServerUrl: client.baseUrl,
-      sessionToken: token,
-    })
-      .then((status) => {
-        if (!isCurrent) {
-          return;
+    void localMachineBridge.getRegistrationPreview()
+      .then((preview) => {
+        if (isCurrent) {
+          setLocalMachinePreview(preview);
         }
-
-        setLocalMachineStatus(status);
-        void refreshMachines();
       })
       .catch((error) => {
         if (!isCurrent) {
           return;
         }
 
-        setMachinesError(error instanceof Error ? error.message : "Failed to sync local machine.");
+        setLocalMachineRegistrationError(
+          error instanceof Error ? error.message : "Failed to read local machine details.",
+        );
       });
 
     return () => {
       isCurrent = false;
     };
-  }, [authState, client.baseUrl, localMachineBridge, refreshMachines, token]);
+  }, [authState, localMachineBridge, shouldManageLocalMachine]);
+
+  useEffect(() => {
+    if (
+      authState !== "authenticated" ||
+      token === null ||
+      localMachinePreview === null ||
+      localComputerForThisDevice === null ||
+      localMachineStatus?.cloud.computer?.id === localComputerForThisDevice.id
+    ) {
+      return;
+    }
+
+    const syncKey = `${token}:${localMachinePreview.localDeviceId}:${localComputerForThisDevice.id}`;
+
+    if (lastLocalSyncKeyRef.current === syncKey) {
+      return;
+    }
+
+    lastLocalSyncKeyRef.current = syncKey;
+
+    void syncLocalMachine(localMachinePreview)
+      .then(() => {
+        void refreshMachines();
+      })
+      .catch((error) => {
+        lastLocalSyncKeyRef.current = null;
+        setMachinesError(error instanceof Error ? error.message : "Failed to sync local machine.");
+      });
+  }, [
+    authState,
+    localComputerForThisDevice,
+    localMachinePreview,
+    localMachineStatus?.cloud.computer?.id,
+    refreshMachines,
+    syncLocalMachine,
+    token,
+  ]);
 
   useEffect(() => {
     if (
@@ -271,7 +377,7 @@ export function CloudApp({
     };
   }, [authState, clearSession, client, localWorkspaceUrls, selectedComputer, selectedComputerId, token]);
 
-  const login = async (input: { readonly email: string; readonly password: string }): Promise<void> => {
+  const login = async (input: { readonly email: string; readonly password: string }): Promise<boolean> => {
     setIsLoggingIn(true);
     setLoginError(null);
 
@@ -280,13 +386,18 @@ export function CloudApp({
       writeStoredToken(storageKey, response.session.token);
       setToken(response.session.token);
       setUser(response.user);
-      setAuthState("authenticated");
+      return true;
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Unable to sign in.");
+      return false;
     } finally {
       setIsLoggingIn(false);
     }
   };
+
+  const completeLogin = useCallback((): void => {
+    setAuthState("authenticated");
+  }, []);
 
   const logout = async (): Promise<void> => {
     const currentToken = token;
@@ -312,10 +423,8 @@ export function CloudApp({
 
     try {
       const response = await client.createComputer(token, input);
-      setComputers((currentComputers) => [
-        response.computer,
-        ...currentComputers.filter((computer) => computer.id !== response.computer.id),
-      ]);
+      upsertComputer(response.computer);
+      setIsRemoteMachineCreateVisible(false);
       void refreshMachines();
     } catch (error) {
       if (isAuthFailure(error)) {
@@ -331,7 +440,34 @@ export function CloudApp({
     }
   };
 
+  const addLocalMachine = async (): Promise<void> => {
+    if (localMachinePreview === null) {
+      return;
+    }
+
+    setIsAddingLocalMachine(true);
+    setLocalMachineRegistrationError(null);
+    setMachinesError(null);
+
+    try {
+      const status = await syncLocalMachine(localMachinePreview);
+
+      if (status?.cloud.computer !== null && status?.cloud.computer !== undefined && token !== null) {
+        lastLocalSyncKeyRef.current = `${token}:${localMachinePreview.localDeviceId}:${status.cloud.computer.id}`;
+      }
+
+      await refreshMachines();
+    } catch (error) {
+      setLocalMachineRegistrationError(
+        error instanceof Error ? error.message : "Failed to add local machine.",
+      );
+    } finally {
+      setIsAddingLocalMachine(false);
+    }
+  };
+
   const openMachine = (computer: CloudComputer): void => {
+    setIsRemoteMachineCreateVisible(false);
     setSelectedComputerId(computer.id);
     setAccessSession(null);
     setWorkspaceError(null);
@@ -352,10 +488,20 @@ export function CloudApp({
     }
   };
 
+  const startRemoteMachineCreate = (): void => {
+    setMachinesError(null);
+    setIsRemoteMachineCreateVisible(true);
+  };
+
+  const closeRemoteMachineCreate = (): void => {
+    setMachinesError(null);
+    setIsRemoteMachineCreateVisible(false);
+  };
+
   if (authState === "checking") {
     return (
       <main className="cloud-shell">
-        <div className="cloud-loading" role="status">Loading...</div>
+        <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
   }
@@ -365,7 +511,41 @@ export function CloudApp({
       <LoginScreen
         error={loginError}
         isSubmitting={isLoggingIn}
+        onSuccessComplete={completeLogin}
         onSubmit={login}
+      />
+    );
+  }
+
+  if (isPreparingLocalMachineGate) {
+    return (
+      <main className="cloud-shell">
+        <div className="cloud-loading" role="status" aria-label="Loading" />
+      </main>
+    );
+  }
+
+  if (shouldShowLocalMachineOnboarding && localMachinePreview !== null) {
+    return (
+      <LocalMachineOnboardingScreen
+        error={localMachineRegistrationError}
+        hasExistingMachines={computers.length > 0}
+        isSubmitting={isAddingLocalMachine}
+        machineName={localMachinePreview.name}
+        onAddMachine={addLocalMachine}
+        onLogout={logout}
+      />
+    );
+  }
+
+  if (isRemoteMachineCreateVisible) {
+    return (
+      <RemoteMachineCreateScreen
+        error={machinesError}
+        isSubmitting={isCreatingMachine}
+        onBack={closeRemoteMachineCreate}
+        onCreateMachine={createMachine}
+        onLogout={logout}
       />
     );
   }
@@ -417,13 +597,13 @@ export function CloudApp({
     <MyMachinesScreen
       activeLocalComputerId={activeLocalComputerId}
       computers={computers}
-      error={machinesError}
+      error={machinesError ?? localMachineRegistrationError}
       isCreatingMachine={isCreatingMachine}
       isLoading={isLoadingMachines}
-      onCreateMachine={createMachine}
       onOpenMachine={openMachine}
       onLogout={logout}
       onRefresh={refreshMachines}
+      onStartCreateMachine={startRemoteMachineCreate}
       user={user}
     />
   );
@@ -502,6 +682,15 @@ const getLocalWorkspaceUrls = (
   }
 
   return status.server.urls;
+};
+
+const readProviderMetadataString = (metadata: unknown, key: string): string | null => {
+  if (typeof metadata !== "object" || metadata === null || !(key in metadata)) {
+    return null;
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
 };
 
 const joinRoute = (basePath: string, computerId: string): string => {

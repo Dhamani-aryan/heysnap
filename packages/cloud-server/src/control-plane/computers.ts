@@ -5,6 +5,7 @@ import { createOpaqueToken, hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerRecord } from "../db/types.js";
 import type { GatewayAccessService } from "../gateway/access-sessions.js";
+import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
 import { getDev8gbPreset } from "../provisioning/presets.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
 import type { AppVariables } from "../shared/context.js";
@@ -22,6 +23,7 @@ export const createComputerRoutes = (
   gatewayAccessService: GatewayAccessService,
   provisioner: ComputerProvisioner,
   config: CloudServerConfig,
+  tunnelRegistry: TunnelStatusRegistry,
 ): Hono<{ Variables: AppVariables }> => {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -31,7 +33,9 @@ export const createComputerRoutes = (
     const user = context.get("currentUser");
     const computers = await store.listComputersForUser(user.id);
 
-    return context.json({ computers: computers.map(serializeComputer) });
+    return context.json({
+      computers: computers.map((computer) => serializeUserComputer(computer, tunnelRegistry)),
+    });
   });
 
   app.post("/", async (context) => {
@@ -66,7 +70,7 @@ export const createComputerRoutes = (
         providerMetadata: result.providerMetadata,
       });
 
-      return context.json({ computer: serializeComputer(updated ?? computer) }, 201);
+      return context.json({ computer: serializeUserComputer(updated ?? computer, tunnelRegistry) }, 201);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to provision computer";
       await store.updateComputerForUser({
@@ -151,7 +155,7 @@ export const createComputerRoutes = (
     }
 
     return context.json({
-      computer: serializeComputer(syncedComputer),
+      computer: serializeUserComputer(syncedComputer, tunnelRegistry),
       machine: {
         computerId: syncedComputer.id,
         token: machineToken,
@@ -163,7 +167,7 @@ export const createComputerRoutes = (
   app.get("/:computerId", async (context) => {
     const computer = await readOwnedComputer(store, context.get("currentUser").id, context.req.param("computerId"));
 
-    return context.json({ computer: serializeComputer(computer) });
+    return context.json({ computer: serializeUserComputer(computer, tunnelRegistry) });
   });
 
   app.patch("/:computerId", async (context) => {
@@ -179,7 +183,7 @@ export const createComputerRoutes = (
       throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
     }
 
-    return context.json({ computer: serializeComputer(computer) });
+    return context.json({ computer: serializeUserComputer(computer, tunnelRegistry) });
   });
 
   app.delete("/:computerId", async (context) => {
@@ -209,7 +213,7 @@ export const createComputerRoutes = (
       providerMetadata,
     });
 
-    return context.json({ computer: serializeComputer(updated ?? computer) });
+    return context.json({ computer: serializeUserComputer(updated ?? computer, tunnelRegistry) });
   });
 
   app.post("/:computerId/stop", async (context) => {
@@ -223,7 +227,7 @@ export const createComputerRoutes = (
       providerMetadata,
     });
 
-    return context.json({ computer: serializeComputer(updated ?? computer) });
+    return context.json({ computer: serializeUserComputer(updated ?? computer, tunnelRegistry) });
   });
 
   app.post("/:computerId/restart", async (context) => {
@@ -237,7 +241,7 @@ export const createComputerRoutes = (
       providerMetadata,
     });
 
-    return context.json({ computer: serializeComputer(updated ?? computer) });
+    return context.json({ computer: serializeUserComputer(updated ?? computer, tunnelRegistry) });
   });
 
   app.post("/:computerId/access-session", async (context) => {
@@ -283,6 +287,14 @@ const createActivatedMachineToken = async (
 
   return machineToken;
 };
+
+const serializeUserComputer = (
+  computer: ComputerRecord,
+  tunnelRegistry: TunnelStatusRegistry,
+) => ({
+  ...serializeComputer(computer),
+  tunnelConnected: tunnelRegistry.isConnected(computer.id),
+});
 
 const readCapabilities = (value: unknown): string[] => {
   if (value === undefined) {

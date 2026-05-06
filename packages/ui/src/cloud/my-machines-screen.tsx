@@ -1,17 +1,21 @@
 "use client";
 
-import {
-  CloudServerIcon,
-  ComputerAddIcon,
-  ComputerIcon,
-  Logout03Icon,
-  RefreshIcon,
-} from "@hugeicons/core-free-icons";
+import { ArrowRight02Icon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { useEffect } from "react";
 
+import macLightImageUrl from "../../../../apps/assets/mac-light.png";
+import macImageUrl from "../../../../apps/assets/mac.png";
+import newMacLightImageUrl from "../../../../apps/assets/new-mac-light.png";
+import newMacImageUrl from "../../../../apps/assets/new-mac.png";
 import { ThemeToggle } from "../filesystem/theme-toggle";
 import type { CloudComputer, CloudUser } from "./cloud-client";
+
+type ImageAsset = string | { readonly src: string };
+
+const getImageSrc = (asset: ImageAsset): string => {
+  return typeof asset === "string" ? asset : asset.src;
+};
 
 export interface MyMachinesScreenProps {
   readonly activeLocalComputerId: string | null;
@@ -19,234 +23,143 @@ export interface MyMachinesScreenProps {
   readonly error: string | null;
   readonly isCreatingMachine: boolean;
   readonly isLoading: boolean;
-  readonly onCreateMachine: (input: { readonly name: string }) => Promise<void>;
   readonly onOpenMachine: (computer: CloudComputer) => void;
   readonly onLogout: () => Promise<void>;
   readonly onRefresh: () => Promise<void>;
+  readonly onStartCreateMachine: () => void;
   readonly user: CloudUser;
 }
 
-interface MachineRow {
-  readonly id: string;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly providerMetadata: unknown;
-  readonly lastHeartbeatAt: string | null;
-  readonly computer?: CloudComputer;
-  readonly disabled: boolean;
-}
-
 export function MyMachinesScreen({
-  activeLocalComputerId,
   computers,
-  error,
-  isCreatingMachine,
-  isLoading,
-  onCreateMachine,
-  onOpenMachine,
   onLogout,
-  onRefresh,
-  user,
+  onOpenMachine,
+  onStartCreateMachine,
 }: MyMachinesScreenProps): React.ReactElement {
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [machineName, setMachineName] = useState("Dev Machine");
-  const [createError, setCreateError] = useState<string | null>(null);
-  const rows: MachineRow[] = computers.map((computer) => ({
-      id: computer.id,
-      name: computer.name,
-      kind: computer.kind,
-      status: computer.status,
-      providerMetadata: computer.providerMetadata,
-      lastHeartbeatAt: computer.lastHeartbeatAt,
-      computer,
-      disabled: computer.kind === "local" && computer.id !== activeLocalComputerId,
-    }));
+  const sortedComputers = [...computers].sort(compareMachinesForDisplay);
+
+  useEffect(() => {
+    document.documentElement.dataset.cloudScreen = "machines";
+
+    return () => {
+      delete document.documentElement.dataset.cloudScreen;
+    };
+  }, []);
 
   return (
     <main className="cloud-shell">
       <header className="cloud-topbar">
-        <div>
-          <h1>My Machines</h1>
-          <p>{user.email}</p>
-        </div>
         <div className="cloud-topbar-actions">
           <ThemeToggle />
           <button
-            className="cloud-text-button"
-            disabled={isCreatingMachine}
+            className="theme-toggle"
+            title="Settings"
             type="button"
-            onClick={() => {
-              setCreateError(null);
-              setIsCreateOpen(true);
-            }}
+            aria-label="Settings"
+            onClick={() => void onLogout()}
           >
-            <HugeiconsIcon icon={ComputerAddIcon} size={17} color="currentColor" strokeWidth={1.8} />
-            New machine
-          </button>
-          <button
-            className="cloud-icon-button"
-            disabled={isLoading}
-            title="Refresh"
-            type="button"
-            onClick={() => void onRefresh()}
-          >
-            <HugeiconsIcon icon={RefreshIcon} size={18} color="currentColor" strokeWidth={1.8} />
-          </button>
-          <button className="cloud-text-button" type="button" onClick={() => void onLogout()}>
-            <HugeiconsIcon icon={Logout03Icon} size={17} color="currentColor" strokeWidth={1.8} />
-            Sign out
+            <HugeiconsIcon icon={Settings03Icon} size={18} color="currentColor" strokeWidth={1.8} />
           </button>
         </div>
       </header>
 
-      <section className="cloud-machines-panel" aria-busy={isLoading}>
-        {error !== null ? <div className="cloud-machines-error" role="alert">{error}</div> : null}
-        {isLoading && rows.length === 0 ? <div className="cloud-empty-state">Loading machines...</div> : null}
-        {!isLoading && rows.length === 0 ? <div className="cloud-empty-state">No cloud machines yet.</div> : null}
+      <section className="cloud-machines-page">
+        <div className="cloud-machines-page-inner">
+          <h1 className="cloud-machines-title">Machines</h1>
+          <p className="cloud-machines-subtitle">
+            Your cloud and local computers. <span>Learn more</span>
+          </p>
 
-        {rows.length > 0 ? (
-          <div className="cloud-machine-list">
-            {rows.map((row) => (
-              <MachineListRow
-                key={row.id}
-                row={row}
+          <div className="cloud-machines-grid">
+            {sortedComputers.map((computer) => (
+              <MachineCard
+                key={computer.id}
+                computer={computer}
                 onOpenMachine={onOpenMachine}
               />
             ))}
+            <button
+              aria-label="Create remote machine"
+              className="cloud-machine-card-placeholder cloud-machine-card-placeholder-add"
+              type="button"
+              onClick={onStartCreateMachine}
+            >
+              <div className="cloud-machine-card-add-art">
+                <HugeiconsIcon icon={PlusSignIcon} size={34} color="currentColor" strokeWidth={1.6} />
+              </div>
+            </button>
           </div>
-        ) : null}
-      </section>
-
-      {isCreateOpen ? (
-        <div className="cloud-modal-backdrop" role="presentation">
-          <form
-            className="cloud-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-machine-title"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = machineName.trim();
-
-              if (name.length === 0) {
-                setCreateError("Name is required.");
-                return;
-              }
-
-              setCreateError(null);
-              void onCreateMachine({ name })
-                .then(() => {
-                  setIsCreateOpen(false);
-                  setMachineName("Dev Machine");
-                })
-                .catch((error) => {
-                  setCreateError(error instanceof Error ? error.message : "Failed to create machine.");
-                });
-            }}
-          >
-            <h2 id="create-machine-title">Create machine</h2>
-            <label className="cloud-field">
-              <span>Name</span>
-              <input
-                autoFocus
-                maxLength={120}
-                value={machineName}
-                onChange={(event) => setMachineName(event.currentTarget.value)}
-              />
-            </label>
-            {createError !== null ? <div className="cloud-auth-error" role="alert">{createError}</div> : null}
-            <div className="cloud-modal-actions">
-              <button
-                className="cloud-text-button"
-                disabled={isCreatingMachine}
-                type="button"
-                onClick={() => {
-                  setCreateError(null);
-                  setIsCreateOpen(false);
-                }}
-              >
-                Cancel
-              </button>
-              <button className="cloud-primary-button" disabled={isCreatingMachine} type="submit">
-                {isCreatingMachine ? "Creating..." : "Create"}
-              </button>
-            </div>
-          </form>
         </div>
-      ) : null}
+      </section>
     </main>
   );
 }
 
-const MachineListRow = ({
-  row,
+const MachineCard = ({
+  computer,
   onOpenMachine,
 }: {
-  readonly row: MachineRow;
+  readonly computer: CloudComputer;
   readonly onOpenMachine: (computer: CloudComputer) => void;
 }): React.ReactElement => {
-  const region = readMetadataString(row.providerMetadata, "region");
-  const instanceType = readMetadataString(row.providerMetadata, "instanceType");
-  const instanceId = readMetadataString(row.providerMetadata, "instanceId");
-  const meta = [region, instanceType, instanceId].filter((value) => value !== null).join(" · ");
+  const isLocal = computer.kind === "local";
 
   return (
     <button
-      className="cloud-machine-row"
-      data-disabled={row.disabled ? "true" : "false"}
-      disabled={row.disabled}
-      title={row.disabled ? "This local machine is not active in this desktop app" : row.name}
+      className="cloud-machine-card-placeholder cloud-machine-card-placeholder-device"
       type="button"
-      onClick={() => {
-        if (!row.disabled && row.computer !== undefined) {
-          onOpenMachine(row.computer);
-        }
-      }}
+      onClick={() => onOpenMachine(computer)}
     >
-      <span className="cloud-machine-icon" aria-hidden="true">
-        <HugeiconsIcon
-          icon={row.kind === "local" ? ComputerIcon : CloudServerIcon}
-          size={22}
-          color="currentColor"
-          strokeWidth={1.7}
+      <span
+        className="cloud-machine-status-dot"
+        data-status={computer.status}
+        title={formatMachineStatus(computer.status)}
+        aria-label={`Status: ${formatMachineStatus(computer.status)}`}
+      />
+      <span className="cloud-machine-status-tooltip" aria-hidden="true">
+        {formatMachineStatus(computer.status)}
+      </span>
+      <div className="cloud-machine-card-art">
+        <img
+          className={`cloud-machine-card-image cloud-machine-card-image-light${isLocal ? " cloud-machine-card-image-new" : ""}`}
+          src={getImageSrc(isLocal ? newMacLightImageUrl : macLightImageUrl)}
+          alt=""
+          aria-hidden="true"
         />
-      </span>
-      <span className="cloud-machine-main">
-        <span className="cloud-machine-title">{row.name}</span>
-        <span className="cloud-machine-meta">
-          {meta.length > 0 ? meta : row.kind}
-        </span>
-      </span>
-      <span className="cloud-machine-side">
-        <span className="cloud-status-pill" data-status={row.status}>{formatStatus(row.status)}</span>
-        <span className="cloud-machine-heartbeat">{formatHeartbeat(row.lastHeartbeatAt)}</span>
-      </span>
+        <img
+          className={`cloud-machine-card-image cloud-machine-card-image-dark${isLocal ? " cloud-machine-card-image-new" : ""}`}
+          src={getImageSrc(isLocal ? newMacImageUrl : macImageUrl)}
+          alt=""
+          aria-hidden="true"
+        />
+      </div>
+      <div className="cloud-machine-card-footer">
+        <span>{`Work on ${computer.name}`}</span>
+        <HugeiconsIcon
+          icon={ArrowRight02Icon}
+          size={18}
+          color="currentColor"
+          strokeWidth={1.65}
+        />
+      </div>
     </button>
   );
 };
 
-const readMetadataString = (metadata: unknown, key: string): string | null => {
-  if (typeof metadata !== "object" || metadata === null || !(key in metadata)) {
-    return null;
-  }
-
-  const value = (metadata as Record<string, unknown>)[key];
-  return typeof value === "string" && value.length > 0 ? value : null;
-};
-
-const formatStatus = (status: string): string =>
+const formatMachineStatus = (status: string): string =>
   status
-    .split(/[-_\s]+/g)
-    .filter((part) => part.length > 0)
-    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
 
-const formatHeartbeat = (lastHeartbeatAt: string | null): string => {
-  if (lastHeartbeatAt === null) {
-    return "No heartbeat";
+const compareMachinesForDisplay = (left: CloudComputer, right: CloudComputer): number => {
+  const leftRank = left.kind === "local" ? 1 : 0;
+  const rightRank = right.kind === "local" ? 1 : 0;
+
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
   }
 
-  const date = new Date(lastHeartbeatAt);
-  return Number.isNaN(date.getTime()) ? "No heartbeat" : `Last seen ${date.toLocaleString()}`;
+  return left.createdAt.localeCompare(right.createdAt);
 };
