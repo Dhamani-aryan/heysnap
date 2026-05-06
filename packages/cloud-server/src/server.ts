@@ -64,6 +64,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     gatewayAccessService,
     provisioner,
     options.config,
+    tunnelRegistry,
   ));
   app.route("/machines", createMachineRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));

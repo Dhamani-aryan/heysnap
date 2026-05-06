@@ -22,6 +22,7 @@ export interface CloudComputer {
   readonly capabilities: unknown;
   readonly machineServerVersion: string | null;
   readonly lastHeartbeatAt: string | null;
+  readonly tunnelConnected?: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

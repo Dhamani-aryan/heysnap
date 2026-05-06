@@ -5,6 +5,7 @@ import { hashToken } from "../src/auth/tokens.js";
 import { createApp } from "../src/server.js";
 import type { ComputerProvisioner } from "../src/provisioning/types.js";
 import type { ComputerRecord } from "../src/db/types.js";
+import type { TunnelStatusRegistry } from "../src/gateway/tunnel.js";
 import { InMemoryCloudStore } from "./in-memory-store.js";
 
 const config: CloudServerConfig = {
@@ -323,6 +324,34 @@ describe("cloud server computer inventory", () => {
     expect((await app.request(`/computers/${createdBody.computer.id}`, {
       headers: authHeaders(auth.token),
     })).status).toBe(404);
+  });
+
+  it("exposes live tunnel state on user computer payloads", async () => {
+    const connectedComputerIds = new Set<string>();
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: (computerId) => connectedComputerIds.has(computerId),
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "tunnel-user@example.com");
+    const computer = await createComputer(app, auth.token, "Tunnel VM");
+
+    expect(computer.tunnelConnected).toBe(false);
+
+    connectedComputerIds.add(computer.id);
+
+    const listed = await app.request("/computers", {
+      headers: authHeaders(auth.token),
+    });
+    expect(await listed.json()).toMatchObject({
+      computers: [{ id: computer.id, tunnelConnected: true }],
+    });
+
+    const read = await app.request(`/computers/${computer.id}`, {
+      headers: authHeaders(auth.token),
+    });
+    expect(await read.json()).toMatchObject({
+      computer: { id: computer.id, tunnelConnected: true },
+    });
   });
 
   it("does not allow users to access another user's computer", async () => {
@@ -762,10 +791,12 @@ describe("cloud server machine registration", () => {
   });
 });
 
-const createTestApp = () => {
+const createTestApp = (options: {
+  readonly tunnelRegistry?: TunnelStatusRegistry;
+} = {}) => {
   const store = new InMemoryCloudStore();
   const provisioner = new FakeProvisioner();
-  const app = createApp({ config, store, provisioner });
+  const app = createApp({ config, store, provisioner, tunnelRegistry: options.tunnelRegistry });
 
   return { app, store, provisioner };
 };
@@ -855,6 +886,7 @@ interface ComputerResponse {
     readonly providerMetadata: unknown;
     readonly capabilities: unknown;
     readonly machineServerVersion: string | null;
+    readonly tunnelConnected: boolean;
   };
 }
 
