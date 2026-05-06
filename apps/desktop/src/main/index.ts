@@ -24,6 +24,7 @@ function createWindow() {
       ? titleBarBackgroundByTheme.dark
       : titleBarBackgroundByTheme.light,
     titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       sandbox: true,

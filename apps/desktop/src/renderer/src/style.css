@@ -36,11 +36,13 @@ body {
   pointer-events: none;
 }
 
-:root[data-cloud-screen="machines"] .desktop-titlebar-title {
+:root[data-cloud-screen="machines"] .desktop-titlebar-title,
+:root[data-cloud-screen="workspace"] .desktop-titlebar-title {
   display: none;
 }
 
-:root[data-cloud-screen="machines"] .desktop-titlebar {
+:root[data-cloud-screen="machines"] .desktop-titlebar,
+:root[data-cloud-screen="workspace"] .desktop-titlebar {
   pointer-events: none;
 }
 
@@ -63,6 +65,14 @@ body {
   min-height: 34px;
   padding-top: 8px;
   padding-bottom: 0;
+}
+
+:root[data-desktop="true"][data-cloud-screen="workspace"] .finder-toolbar {
+  position: relative;
+  z-index: 21;
+  height: 42px;
+  padding-top: 8px;
+  padding-left: 88px;
 }
 
 :root[data-desktop="true"][data-cloud-screen="machines"] .cloud-machines-page {
