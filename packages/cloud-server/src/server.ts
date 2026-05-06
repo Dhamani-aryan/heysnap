@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 
 import { createAdminRoutes } from "./admin/routes.js";
@@ -67,36 +67,20 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     tunnelRegistry,
   ));
   app.get("/gateway/computers/:computerId/filesystem/download", async (context) => {
-    const computerId = context.req.param("computerId");
-    const requestUrl = new URL(context.req.url);
-    const token = readBearerToken(context.req.header("authorization"))
-      ?? requestUrl.searchParams.get("accessToken")
-      ?? requestUrl.searchParams.get("token")
-      ?? undefined;
-
-    if (token === undefined || token.length === 0) {
-      return context.json({ error: { code: "UNAUTHORIZED", message: "Gateway access token is required" } }, 401);
-    }
-
-    const accessSession = await gatewayAccessService.authenticateAccessToken({ token, computerId });
-
-    if (accessSession === null) {
-      return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
-    }
-
-    if (tunnelRegistry.proxyHttpRequest === undefined) {
-      return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
-    }
-
-    const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
-      path: buildFilesystemDownloadTargetPath(requestUrl),
-    });
-
-    if (proxied === null) {
-      return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
-    }
-
-    return toGatewayDownloadResponse(proxied);
+    return await proxyGatewayFilesystemHttpRequest(
+      context,
+      gatewayAccessService,
+      tunnelRegistry,
+      "/filesystem/download",
+    );
+  });
+  app.get("/gateway/computers/:computerId/filesystem/preview", async (context) => {
+    return await proxyGatewayFilesystemHttpRequest(
+      context,
+      gatewayAccessService,
+      tunnelRegistry,
+      "/filesystem/preview",
+    );
   });
   app.route("/machines", createMachineRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));
@@ -131,13 +115,59 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   return app;
 };
 
-const buildFilesystemDownloadTargetPath = (requestUrl: URL): string => {
+const proxyGatewayFilesystemHttpRequest = async (
+  context: Context<{ Variables: AppVariables }>,
+  gatewayAccessService: GatewayAccessService,
+  tunnelRegistry: TunnelStatusRegistry,
+  targetPathname: "/filesystem/download" | "/filesystem/preview",
+): Promise<Response> => {
+  const computerId = context.req.param("computerId");
+  const requestUrl = new URL(context.req.url);
+
+  if (computerId === undefined || computerId.length === 0) {
+    return context.json({ error: { code: "NOT_FOUND", message: "Computer not found" } }, 404);
+  }
+
+  const token = readBearerToken(context.req.header("authorization"))
+    ?? requestUrl.searchParams.get("accessToken")
+    ?? requestUrl.searchParams.get("token")
+    ?? undefined;
+
+  if (token === undefined || token.length === 0) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Gateway access token is required" } }, 401);
+  }
+
+  const accessSession = await gatewayAccessService.authenticateAccessToken({ token, computerId });
+
+  if (accessSession === null) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
+  }
+
+  if (tunnelRegistry.proxyHttpRequest === undefined) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
+    path: buildFilesystemProxyTargetPath(requestUrl, targetPathname),
+  });
+
+  if (proxied === null) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  return toGatewayDownloadResponse(proxied);
+};
+
+const buildFilesystemProxyTargetPath = (
+  requestUrl: URL,
+  targetPathname: "/filesystem/download" | "/filesystem/preview",
+): string => {
   const query = new URLSearchParams(requestUrl.searchParams);
   query.delete("accessToken");
   query.delete("token");
   const queryString = query.toString();
 
-  return `/filesystem/download${queryString.length > 0 ? `?${queryString}` : ""}`;
+  return `${targetPathname}${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
 
 const toGatewayDownloadResponse = (proxied: GatewayHttpResponse): Response => {
