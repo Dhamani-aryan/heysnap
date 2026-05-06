@@ -1,4 +1,4 @@
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
@@ -50,6 +50,40 @@ describe("FilesystemService", () => {
 
     expect(first.name).toBe("untitled folder");
     expect(second.name).toBe("untitled folder 2");
+  });
+
+  it("uploads files into the target directory and preserves folder-relative paths", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "target"));
+
+    const service = new FilesystemService({ rootPath: root, trashFunction: removeEntriesForTest });
+    const result = await service.uploadFiles("target", [
+      {
+        relativePath: "plain.txt",
+        contentBase64: Buffer.from("plain").toString("base64"),
+      },
+      {
+        relativePath: "Folder/nested.txt",
+        contentBase64: Buffer.from("nested").toString("base64"),
+      },
+    ]);
+
+    expect(result.entries.map((entry) => entry.path).sort()).toEqual([
+      "target/Folder/nested.txt",
+      "target/plain.txt",
+    ]);
+    expect(await readFile(join(root, "target", "plain.txt"), "utf8")).toBe("plain");
+    expect(await readFile(join(root, "target", "Folder", "nested.txt"), "utf8")).toBe("nested");
+  });
+
+  it("rejects upload paths that escape the target directory", async () => {
+    const root = await createRoot();
+    const service = new FilesystemService({ rootPath: root, trashFunction: removeEntriesForTest });
+
+    await expect(service.uploadFiles(undefined, [{
+      relativePath: "../bad.txt",
+      contentBase64: Buffer.from("bad").toString("base64"),
+    }])).rejects.toThrow("cannot leave");
   });
 
   it("renames entries and rejects conflicts", async () => {
