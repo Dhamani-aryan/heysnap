@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowRight02Icon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight02Icon, Cancel01Icon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
 
+import darkLogoUrl from "../../../../apps/assets/heysnap-dark-logo.gif";
+import lightLogoUrl from "../../../../apps/assets/heysnap-light-logo.gif";
 import macLightImageUrl from "../../../../apps/assets/mac-light.png";
 import macImageUrl from "../../../../apps/assets/mac.png";
 import newMacLightImageUrl from "../../../../apps/assets/new-mac-light.png";
@@ -23,6 +25,8 @@ export interface MyMachinesScreenProps {
   readonly error: string | null;
   readonly isCreatingMachine: boolean;
   readonly isLoading: boolean;
+  readonly showOnboardingModal: boolean;
+  readonly onDismissOnboarding: () => void;
   readonly onOpenMachine: (computer: CloudComputer) => void;
   readonly onLogout: () => Promise<void>;
   readonly onRefresh: () => Promise<void>;
@@ -31,7 +35,10 @@ export interface MyMachinesScreenProps {
 }
 
 export function MyMachinesScreen({
+  activeLocalComputerId,
   computers,
+  showOnboardingModal,
+  onDismissOnboarding,
   onLogout,
   onOpenMachine,
   onStartCreateMachine,
@@ -74,6 +81,7 @@ export function MyMachinesScreen({
             {sortedComputers.map((computer) => (
               <MachineCard
                 key={computer.id}
+                activeLocalComputerId={activeLocalComputerId}
                 computer={computer}
                 onOpenMachine={onOpenMachine}
               />
@@ -91,33 +99,118 @@ export function MyMachinesScreen({
           </div>
         </div>
       </section>
+
+      {showOnboardingModal ? (
+        <div className="cloud-modal-backdrop cloud-machines-onboarding-backdrop" role="presentation">
+          <section
+            aria-label="Machines onboarding"
+            aria-modal="true"
+            className="cloud-modal cloud-machines-onboarding-modal"
+            role="dialog"
+          >
+            <h2 className="cloud-machines-title cloud-machines-onboarding-title">
+              <span>Welcome</span>
+              <img
+                className="cloud-machines-onboarding-logo cloud-machines-onboarding-logo-light"
+                src={getImageSrc(lightLogoUrl)}
+                alt=""
+                aria-hidden="true"
+              />
+              <img
+                className="cloud-machines-onboarding-logo cloud-machines-onboarding-logo-dark"
+                src={getImageSrc(darkLogoUrl)}
+                alt=""
+                aria-hidden="true"
+              />
+            </h2>
+            <div className="cloud-machines-onboarding-image-row" aria-hidden="true">
+              <div className="cloud-machines-onboarding-image-frame">
+                <img
+                  className="cloud-machines-onboarding-image cloud-machines-onboarding-image-light"
+                  src={getImageSrc(macLightImageUrl)}
+                  alt=""
+                />
+                <img
+                  className="cloud-machines-onboarding-image cloud-machines-onboarding-image-dark"
+                  src={getImageSrc(macImageUrl)}
+                  alt=""
+                />
+                <p className="cloud-machines-onboarding-caption">These represent remote machines.</p>
+              </div>
+              <div className="cloud-machines-onboarding-image-frame">
+                <img
+                  className="cloud-machines-onboarding-image cloud-machines-onboarding-image-light"
+                  src={getImageSrc(newMacLightImageUrl)}
+                  alt=""
+                />
+                <img
+                  className="cloud-machines-onboarding-image cloud-machines-onboarding-image-dark"
+                  src={getImageSrc(newMacImageUrl)}
+                  alt=""
+                />
+                <p className="cloud-machines-onboarding-caption">These represent local machines.</p>
+              </div>
+            </div>
+            <p className="cloud-machines-onboarding-copy">
+              HeySnap works on your local machine and creates a 24*7 dedicated cloud machine for you as well. To add a
+              new remote machine click on the plus box. To add a new local machine, just install the Heysnap desktop app
+              and login with the same account.
+            </p>
+            <button
+              className="cloud-primary-button cloud-machines-onboarding-action"
+              type="button"
+              onClick={onDismissOnboarding}
+            >
+              Let's go!
+            </button>
+            <button
+              aria-label="Close onboarding"
+              className="cloud-machines-onboarding-close"
+              title="Close onboarding"
+              type="button"
+              onClick={onDismissOnboarding}
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={18} color="currentColor" strokeWidth={1.8} />
+            </button>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
 
 const MachineCard = ({
+  activeLocalComputerId,
   computer,
   onOpenMachine,
 }: {
+  readonly activeLocalComputerId: string | null;
   readonly computer: CloudComputer;
   readonly onOpenMachine: (computer: CloudComputer) => void;
 }): React.ReactElement => {
   const isLocal = computer.kind === "local";
+  const displayStatus = getMachineDisplayStatus(computer, activeLocalComputerId);
+  const canOpenMachine = displayStatus.canOpen;
 
   return (
     <button
       className="cloud-machine-card-placeholder cloud-machine-card-placeholder-device"
+      data-can-open={canOpenMachine ? "true" : "false"}
       type="button"
-      onClick={() => onOpenMachine(computer)}
+      onClick={() => {
+        if (canOpenMachine) {
+          onOpenMachine(computer);
+        }
+      }}
     >
       <span
         className="cloud-machine-status-dot"
-        data-status={computer.status}
-        title={formatMachineStatus(computer.status)}
-        aria-label={`Status: ${formatMachineStatus(computer.status)}`}
+        data-status={displayStatus.status}
+        title={displayStatus.label}
+        aria-label={`Status: ${displayStatus.label}`}
       />
       <span className="cloud-machine-status-tooltip" aria-hidden="true">
-        {formatMachineStatus(computer.status)}
+        {displayStatus.label}
       </span>
       <div className="cloud-machine-card-art">
         <img
@@ -152,6 +245,29 @@ const formatMachineStatus = (status: string): string =>
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
+
+const getMachineDisplayStatus = (
+  computer: CloudComputer,
+  activeLocalComputerId: string | null,
+): { readonly status: string; readonly label: string; readonly canOpen: boolean } => {
+  if (
+    computer.kind === "local" &&
+    computer.tunnelConnected !== true &&
+    computer.id !== activeLocalComputerId
+  ) {
+    return {
+      status: "tunnel-disconnected",
+      label: "Tunnel disconnected",
+      canOpen: false,
+    };
+  }
+
+  return {
+    status: computer.status,
+    label: formatMachineStatus(computer.status),
+    canOpen: computer.status !== "creating" && computer.status !== "starting" && computer.status !== "failed",
+  };
+};
 
 const compareMachinesForDisplay = (left: CloudComputer, right: CloudComputer): number => {
   const leftRank = left.kind === "local" ? 1 : 0;
