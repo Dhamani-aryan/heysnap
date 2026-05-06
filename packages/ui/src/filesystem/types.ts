@@ -20,7 +20,8 @@ export interface FilesystemListing {
 
 export interface FilesystemUploadFile {
   readonly relativePath: string;
-  readonly contentBase64: string;
+  readonly type?: "file" | "directory";
+  readonly contentBase64?: string;
   readonly updatedAt?: string;
 }
 
