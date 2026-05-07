@@ -122,6 +122,44 @@ export interface AiUsageSummary {
   readonly cachedInputTokens: number;
   readonly reasoningOutputTokens: number;
   readonly totalTokens: number;
+  readonly successCount: number;
+  readonly failedCount: number;
+  readonly abortedCount: number;
+  readonly startedCount: number;
+  readonly avgDurationMs: number | null;
+  readonly p50DurationMs: number | null;
+  readonly p95DurationMs: number | null;
+  readonly distinctUsers: number;
+  readonly distinctComputers: number;
+  readonly distinctModels: number;
+}
+
+export type AiUsageBucketGranularity = "hour" | "day";
+
+export interface AiUsageBucket {
+  readonly bucketStart: Date;
+  readonly requestCount: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly successCount: number;
+  readonly failedCount: number;
+}
+
+export type AiUsageGroupBy = "model" | "status" | "user" | "computer";
+
+export interface AiUsageBreakdownRow {
+  readonly key: string;
+  readonly requestCount: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly successCount: number;
+  readonly failedCount: number;
 }
 
 export interface CloudStore {
@@ -286,13 +324,37 @@ export interface CloudStore {
   listAiUsageRequests(input?: {
     readonly userId?: string;
     readonly computerId?: string;
-    readonly limit?: number;
+    readonly status?: AiUsageStatus;
+    readonly model?: string;
+    readonly from?: Date;
     readonly before?: Date;
+    readonly limit?: number;
   }): Promise<AiUsageRequestRecord[]>;
   summarizeAiUsageRequests(input?: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
     readonly from?: Date;
     readonly to?: Date;
   }): Promise<AiUsageSummary>;
+  bucketAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly bucket: AiUsageBucketGranularity;
+  }): Promise<AiUsageBucket[]>;
+  groupAiUsageRequests(input: {
+    readonly groupBy: AiUsageGroupBy;
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly limit?: number;
+  }): Promise<AiUsageBreakdownRow[]>;
 }
