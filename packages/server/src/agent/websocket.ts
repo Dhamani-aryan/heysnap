@@ -91,12 +91,6 @@ class AgentSocketSession {
           break;
         case "cancelRun":
           await this.options.harness.cancelRun?.({ threadId: message.threadId, runId: message.runId });
-          this.send({
-            type: "run_end",
-            requestId: message.requestId,
-            runId: message.runId,
-            threadId: message.threadId,
-          });
           break;
         case "ping":
           this.send({ type: "pong", requestId: message.requestId, serverTime: new Date().toISOString() });

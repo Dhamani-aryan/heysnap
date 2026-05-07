@@ -235,9 +235,25 @@ export class CodexStdioAppServerClient implements CodexAppServerClient {
       message.method === "item/commandExecution/requestApproval" ||
       message.method === "item/fileChange/requestApproval"
     ) {
+      const requestId = String(message.id);
+      this.notifyListeners({
+        method: message.method,
+        params: {
+          ...(isRecord(message.params) ? message.params : {}),
+          requestId,
+        },
+      });
       this.writeMessage({
         id: message.id,
         result: {
+          decision: "accept",
+        },
+      });
+      this.notifyListeners({
+        method: `${message.method}/resolved`,
+        params: {
+          ...(isRecord(message.params) ? message.params : {}),
+          requestId,
           decision: "accept",
         },
       });

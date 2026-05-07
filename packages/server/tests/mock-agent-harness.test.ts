@@ -23,20 +23,20 @@ describe("mock agent harness", () => {
       content: textContent("Please help me"),
     }));
 
-    const threadCreated = events.find((event) => event.type === "thread_created");
+    const threadCreated = events.find((event) => event.type === "thread.created");
     expect(threadCreated).toBeDefined();
     expect(events.map((event) => event.type)).toEqual([
-      "agent_start",
-      "turn_start",
-      "thread_created",
-      "message_start",
-      "message_end",
-      "message_start",
-      "message_update",
-      "message_end",
-      "thread_updated",
-      "turn_end",
-      "agent_end",
+      "thread.created",
+      "turn.started",
+      "message.started",
+      "message.completed",
+      "item.started",
+      "item.completed",
+      "message.started",
+      "content.delta",
+      "message.completed",
+      "turn.completed",
+      "thread.updated",
     ]);
 
     const thread = await harness.getThread({ threadId: events[0]?.threadId ?? "" });

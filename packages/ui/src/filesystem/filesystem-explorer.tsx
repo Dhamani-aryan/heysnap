@@ -265,6 +265,30 @@ export function FilesystemExplorer({
     setActiveFilePath(entry.path);
   }, []);
 
+  const openFilePath = useCallback((path: string): void => {
+    const normalizedPath = normalizeOpenFilePath(path);
+
+    if (normalizedPath === null) {
+      return;
+    }
+
+    const tab: OpenFileTab = {
+      name: normalizedPath.split("/").filter(Boolean).at(-1) ?? normalizedPath,
+      path: normalizedPath,
+      size: 0,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setOpenFileTabs((currentTabs) => {
+      if (currentTabs.some((currentTab) => currentTab.path === tab.path)) {
+        return currentTabs;
+      }
+
+      return [...currentTabs, tab];
+    });
+    setActiveFilePath(tab.path);
+  }, []);
+
   const closeFileTab = useCallback((path: string): void => {
     setOpenFileTabs((currentTabs) => {
       const closedIndex = currentTabs.findIndex((tab) => tab.path === path);
@@ -621,6 +645,7 @@ export function FilesystemExplorer({
         agentWebsocketUrl={agentWebsocketUrl}
         selectedThreadId={selectedThread?.id ?? null}
         currentPath={currentPath}
+        onOpenFilePath={openFilePath}
         onSelectThread={setSelectedThread}
       >
         <div className="left-pane-surface-stack">
@@ -1607,6 +1632,7 @@ const DesktopSplitPane = ({
   agentWebsocketUrl,
   selectedThreadId,
   currentPath,
+  onOpenFilePath,
   onSelectThread,
 }: {
   readonly children: React.ReactNode;
@@ -1615,6 +1641,7 @@ const DesktopSplitPane = ({
   readonly agentWebsocketUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
+  readonly onOpenFilePath: (path: string) => void;
   readonly onSelectThread: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1682,6 +1709,7 @@ const DesktopSplitPane = ({
           websocketUrl={agentWebsocketUrl}
           selectedThreadId={selectedThreadId}
           currentPath={currentPath}
+          onOpenFilePath={onOpenFilePath}
           onSelectThread={onSelectThread}
         />
       </aside>
@@ -2552,6 +2580,30 @@ const toOpenFileTab = (entry: FilesystemEntry): OpenFileTab => ({
   size: entry.size,
   updatedAt: entry.updatedAt,
 });
+
+const normalizeOpenFilePath = (rawPath: string): string | null => {
+  const path = rawPath.trim().replaceAll("\\", "/");
+  if (path.length === 0 || path.includes("\0")) {
+    return null;
+  }
+
+  if (path.startsWith("/")) {
+    const desktopIndex = path.indexOf("/Desktop/");
+    if (desktopIndex < 0) {
+      return null;
+    }
+
+    const relativePath = path.slice(desktopIndex + "/Desktop/".length);
+    return relativePath.length > 0 && !relativePath.split("/").includes("..") ? relativePath : null;
+  }
+
+  const relativePath = path;
+  if (relativePath.startsWith("/") || relativePath.split("/").includes("..")) {
+    return null;
+  }
+
+  return relativePath;
+};
 
 const syncOpenFileTabsFromEntries = (
   currentTabs: OpenFileTab[],

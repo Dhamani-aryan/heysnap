@@ -2,8 +2,11 @@ import { toClientPath } from "../../../filesystem/paths.js";
 import type {
   AgentContent,
   AgentMessage,
+  AgentProposedPlan,
   AgentThread,
+  AgentThreadActivity,
   AgentThreadSummary,
+  AssistantMessage,
   StopReason,
   TextContent,
   ToolResultMessage,
@@ -157,10 +160,15 @@ export const mapCodexThreadToAgentThread = (
   filesystemRoot: string,
 ): AgentThread => {
   const path = toHarnessPath(thread.cwd, filesystemRoot);
-  const messages = toAgentMessages(thread, path);
+  const allMessages = toAgentMessages(thread, path);
+  const messages = allMessages.filter(isTranscriptMessage);
+  const activities = toAgentActivities(allMessages);
+  const proposedPlans = toAgentProposedPlans(allMessages);
   return {
     ...toThreadSummary(thread, filesystemRoot, countUserMessages(thread)),
     messages,
+    activities,
+    proposedPlans,
   };
 };
 
@@ -235,6 +243,128 @@ const toAgentMessages = (thread: CodexThread, path: string): AgentMessage[] => {
   }
 
   return messages;
+};
+
+const isTranscriptMessage = (message: AgentMessage): boolean => {
+  if (message.role === "user") {
+    return true;
+  }
+
+  if (message.role !== "assistant") {
+    return false;
+  }
+
+  return message.content.some((block) => block.type === "response");
+};
+
+const toAgentActivities = (messages: readonly AgentMessage[]): AgentThreadActivity[] =>
+  messages.flatMap((message, index): AgentThreadActivity[] => {
+    if (message.role === "assistant" && message.content.some((block) => block.type === "thinking")) {
+      return [
+        {
+          id: `activity:${message.id}`,
+          itemId: message.id,
+          kind: "thinking",
+          tone: "thinking",
+          status: "completed",
+          title: "Thinking",
+          summary: getThinkingText(message),
+          createdAt: message.timestamp,
+          sequence: index,
+          payload: message,
+        },
+      ];
+    }
+
+    if (message.role === "toolResult") {
+      return [
+        {
+          id: `activity:${message.id}`,
+          itemId: message.toolCallId,
+          kind: "tool.completed",
+          tone: message.isError ? "error" : "tool",
+          status: message.isError ? "failed" : "completed",
+          title: toolActivityTitle(message.toolName),
+          summary: getTextContent(message.content),
+          createdAt: message.timestamp,
+          sequence: index,
+          payload: message.details ?? message,
+        },
+      ];
+    }
+
+    if (message.role === "custom") {
+      return [
+        {
+          id: `activity:${message.id}`,
+          itemId: message.id,
+          kind: message.tag === "codex:turnError" ? "runtime.error" : "info",
+          tone: message.tag === "codex:turnError" ? "error" : "info",
+          status: message.tag === "codex:turnError" ? "failed" : "completed",
+          title: customActivityTitle(message),
+          createdAt: message.timestamp,
+          sequence: index,
+          payload: message.content,
+        },
+      ];
+    }
+
+    return [];
+  });
+
+const toAgentProposedPlans = (messages: readonly AgentMessage[]): AgentProposedPlan[] =>
+  messages.flatMap((message, index): AgentProposedPlan[] => {
+    if (message.role !== "custom" || message.tag !== "codex:plan") {
+      return [];
+    }
+
+    const item = message.content["item"];
+    const content = typeof item === "object" && item !== null && "text" in item && typeof item.text === "string"
+      ? item.text
+      : JSON.stringify(message.content, null, 2);
+
+    return [
+      {
+        id: `plan:${message.id}`,
+        content,
+        status: "completed",
+        createdAt: message.timestamp,
+        updatedAt: message.timestamp,
+        sequence: index,
+      },
+    ];
+  });
+
+const getThinkingText = (message: AssistantMessage): string =>
+  message.content
+    .filter((block): block is Extract<AssistantMessage["content"][number], { readonly type: "thinking" }> =>
+      block.type === "thinking"
+    )
+    .map((block) => block.thinkingText)
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+
+const getTextContent = (content: AgentContent): string =>
+  content
+    .filter((block): block is TextContent => block.type === "text")
+    .map((block) => block.content)
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+
+const toolActivityTitle = (toolName: string): string => {
+  if (toolName === "commandExecution") return "Command";
+  if (toolName === "fileChange") return "File change";
+  if (toolName.startsWith("mcp:")) return "MCP tool";
+  if (toolName.startsWith("dynamic:")) return "Dynamic tool";
+  return toolName;
+};
+
+const customActivityTitle = (message: Extract<AgentMessage, { readonly role: "custom" }>): string => {
+  if (message.tag === "codex:webSearch") return "Web search";
+  if (message.tag === "codex:imageView") return "Image view";
+  if (message.tag === "codex:contextCompaction") return "Context compacted";
+  if (message.tag === "codex:turnError") return "Runtime error";
+  return message.tag?.replace(/^codex:/, "") || "Codex activity";
 };
 
 export const mapCodexThreadItemToAgentMessages = (

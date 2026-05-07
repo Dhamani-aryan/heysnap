@@ -45,17 +45,17 @@ describe("agent websocket", () => {
     const events = await client.collectUntil("run_end");
     expect(events.map((message) => message.type)).toContain("event");
     expect(events.filter((message) => message.type === "event").map((message) => message.event.type)).toEqual([
-      "agent_start",
-      "turn_start",
-      "thread_created",
-      "message_start",
-      "message_end",
-      "message_start",
-      "message_update",
-      "message_end",
-      "thread_updated",
-      "turn_end",
-      "agent_end",
+      "thread.created",
+      "turn.started",
+      "message.started",
+      "message.completed",
+      "item.started",
+      "item.completed",
+      "message.started",
+      "content.delta",
+      "message.completed",
+      "turn.completed",
+      "thread.updated",
     ]);
 
     socket.send(JSON.stringify({ type: "getThread", requestId: "thread-1", threadId: runStart.threadId }));
