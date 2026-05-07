@@ -12,6 +12,10 @@ import {
   users,
 } from "./schema/index.js";
 import type {
+  AiUsageBreakdownRow,
+  AiUsageBucket,
+  AiUsageBucketGranularity,
+  AiUsageGroupBy,
   AiUsagePayloadRecord,
   AiUsageRequestRecord,
   AiUsageStatus,
@@ -25,6 +29,12 @@ import type {
   SessionRecord,
   UserRecord,
 } from "./types.js";
+import {
+  bucketAiUsageRows,
+  buildEmptyAiUsageSummary,
+  groupAiUsageRows,
+  summarizeAiUsageRows,
+} from "./ai-usage-aggregations.js";
 
 export class DrizzleCloudStore implements CloudStore {
   constructor(private readonly db: DbClient) {}
@@ -508,8 +518,11 @@ export class DrizzleCloudStore implements CloudStore {
   async listAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
-    readonly limit?: number;
+    readonly status?: AiUsageStatus;
+    readonly model?: string;
+    readonly from?: Date;
     readonly before?: Date;
+    readonly limit?: number;
   } = {}): Promise<AiUsageRequestRecord[]> {
     const query = this.db
       .select()
@@ -522,6 +535,8 @@ export class DrizzleCloudStore implements CloudStore {
   async summarizeAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
     readonly from?: Date;
     readonly to?: Date;
   } = {}): Promise<AiUsageSummary> {
@@ -529,21 +544,51 @@ export class DrizzleCloudStore implements CloudStore {
       .select()
       .from(aiUsageRequests)
       .where(buildAiUsageWhere(input));
+    if (rows.length === 0) {
+      return buildEmptyAiUsageSummary();
+    }
+    return summarizeAiUsageRows(rows);
+  }
 
-    return rows.reduce<AiUsageSummary>((summary, usage) => ({
-      requestCount: summary.requestCount + 1,
-      inputTokens: summary.inputTokens + usage.inputTokens,
-      outputTokens: summary.outputTokens + usage.outputTokens,
-      cachedInputTokens: summary.cachedInputTokens + usage.cachedInputTokens,
-      reasoningOutputTokens: summary.reasoningOutputTokens + usage.reasoningOutputTokens,
-      totalTokens: summary.totalTokens + usage.totalTokens,
-    }), emptyAiUsageSummary());
+  async bucketAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly bucket: AiUsageBucketGranularity;
+  }): Promise<AiUsageBucket[]> {
+    const rows = await this.db
+      .select()
+      .from(aiUsageRequests)
+      .where(buildAiUsageWhere(input));
+    return bucketAiUsageRows(rows, input.bucket);
+  }
+
+  async groupAiUsageRequests(input: {
+    readonly groupBy: AiUsageGroupBy;
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly limit?: number;
+  }): Promise<AiUsageBreakdownRow[]> {
+    const rows = await this.db
+      .select()
+      .from(aiUsageRequests)
+      .where(buildAiUsageWhere(input));
+    return groupAiUsageRows(rows, input.groupBy, input.limit);
   }
 }
 
 const buildAiUsageWhere = (input: {
   readonly userId?: string;
   readonly computerId?: string;
+  readonly status?: AiUsageStatus;
+  readonly model?: string;
   readonly before?: Date;
   readonly from?: Date;
   readonly to?: Date;
@@ -556,6 +601,14 @@ const buildAiUsageWhere = (input: {
 
   if (input.computerId !== undefined) {
     conditions.push(eq(aiUsageRequests.computerId, input.computerId));
+  }
+
+  if (input.status !== undefined) {
+    conditions.push(eq(aiUsageRequests.status, input.status));
+  }
+
+  if (input.model !== undefined) {
+    conditions.push(eq(aiUsageRequests.model, input.model));
   }
 
   if (input.before !== undefined) {
@@ -572,12 +625,3 @@ const buildAiUsageWhere = (input: {
 
   return conditions.length === 0 ? undefined : and(...conditions);
 };
-
-const emptyAiUsageSummary = (): AiUsageSummary => ({
-  requestCount: 0,
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
-  reasoningOutputTokens: 0,
-  totalTokens: 0,
-});

@@ -5,8 +5,13 @@ import { Hono } from "hono";
 import type { AuthService } from "../auth/service.js";
 import type { CloudServerConfig } from "../config.js";
 import type {
+  AiUsageBreakdownRow,
+  AiUsageBucket,
+  AiUsageBucketGranularity,
+  AiUsageGroupBy,
   AiUsagePayloadRecord,
   AiUsageRequestRecord,
+  AiUsageStatus,
   AiUsageSummary,
   CloudStore,
   ComputerAccessSessionRecord,
@@ -75,8 +80,11 @@ export const createAdminRoutes = (
       store.listAiUsageRequests({
         userId: readOptionalQueryString(context.req.query("userId")),
         computerId: readOptionalQueryString(context.req.query("computerId")),
-        limit: readLimit(context.req.query("limit")),
+        status: readAiUsageStatus(context.req.query("status")),
+        model: readOptionalQueryString(context.req.query("model")),
+        from: readOptionalDate(context.req.query("from")),
         before: readOptionalDate(context.req.query("before")),
+        limit: readLimit(context.req.query("limit")),
       }),
       store.listUsers(),
       store.listComputers(),
@@ -91,11 +99,112 @@ export const createAdminRoutes = (
     const summary = await store.summarizeAiUsageRequests({
       userId: readOptionalQueryString(context.req.query("userId")),
       computerId: readOptionalQueryString(context.req.query("computerId")),
+      model: readOptionalQueryString(context.req.query("model")),
+      status: readAiUsageStatus(context.req.query("status")),
       from: readOptionalDate(context.req.query("from")),
       to: readOptionalDate(context.req.query("to")),
     });
 
     return context.json({ summary: serializeAiUsageSummary(summary) });
+  });
+
+  app.get("/ai-usage/buckets", async (context) => {
+    const buckets = await store.bucketAiUsageRequests({
+      userId: readOptionalQueryString(context.req.query("userId")),
+      computerId: readOptionalQueryString(context.req.query("computerId")),
+      model: readOptionalQueryString(context.req.query("model")),
+      status: readAiUsageStatus(context.req.query("status")),
+      from: readOptionalDate(context.req.query("from")),
+      to: readOptionalDate(context.req.query("to")),
+      bucket: readBucketGranularity(context.req.query("bucket")),
+    });
+
+    return context.json({ buckets: buckets.map(serializeAiUsageBucket) });
+  });
+
+  app.get("/ai-usage/breakdown", async (context) => {
+    const groupBy = readAiUsageGroupBy(context.req.query("groupBy"));
+    const [groups, users, computers] = await Promise.all([
+      store.groupAiUsageRequests({
+        groupBy,
+        userId: readOptionalQueryString(context.req.query("userId")),
+        computerId: readOptionalQueryString(context.req.query("computerId")),
+        model: readOptionalQueryString(context.req.query("model")),
+        status: readAiUsageStatus(context.req.query("status")),
+        from: readOptionalDate(context.req.query("from")),
+        to: readOptionalDate(context.req.query("to")),
+        limit: readBreakdownLimit(context.req.query("limit")),
+      }),
+      groupBy === "user" ? store.listUsers() : Promise.resolve([]),
+      groupBy === "computer" ? store.listComputers() : Promise.resolve([]),
+    ]);
+
+    return context.json({
+      groupBy,
+      groups: groups.map((row) => serializeAiUsageBreakdownRow(row, groupBy, users, computers)),
+    });
+  });
+
+  app.get("/users/:userId/ai-usage", async (context) => {
+    const userId = context.req.param("userId");
+    const user = await store.getUserById(userId);
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    const from = readOptionalDate(context.req.query("from"));
+    const to = readOptionalDate(context.req.query("to"));
+    const bucket = readBucketGranularity(context.req.query("bucket"));
+    const breakdownLimit = readBreakdownLimit(context.req.query("breakdownLimit"));
+    const [summary, buckets, modelBreakdown, computerBreakdown, computers] = await Promise.all([
+      store.summarizeAiUsageRequests({ userId, from, to }),
+      store.bucketAiUsageRequests({ userId, from, to, bucket }),
+      store.groupAiUsageRequests({ userId, from, to, groupBy: "model", limit: breakdownLimit }),
+      store.groupAiUsageRequests({ userId, from, to, groupBy: "computer", limit: breakdownLimit }),
+      store.listComputers(),
+    ]);
+
+    return context.json({
+      summary: serializeAiUsageSummary(summary),
+      buckets: buckets.map(serializeAiUsageBucket),
+      breakdown: {
+        models: modelBreakdown.map((row) => serializeAiUsageBreakdownRow(row, "model", [], [])),
+        computers: computerBreakdown.map((row) =>
+          serializeAiUsageBreakdownRow(row, "computer", [], computers),
+        ),
+      },
+    });
+  });
+
+  app.get("/computers/:computerId/ai-usage", async (context) => {
+    const computerId = context.req.param("computerId");
+    const computer = await store.getComputerById(computerId);
+
+    if (computer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    const from = readOptionalDate(context.req.query("from"));
+    const to = readOptionalDate(context.req.query("to"));
+    const bucket = readBucketGranularity(context.req.query("bucket"));
+    const breakdownLimit = readBreakdownLimit(context.req.query("breakdownLimit"));
+    const [summary, buckets, modelBreakdown, userBreakdown, users] = await Promise.all([
+      store.summarizeAiUsageRequests({ computerId, from, to }),
+      store.bucketAiUsageRequests({ computerId, from, to, bucket }),
+      store.groupAiUsageRequests({ computerId, from, to, groupBy: "model", limit: breakdownLimit }),
+      store.groupAiUsageRequests({ computerId, from, to, groupBy: "user", limit: breakdownLimit }),
+      store.listUsers(),
+    ]);
+
+    return context.json({
+      summary: serializeAiUsageSummary(summary),
+      buckets: buckets.map(serializeAiUsageBucket),
+      breakdown: {
+        models: modelBreakdown.map((row) => serializeAiUsageBreakdownRow(row, "model", [], [])),
+        users: userBreakdown.map((row) => serializeAiUsageBreakdownRow(row, "user", users, [])),
+      },
+    });
   });
 
   app.get("/ai-usage/:usageId", async (context) => {
@@ -524,7 +633,63 @@ const serializeAiUsageSummary = (summary: AiUsageSummary) => ({
   cachedInputTokens: summary.cachedInputTokens,
   reasoningOutputTokens: summary.reasoningOutputTokens,
   totalTokens: summary.totalTokens,
+  successCount: summary.successCount,
+  failedCount: summary.failedCount,
+  abortedCount: summary.abortedCount,
+  startedCount: summary.startedCount,
+  avgDurationMs: summary.avgDurationMs,
+  p50DurationMs: summary.p50DurationMs,
+  p95DurationMs: summary.p95DurationMs,
+  distinctUsers: summary.distinctUsers,
+  distinctComputers: summary.distinctComputers,
+  distinctModels: summary.distinctModels,
 });
+
+const serializeAiUsageBucket = (bucket: AiUsageBucket) => ({
+  bucketStart: bucket.bucketStart.toISOString(),
+  requestCount: bucket.requestCount,
+  inputTokens: bucket.inputTokens,
+  outputTokens: bucket.outputTokens,
+  cachedInputTokens: bucket.cachedInputTokens,
+  reasoningOutputTokens: bucket.reasoningOutputTokens,
+  totalTokens: bucket.totalTokens,
+  successCount: bucket.successCount,
+  failedCount: bucket.failedCount,
+});
+
+const serializeAiUsageBreakdownRow = (
+  row: AiUsageBreakdownRow,
+  groupBy: AiUsageGroupBy,
+  users: ReadonlyArray<{ readonly id: string; readonly email: string }>,
+  computers: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+) => ({
+  key: row.key,
+  label: resolveBreakdownLabel(row.key, groupBy, users, computers),
+  requestCount: row.requestCount,
+  inputTokens: row.inputTokens,
+  outputTokens: row.outputTokens,
+  cachedInputTokens: row.cachedInputTokens,
+  reasoningOutputTokens: row.reasoningOutputTokens,
+  totalTokens: row.totalTokens,
+  successCount: row.successCount,
+  failedCount: row.failedCount,
+});
+
+const resolveBreakdownLabel = (
+  key: string,
+  groupBy: AiUsageGroupBy,
+  users: ReadonlyArray<{ readonly id: string; readonly email: string }>,
+  computers: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+): string => {
+  switch (groupBy) {
+    case "user":
+      return users.find((user) => user.id === key)?.email ?? key;
+    case "computer":
+      return computers.find((computer) => computer.id === key)?.name ?? key;
+    default:
+      return key;
+  }
+};
 
 const readMetadata = (value: unknown): unknown => {
   if (value === undefined) {
@@ -571,6 +736,54 @@ const readLimit = (value: string | undefined): number => {
   }
 
   return Math.min(parsed, 200);
+};
+
+const readBreakdownLimit = (value: string | undefined): number => {
+  const parsed = Number.parseInt(value ?? "", 10);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return 10;
+  }
+
+  return Math.min(parsed, 100);
+};
+
+const VALID_AI_USAGE_STATUSES: ReadonlySet<AiUsageStatus> = new Set([
+  "started",
+  "succeeded",
+  "failed",
+  "aborted",
+]);
+
+const readAiUsageStatus = (value: string | undefined): AiUsageStatus | undefined => {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) {
+    return undefined;
+  }
+  return VALID_AI_USAGE_STATUSES.has(trimmed as AiUsageStatus)
+    ? (trimmed as AiUsageStatus)
+    : undefined;
+};
+
+const readBucketGranularity = (value: string | undefined): AiUsageBucketGranularity => {
+  return value === "hour" ? "hour" : "day";
+};
+
+const VALID_AI_USAGE_GROUP_BY: ReadonlySet<AiUsageGroupBy> = new Set([
+  "model",
+  "status",
+  "user",
+  "computer",
+]);
+
+const readAiUsageGroupBy = (value: string | undefined): AiUsageGroupBy => {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) {
+    return "model";
+  }
+  return VALID_AI_USAGE_GROUP_BY.has(trimmed as AiUsageGroupBy)
+    ? (trimmed as AiUsageGroupBy)
+    : "model";
 };
 
 const optionalNonEmptyString = (

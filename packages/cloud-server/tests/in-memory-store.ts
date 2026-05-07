@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AiUsageBreakdownRow,
+  AiUsageBucket,
+  AiUsageBucketGranularity,
+  AiUsageGroupBy,
   AiUsagePayloadRecord,
   AiUsageRequestRecord,
   AiUsageStatus,
@@ -16,6 +20,11 @@ import type {
   SessionRecord,
   UserRecord,
 } from "../src/db/types.js";
+import {
+  bucketAiUsageRows,
+  groupAiUsageRows,
+  summarizeAiUsageRows,
+} from "../src/db/ai-usage-aggregations.js";
 
 export class InMemoryCloudStore implements CloudStore {
   readonly users = new Map<string, UserRecord>();
@@ -570,13 +579,13 @@ export class InMemoryCloudStore implements CloudStore {
   async listAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
-    readonly limit?: number;
+    readonly status?: AiUsageStatus;
+    readonly model?: string;
+    readonly from?: Date;
     readonly before?: Date;
+    readonly limit?: number;
   } = {}): Promise<AiUsageRequestRecord[]> {
-    const rows = Array.from(this.aiUsageRequests.values())
-      .filter((usage) => input.userId === undefined || usage.userId === input.userId)
-      .filter((usage) => input.computerId === undefined || usage.computerId === input.computerId)
-      .filter((usage) => input.before === undefined || usage.startedAt.getTime() < input.before.getTime())
+    const rows = this.filterAiUsageRows(input)
       .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
     return input.limit !== undefined ? rows.slice(0, input.limit) : rows;
   }
@@ -584,29 +593,56 @@ export class InMemoryCloudStore implements CloudStore {
   async summarizeAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
     readonly from?: Date;
     readonly to?: Date;
   } = {}): Promise<AiUsageSummary> {
+    return summarizeAiUsageRows(this.filterAiUsageRows(input));
+  }
+
+  async bucketAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly bucket: AiUsageBucketGranularity;
+  }): Promise<AiUsageBucket[]> {
+    return bucketAiUsageRows(this.filterAiUsageRows(input), input.bucket);
+  }
+
+  async groupAiUsageRequests(input: {
+    readonly groupBy: AiUsageGroupBy;
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly model?: string;
+    readonly status?: AiUsageStatus;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly limit?: number;
+  }): Promise<AiUsageBreakdownRow[]> {
+    return groupAiUsageRows(this.filterAiUsageRows(input), input.groupBy, input.limit);
+  }
+
+  private filterAiUsageRows(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly status?: AiUsageStatus;
+    readonly model?: string;
+    readonly from?: Date;
+    readonly to?: Date;
+    readonly before?: Date;
+  }): AiUsageRequestRecord[] {
     return Array.from(this.aiUsageRequests.values())
       .filter((usage) => input.userId === undefined || usage.userId === input.userId)
       .filter((usage) => input.computerId === undefined || usage.computerId === input.computerId)
+      .filter((usage) => input.status === undefined || usage.status === input.status)
+      .filter((usage) => input.model === undefined || usage.model === input.model)
+      .filter((usage) => input.before === undefined || usage.startedAt.getTime() < input.before.getTime())
       .filter((usage) => input.from === undefined || usage.startedAt.getTime() >= input.from.getTime())
-      .filter((usage) => input.to === undefined || usage.startedAt.getTime() <= input.to.getTime())
-      .reduce<AiUsageSummary>((summary, usage) => ({
-        requestCount: summary.requestCount + 1,
-        inputTokens: summary.inputTokens + usage.inputTokens,
-        outputTokens: summary.outputTokens + usage.outputTokens,
-        cachedInputTokens: summary.cachedInputTokens + usage.cachedInputTokens,
-        reasoningOutputTokens: summary.reasoningOutputTokens + usage.reasoningOutputTokens,
-        totalTokens: summary.totalTokens + usage.totalTokens,
-      }), {
-        requestCount: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedInputTokens: 0,
-        reasoningOutputTokens: 0,
-        totalTokens: 0,
-      });
+      .filter((usage) => input.to === undefined || usage.startedAt.getTime() <= input.to.getTime());
   }
 }
 

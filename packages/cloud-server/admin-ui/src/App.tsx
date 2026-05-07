@@ -5,6 +5,8 @@ import { RequireAuth } from "@/components/require-auth";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { AiUsageDetailPage } from "@/pages/ai-usage-detail";
+import { AiUsagePage } from "@/pages/ai-usage";
 import { LoginPage } from "@/pages/login";
 import { OverviewPage } from "@/pages/overview";
 import { UsersListPage } from "@/pages/users-list";
@@ -32,6 +34,8 @@ export const App = () => (
             <Route path="users/:userId" element={<UserDetailPage />} />
             <Route path="computers" element={<ComputersListPage />} />
             <Route path="computers/:computerId" element={<ComputerDetailPage />} />
+            <Route path="ai-usage" element={<AiUsagePage />} />
+            <Route path="ai-usage/:usageId" element={<AiUsageDetailPage />} />
             <Route path="releases" element={<ReleasesPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>

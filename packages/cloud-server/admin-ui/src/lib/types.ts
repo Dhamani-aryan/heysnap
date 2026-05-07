@@ -112,3 +112,104 @@ export interface AdminComputerDetail {
   readonly identities: AdminMachineIdentity[];
   readonly accessSessions: AdminAccessSession[];
 }
+
+export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";
+export type AiUsageBucketGranularity = "hour" | "day";
+export type AiUsageGroupBy = "model" | "status" | "user" | "computer";
+
+export interface AdminAiUsageRequest {
+  readonly id: string;
+  readonly userId: string;
+  readonly userEmail: string | null;
+  readonly computerId: string;
+  readonly computerName: string | null;
+  readonly machineIdentityId: string;
+  readonly provider: string;
+  readonly model: string | null;
+  readonly method: string;
+  readonly upstreamPath: string;
+  readonly status: AiUsageStatus | string;
+  readonly httpStatus: number | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly startedAt: string;
+  readonly completedAt: string | null;
+  readonly durationMs: number | null;
+  readonly errorMessage: string | null;
+  readonly metadata: unknown;
+}
+
+export interface AdminAiUsageSummary {
+  readonly requestCount: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly successCount: number;
+  readonly failedCount: number;
+  readonly abortedCount: number;
+  readonly startedCount: number;
+  readonly avgDurationMs: number | null;
+  readonly p50DurationMs: number | null;
+  readonly p95DurationMs: number | null;
+  readonly distinctUsers: number;
+  readonly distinctComputers: number;
+  readonly distinctModels: number;
+}
+
+export interface AdminAiUsageBucket {
+  readonly bucketStart: string;
+  readonly requestCount: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly successCount: number;
+  readonly failedCount: number;
+}
+
+export interface AdminAiUsageBreakdownRow {
+  readonly key: string;
+  readonly label: string;
+  readonly requestCount: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly successCount: number;
+  readonly failedCount: number;
+}
+
+export interface AdminAiUsagePayload {
+  readonly id: string;
+  readonly usageRequestId: string;
+  readonly requestHeaders: unknown;
+  readonly requestBody: string | null;
+  readonly requestBodyTruncated: boolean;
+  readonly responseHeaders: unknown;
+  readonly responseBody: string | null;
+  readonly responseBodyTruncated: boolean;
+  readonly createdAt: string;
+}
+
+export interface AdminAiUsageDetail {
+  readonly usage: AdminAiUsageRequest & {
+    readonly payload: AdminAiUsagePayload | null;
+  };
+}
+
+export interface AdminAiUsageOverview {
+  readonly summary: AdminAiUsageSummary;
+  readonly buckets: AdminAiUsageBucket[];
+  readonly breakdown: {
+    readonly models: AdminAiUsageBreakdownRow[];
+    readonly computers?: AdminAiUsageBreakdownRow[];
+    readonly users?: AdminAiUsageBreakdownRow[];
+  };
+}
