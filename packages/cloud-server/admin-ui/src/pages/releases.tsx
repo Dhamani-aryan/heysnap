@@ -66,7 +66,7 @@ export const ReleasesPage = () => {
     <>
       <PageHeader
         title="Releases"
-        description="Release manifests served to desktop installers and machine-server containers."
+        description="Release manifests served to desktop installers and machine-server hosts."
         actions={
           <Button variant="outline" size="sm" onClick={releases.reload} disabled={releases.loading} className="gap-2">
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
@@ -91,7 +91,7 @@ export const ReleasesPage = () => {
 
           <ReleaseCard
             title="Machine server"
-            description="Machine-server Docker images checked at /releases/machine-server/latest."
+            description="Machine-server host artifacts checked at /releases/machine-server/latest."
             icon={<Cloud className="h-4 w-4" />}
             target="machine-server"
             releases={machineServer}
@@ -234,6 +234,7 @@ interface ReleaseFormState {
   platform: string;
   version: string;
   downloadUrl: string;
+  sha256: string;
   dockerImage: string;
   notes: string;
 }
@@ -243,6 +244,7 @@ const emptyForm = (target: ReleaseTarget): ReleaseFormState => ({
   platform: target === "desktop" ? "darwin-arm64" : "default",
   version: "",
   downloadUrl: "",
+  sha256: "",
   dockerImage: "",
   notes: "",
 });
@@ -285,7 +287,9 @@ const PublishDialog = ({
         await adminApi.upsertMachineServerRelease({
           channel: form.channel.trim(),
           version: form.version.trim(),
-          dockerImage: form.dockerImage.trim(),
+          downloadUrl: form.downloadUrl.trim(),
+          dockerImage: form.dockerImage.trim().length > 0 ? form.dockerImage.trim() : null,
+          metadata: { sha256: form.sha256.trim() },
           notes: form.notes.trim().length > 0 ? form.notes : null,
         });
       }
@@ -362,17 +366,41 @@ const PublishDialog = ({
           )}
 
           {target === "machine-server" && (
-            <div className="grid gap-2">
-              <Label htmlFor="release-image">Docker image</Label>
-              <Input
-                id="release-image"
-                value={form.dockerImage}
-                onChange={(event) => setForm({ ...form, dockerImage: event.target.value })}
-                placeholder="123456.dkr.ecr.ap-south-1.amazonaws.com/ank1015-machine-server:0.1.0"
-                required
-                disabled={submitting}
-              />
-            </div>
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="release-download">Download URL</Label>
+                <Input
+                  id="release-download"
+                  value={form.downloadUrl}
+                  onChange={(event) => setForm({ ...form, downloadUrl: event.target.value })}
+                  placeholder="https://downloads.heysnap.xyz/machine-server/0.1.0/linux-x64.tar.gz"
+                  type="url"
+                  required
+                  disabled={submitting}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="release-sha256">SHA256</Label>
+                <Input
+                  id="release-sha256"
+                  value={form.sha256}
+                  onChange={(event) => setForm({ ...form, sha256: event.target.value })}
+                  placeholder="artifact checksum"
+                  required
+                  disabled={submitting}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="release-image">Docker image</Label>
+                <Input
+                  id="release-image"
+                  value={form.dockerImage}
+                  onChange={(event) => setForm({ ...form, dockerImage: event.target.value })}
+                  placeholder="optional legacy image"
+                  disabled={submitting}
+                />
+              </div>
+            </>
           )}
 
           <div className="grid gap-2">
