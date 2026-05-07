@@ -1,6 +1,6 @@
 export class HttpError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 500,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 502 | 503,
     readonly code: string,
     message: string,
   ) {
@@ -26,3 +26,9 @@ export const conflict = (code: string, message: string): HttpError =>
 
 export const unprocessable = (code: string, message: string): HttpError =>
   new HttpError(422, code, message);
+
+export const badGateway = (code: string, message: string): HttpError =>
+  new HttpError(502, code, message);
+
+export const serviceUnavailable = (code: string, message: string): HttpError =>
+  new HttpError(503, code, message);

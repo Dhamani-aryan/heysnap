@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { createOpaqueToken, hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerStatus } from "../db/types.js";
+import { authenticateMachineBearer } from "./auth.js";
 import {
   buildReleaseCheckResponse,
   DEFAULT_RELEASE_CHANNEL,
@@ -66,7 +67,7 @@ export const createMachineRoutes = (
   });
 
   app.post("/heartbeat", async (context) => {
-    const machine = await authenticateMachine(store, config, context.req.header("authorization"));
+    const machine = await authenticateMachineBearer(store, config, context.req.header("authorization"));
     const body = await readJsonBody(context.req.raw);
     const status = readMachineStatus(body["status"]);
     const capabilities = readCapabilities(body["capabilities"]);
@@ -94,7 +95,7 @@ export const createMachineRoutes = (
   });
 
   app.get("/update-check", async (context) => {
-    const machine = await authenticateMachine(store, config, context.req.header("authorization"));
+    const machine = await authenticateMachineBearer(store, config, context.req.header("authorization"));
     const computer = await store.getComputerById(machine.computerId);
 
     if (computer === null) {
@@ -113,40 +114,6 @@ export const createMachineRoutes = (
   });
 
   return app;
-};
-
-const authenticateMachine = async (
-  store: CloudStore,
-  config: CloudServerConfig,
-  authorization: string | undefined,
-) => {
-  const token = readBearerToken(authorization);
-
-  if (token === undefined) {
-    throw unauthorized("Machine token required");
-  }
-
-  const identity = await store.getMachineIdentityByTokenHash(hashToken(token, config.sessionSecret));
-
-  if (identity === null || identity.revokedAt !== null) {
-    throw unauthorized("Invalid machine token");
-  }
-
-  return identity;
-};
-
-const readBearerToken = (authorization: string | undefined): string | undefined => {
-  if (authorization === undefined) {
-    return undefined;
-  }
-
-  const [scheme, token] = authorization.split(" ");
-
-  if (scheme?.toLowerCase() !== "bearer" || token === undefined || token.trim().length === 0) {
-    return undefined;
-  }
-
-  return token.trim();
 };
 
 const readCapabilities = (value: unknown): string[] => {

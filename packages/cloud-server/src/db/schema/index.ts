@@ -1,4 +1,4 @@
-import { jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const computerKindEnum = pgEnum("computer_kind", ["cloud", "local"]);
 export const releaseTargetEnum = pgEnum("release_target", ["desktop", "machine-server"]);
@@ -93,9 +93,53 @@ export const releaseManifests = pgTable("release_manifests", {
     .on(table.target, table.channel, table.platform),
 }));
 
+export const aiUsageRequests = pgTable("ai_usage_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  computerId: uuid("computer_id").notNull().references(() => computers.id, { onDelete: "cascade" }),
+  machineIdentityId: uuid("machine_identity_id").notNull().references(() => machineIdentities.id, {
+    onDelete: "cascade",
+  }),
+  provider: text("provider").notNull(),
+  model: text("model"),
+  method: text("method").notNull(),
+  upstreamPath: text("upstream_path").notNull(),
+  status: text("status").notNull(),
+  httpStatus: integer("http_status"),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+  reasoningOutputTokens: integer("reasoning_output_tokens").notNull().default(0),
+  totalTokens: integer("total_tokens").notNull().default(0),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  durationMs: integer("duration_ms"),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata").notNull().default({}),
+}, (table) => ({
+  userStartedAtIdx: index("ai_usage_requests_user_started_at_idx").on(table.userId, table.startedAt),
+  computerStartedAtIdx: index("ai_usage_requests_computer_started_at_idx").on(table.computerId, table.startedAt),
+}));
+
+export const aiUsagePayloads = pgTable("ai_usage_payloads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  usageRequestId: uuid("usage_request_id").notNull().references(() => aiUsageRequests.id, { onDelete: "cascade" }),
+  requestHeaders: jsonb("request_headers").notNull().default({}),
+  requestBody: text("request_body"),
+  requestBodyTruncated: boolean("request_body_truncated").notNull().default(false),
+  responseHeaders: jsonb("response_headers").notNull().default({}),
+  responseBody: text("response_body"),
+  responseBodyTruncated: boolean("response_body_truncated").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  usageRequestUnique: uniqueIndex("ai_usage_payloads_usage_request_id_unique").on(table.usageRequestId),
+}));
+
 export type UserRow = typeof users.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type ComputerRow = typeof computers.$inferSelect;
 export type MachineIdentityRow = typeof machineIdentities.$inferSelect;
 export type ComputerAccessSessionRow = typeof computerAccessSessions.$inferSelect;
 export type ReleaseManifestRow = typeof releaseManifests.$inferSelect;
+export type AiUsageRequestRow = typeof aiUsageRequests.$inferSelect;
+export type AiUsagePayloadRow = typeof aiUsagePayloads.$inferSelect;

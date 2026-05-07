@@ -46,6 +46,11 @@ ANK1015_COMPUTER_ID=...
 ANK1015_MACHINE_TOKEN_FILE=/opt/ank1015/machine-token
 ```
 
+When `ANK1015_MACHINE_TOKEN_FILE` is present, the machine server reads that file
+before starting `codex app-server` and injects
+`ANK1015_CODEX_GATEWAY_TOKEN` into the Codex child process. This lets Codex use
+the cloud AI gateway without writing provider secrets to the VM.
+
 ## Updates
 
 Machine-server releases are host artifacts for cloud VMs. Run:

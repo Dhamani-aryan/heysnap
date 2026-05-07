@@ -1,7 +1,9 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, lte, type SQL } from "drizzle-orm";
 
 import type { DbClient } from "./client.js";
 import {
+  aiUsagePayloads,
+  aiUsageRequests,
   computerAccessSessions,
   computers,
   machineIdentities,
@@ -10,6 +12,10 @@ import {
   users,
 } from "./schema/index.js";
 import type {
+  AiUsagePayloadRecord,
+  AiUsageRequestRecord,
+  AiUsageStatus,
+  AiUsageSummary,
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerRecord,
@@ -404,4 +410,174 @@ export class DrizzleCloudStore implements CloudStore {
       .returning({ id: releaseManifests.id });
     return deleted.length > 0;
   }
+
+  async createAiUsageRequest(input: {
+    readonly userId: string;
+    readonly computerId: string;
+    readonly machineIdentityId: string;
+    readonly provider: string;
+    readonly model?: string | null;
+    readonly method: string;
+    readonly upstreamPath: string;
+    readonly status: AiUsageStatus;
+    readonly httpStatus?: number | null;
+    readonly metadata?: unknown;
+    readonly startedAt?: Date;
+  }): Promise<AiUsageRequestRecord> {
+    const [usage] = await this.db.insert(aiUsageRequests).values({
+      userId: input.userId,
+      computerId: input.computerId,
+      machineIdentityId: input.machineIdentityId,
+      provider: input.provider,
+      model: input.model ?? null,
+      method: input.method,
+      upstreamPath: input.upstreamPath,
+      status: input.status,
+      httpStatus: input.httpStatus ?? null,
+      metadata: input.metadata ?? {},
+      startedAt: input.startedAt ?? new Date(),
+    }).returning();
+    return usage;
+  }
+
+  async updateAiUsageRequest(input: {
+    readonly id: string;
+    readonly status: AiUsageStatus;
+    readonly httpStatus?: number | null;
+    readonly model?: string | null;
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly cachedInputTokens?: number;
+    readonly reasoningOutputTokens?: number;
+    readonly totalTokens?: number;
+    readonly completedAt?: Date | null;
+    readonly durationMs?: number | null;
+    readonly errorMessage?: string | null;
+    readonly metadata?: unknown;
+  }): Promise<AiUsageRequestRecord | null> {
+    const [usage] = await this.db
+      .update(aiUsageRequests)
+      .set({
+        status: input.status,
+        ...(input.httpStatus !== undefined ? { httpStatus: input.httpStatus } : {}),
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.inputTokens !== undefined ? { inputTokens: input.inputTokens } : {}),
+        ...(input.outputTokens !== undefined ? { outputTokens: input.outputTokens } : {}),
+        ...(input.cachedInputTokens !== undefined ? { cachedInputTokens: input.cachedInputTokens } : {}),
+        ...(input.reasoningOutputTokens !== undefined
+          ? { reasoningOutputTokens: input.reasoningOutputTokens }
+          : {}),
+        ...(input.totalTokens !== undefined ? { totalTokens: input.totalTokens } : {}),
+        ...(input.completedAt !== undefined ? { completedAt: input.completedAt } : {}),
+        ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+        ...(input.errorMessage !== undefined ? { errorMessage: input.errorMessage } : {}),
+        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      })
+      .where(eq(aiUsageRequests.id, input.id))
+      .returning();
+    return usage ?? null;
+  }
+
+  async createAiUsagePayload(input: {
+    readonly usageRequestId: string;
+    readonly requestHeaders: unknown;
+    readonly requestBody: string | null;
+    readonly requestBodyTruncated: boolean;
+    readonly responseHeaders: unknown;
+    readonly responseBody: string | null;
+    readonly responseBodyTruncated: boolean;
+  }): Promise<AiUsagePayloadRecord> {
+    const [payload] = await this.db.insert(aiUsagePayloads).values(input).returning();
+    return payload;
+  }
+
+  async getAiUsageRequestById(id: string): Promise<AiUsageRequestRecord | null> {
+    const [usage] = await this.db.select().from(aiUsageRequests).where(eq(aiUsageRequests.id, id)).limit(1);
+    return usage ?? null;
+  }
+
+  async getAiUsagePayloadByRequestId(usageRequestId: string): Promise<AiUsagePayloadRecord | null> {
+    const [payload] = await this.db
+      .select()
+      .from(aiUsagePayloads)
+      .where(eq(aiUsagePayloads.usageRequestId, usageRequestId))
+      .limit(1);
+    return payload ?? null;
+  }
+
+  async listAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly limit?: number;
+    readonly before?: Date;
+  } = {}): Promise<AiUsageRequestRecord[]> {
+    const query = this.db
+      .select()
+      .from(aiUsageRequests)
+      .where(buildAiUsageWhere(input))
+      .orderBy(desc(aiUsageRequests.startedAt));
+    return input.limit !== undefined ? query.limit(input.limit) : query;
+  }
+
+  async summarizeAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly from?: Date;
+    readonly to?: Date;
+  } = {}): Promise<AiUsageSummary> {
+    const rows = await this.db
+      .select()
+      .from(aiUsageRequests)
+      .where(buildAiUsageWhere(input));
+
+    return rows.reduce<AiUsageSummary>((summary, usage) => ({
+      requestCount: summary.requestCount + 1,
+      inputTokens: summary.inputTokens + usage.inputTokens,
+      outputTokens: summary.outputTokens + usage.outputTokens,
+      cachedInputTokens: summary.cachedInputTokens + usage.cachedInputTokens,
+      reasoningOutputTokens: summary.reasoningOutputTokens + usage.reasoningOutputTokens,
+      totalTokens: summary.totalTokens + usage.totalTokens,
+    }), emptyAiUsageSummary());
+  }
 }
+
+const buildAiUsageWhere = (input: {
+  readonly userId?: string;
+  readonly computerId?: string;
+  readonly before?: Date;
+  readonly from?: Date;
+  readonly to?: Date;
+}): SQL | undefined => {
+  const conditions: SQL[] = [];
+
+  if (input.userId !== undefined) {
+    conditions.push(eq(aiUsageRequests.userId, input.userId));
+  }
+
+  if (input.computerId !== undefined) {
+    conditions.push(eq(aiUsageRequests.computerId, input.computerId));
+  }
+
+  if (input.before !== undefined) {
+    conditions.push(lt(aiUsageRequests.startedAt, input.before));
+  }
+
+  if (input.from !== undefined) {
+    conditions.push(gte(aiUsageRequests.startedAt, input.from));
+  }
+
+  if (input.to !== undefined) {
+    conditions.push(lte(aiUsageRequests.startedAt, input.to));
+  }
+
+  return conditions.length === 0 ? undefined : and(...conditions);
+};
+
+const emptyAiUsageSummary = (): AiUsageSummary => ({
+  requestCount: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cachedInputTokens: 0,
+  reasoningOutputTokens: 0,
+  totalTokens: 0,
+});

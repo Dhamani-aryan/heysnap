@@ -5,9 +5,11 @@ export interface RenderMachineUserDataInput {
   readonly computer: ComputerRecord;
   readonly bootstrapToken: string;
   readonly machineServerVersion: string;
+  readonly codexDefaultModel?: string;
 }
 
 export const renderMachineUserData = (input: RenderMachineUserDataInput): string => {
+  const codexDefaultModel = input.codexDefaultModel?.trim() || "gpt-5.5";
   const envFile = [
     `CLOUD_SERVER_PUBLIC_URL=${input.cloudServerPublicUrl}`,
     `ANK1015_COMPUTER_ID=${input.computer.id}`,
@@ -36,6 +38,7 @@ fi
 
 install -d -m 0755 -o agent -g agent /workspace
 install -d -m 0755 -o agent -g agent /home/agent
+install -d -m 0700 -o agent -g agent /home/agent/.codex
 install -d -m 0755 -o root -g root /opt/ank1015/machine-server/releases
 
 cat >/opt/ank1015/machine.env <<'ENV'
@@ -48,6 +51,23 @@ cat >/opt/ank1015/bootstrap-token <<'TOKEN'
 ${input.bootstrapToken}
 TOKEN
 chmod 0600 /opt/ank1015/bootstrap-token
+
+cat >/home/agent/.codex/config.toml <<'CODEX'
+model_provider = "azure"
+model = "${codexDefaultModel}"
+
+[model_providers.azure]
+name = "Azure"
+base_url = "${input.cloudServerPublicUrl.replace(/\/+$/, "")}/llm/openai/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+
+[model_providers.azure.env_http_headers]
+"api-key" = "ANK1015_CODEX_GATEWAY_TOKEN"
+CODEX
+chown agent:agent /home/agent/.codex/config.toml
+chmod 0600 /home/agent/.codex/config.toml
 
 cat >/opt/ank1015/install-machine-server-release.sh <<'SCRIPT'
 #!/usr/bin/env bash

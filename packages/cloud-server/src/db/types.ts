@@ -78,6 +78,52 @@ export interface ReleaseManifestRecord {
   readonly updatedAt: Date;
 }
 
+export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";
+
+export interface AiUsageRequestRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly computerId: string;
+  readonly machineIdentityId: string;
+  readonly provider: string;
+  readonly model: string | null;
+  readonly method: string;
+  readonly upstreamPath: string;
+  readonly status: string;
+  readonly httpStatus: number | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+  readonly startedAt: Date;
+  readonly completedAt: Date | null;
+  readonly durationMs: number | null;
+  readonly errorMessage: string | null;
+  readonly metadata: unknown;
+}
+
+export interface AiUsagePayloadRecord {
+  readonly id: string;
+  readonly usageRequestId: string;
+  readonly requestHeaders: unknown;
+  readonly requestBody: string | null;
+  readonly requestBodyTruncated: boolean;
+  readonly responseHeaders: unknown;
+  readonly responseBody: string | null;
+  readonly responseBodyTruncated: boolean;
+  readonly createdAt: Date;
+}
+
+export interface AiUsageSummary {
+  readonly requestCount: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningOutputTokens: number;
+  readonly totalTokens: number;
+}
+
 export interface CloudStore {
   createUser(input: {
     readonly email: string;
@@ -197,4 +243,56 @@ export interface CloudStore {
     readonly releasedAt: Date;
   }): Promise<ReleaseManifestRecord>;
   deleteReleaseManifest(id: string): Promise<boolean>;
+
+  createAiUsageRequest(input: {
+    readonly userId: string;
+    readonly computerId: string;
+    readonly machineIdentityId: string;
+    readonly provider: string;
+    readonly model?: string | null;
+    readonly method: string;
+    readonly upstreamPath: string;
+    readonly status: AiUsageStatus;
+    readonly httpStatus?: number | null;
+    readonly metadata?: unknown;
+    readonly startedAt?: Date;
+  }): Promise<AiUsageRequestRecord>;
+  updateAiUsageRequest(input: {
+    readonly id: string;
+    readonly status: AiUsageStatus;
+    readonly httpStatus?: number | null;
+    readonly model?: string | null;
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly cachedInputTokens?: number;
+    readonly reasoningOutputTokens?: number;
+    readonly totalTokens?: number;
+    readonly completedAt?: Date | null;
+    readonly durationMs?: number | null;
+    readonly errorMessage?: string | null;
+    readonly metadata?: unknown;
+  }): Promise<AiUsageRequestRecord | null>;
+  createAiUsagePayload(input: {
+    readonly usageRequestId: string;
+    readonly requestHeaders: unknown;
+    readonly requestBody: string | null;
+    readonly requestBodyTruncated: boolean;
+    readonly responseHeaders: unknown;
+    readonly responseBody: string | null;
+    readonly responseBodyTruncated: boolean;
+  }): Promise<AiUsagePayloadRecord>;
+  getAiUsageRequestById(id: string): Promise<AiUsageRequestRecord | null>;
+  getAiUsagePayloadByRequestId(usageRequestId: string): Promise<AiUsagePayloadRecord | null>;
+  listAiUsageRequests(input?: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly limit?: number;
+    readonly before?: Date;
+  }): Promise<AiUsageRequestRecord[]>;
+  summarizeAiUsageRequests(input?: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly from?: Date;
+    readonly to?: Date;
+  }): Promise<AiUsageSummary>;
 }

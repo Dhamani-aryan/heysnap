@@ -5,6 +5,9 @@ import { Hono } from "hono";
 import type { AuthService } from "../auth/service.js";
 import type { CloudServerConfig } from "../config.js";
 import type {
+  AiUsagePayloadRecord,
+  AiUsageRequestRecord,
+  AiUsageSummary,
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerRecord,
@@ -64,6 +67,55 @@ export const createAdminRoutes = (
         tunnelConnected: tunnelRegistry.isConnected(computer.id),
       })),
       releases: releases.map(serializeReleaseManifest),
+    });
+  });
+
+  app.get("/ai-usage", async (context) => {
+    const [usageRows, users, computers] = await Promise.all([
+      store.listAiUsageRequests({
+        userId: readOptionalQueryString(context.req.query("userId")),
+        computerId: readOptionalQueryString(context.req.query("computerId")),
+        limit: readLimit(context.req.query("limit")),
+        before: readOptionalDate(context.req.query("before")),
+      }),
+      store.listUsers(),
+      store.listComputers(),
+    ]);
+
+    return context.json({
+      usage: usageRows.map((usage) => serializeAiUsageRequestAdmin(usage, users, computers)),
+    });
+  });
+
+  app.get("/ai-usage/summary", async (context) => {
+    const summary = await store.summarizeAiUsageRequests({
+      userId: readOptionalQueryString(context.req.query("userId")),
+      computerId: readOptionalQueryString(context.req.query("computerId")),
+      from: readOptionalDate(context.req.query("from")),
+      to: readOptionalDate(context.req.query("to")),
+    });
+
+    return context.json({ summary: serializeAiUsageSummary(summary) });
+  });
+
+  app.get("/ai-usage/:usageId", async (context) => {
+    const usage = await store.getAiUsageRequestById(context.req.param("usageId"));
+
+    if (usage === null) {
+      throw notFound("AI_USAGE_NOT_FOUND", "AI usage request not found");
+    }
+
+    const [users, computers, payload] = await Promise.all([
+      store.listUsers(),
+      store.listComputers(),
+      store.getAiUsagePayloadByRequestId(usage.id),
+    ]);
+
+    return context.json({
+      usage: {
+        ...serializeAiUsageRequestAdmin(usage, users, computers),
+        payload: payload === null ? null : serializeAiUsagePayload(payload),
+      },
     });
   });
 
@@ -424,6 +476,56 @@ const serializeAccessSessionAdmin = (accessSession: ComputerAccessSessionRecord)
   createdAt: accessSession.createdAt.toISOString(),
 });
 
+const serializeAiUsageRequestAdmin = (
+  usage: AiUsageRequestRecord,
+  users: ReadonlyArray<{ readonly id: string; readonly email: string }>,
+  computers: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+) => ({
+  id: usage.id,
+  userId: usage.userId,
+  userEmail: users.find((user) => user.id === usage.userId)?.email ?? null,
+  computerId: usage.computerId,
+  computerName: computers.find((computer) => computer.id === usage.computerId)?.name ?? null,
+  machineIdentityId: usage.machineIdentityId,
+  provider: usage.provider,
+  model: usage.model,
+  method: usage.method,
+  upstreamPath: usage.upstreamPath,
+  status: usage.status,
+  httpStatus: usage.httpStatus,
+  inputTokens: usage.inputTokens,
+  outputTokens: usage.outputTokens,
+  cachedInputTokens: usage.cachedInputTokens,
+  reasoningOutputTokens: usage.reasoningOutputTokens,
+  totalTokens: usage.totalTokens,
+  startedAt: usage.startedAt.toISOString(),
+  completedAt: usage.completedAt?.toISOString() ?? null,
+  durationMs: usage.durationMs,
+  errorMessage: usage.errorMessage,
+  metadata: usage.metadata,
+});
+
+const serializeAiUsagePayload = (payload: AiUsagePayloadRecord) => ({
+  id: payload.id,
+  usageRequestId: payload.usageRequestId,
+  requestHeaders: payload.requestHeaders,
+  requestBody: payload.requestBody,
+  requestBodyTruncated: payload.requestBodyTruncated,
+  responseHeaders: payload.responseHeaders,
+  responseBody: payload.responseBody,
+  responseBodyTruncated: payload.responseBodyTruncated,
+  createdAt: payload.createdAt.toISOString(),
+});
+
+const serializeAiUsageSummary = (summary: AiUsageSummary) => ({
+  requestCount: summary.requestCount,
+  inputTokens: summary.inputTokens,
+  outputTokens: summary.outputTokens,
+  cachedInputTokens: summary.cachedInputTokens,
+  reasoningOutputTokens: summary.reasoningOutputTokens,
+  totalTokens: summary.totalTokens,
+});
+
 const readMetadata = (value: unknown): unknown => {
   if (value === undefined) {
     return {};
@@ -443,6 +545,32 @@ const readReleasedAt = (value: unknown): Date => {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? new Date() : date;
+};
+
+const readOptionalQueryString = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+};
+
+const readOptionalDate = (value: string | undefined): Date | undefined => {
+  const trimmed = value?.trim();
+
+  if (trimmed === undefined || trimmed.length === 0) {
+    return undefined;
+  }
+
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+};
+
+const readLimit = (value: string | undefined): number => {
+  const parsed = Number.parseInt(value ?? "", 10);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return 50;
+  }
+
+  return Math.min(parsed, 200);
 };
 
 const optionalNonEmptyString = (

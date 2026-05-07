@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { CodexAgentHarness } from "../src/agent/harnesses/codex/codex-agent-harness.js";
 import {
   CodexStdioAppServerClient,
+  resolveCodexAppServerEnv,
   type CodexAppServerClient,
   type CodexAppServerNotification,
 } from "../src/agent/harnesses/codex/app-server-client.js";
@@ -1154,6 +1155,37 @@ describe("codex agent harness", () => {
 });
 
 describe("codex app-server client", () => {
+  it("injects the Codex gateway token from the machine token file", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ank1015-codex-env-"));
+
+    try {
+      const tokenPath = join(tempDir, "machine-token");
+      await writeFile(tokenPath, "machine-token-value\n");
+
+      expect(resolveCodexAppServerEnv({
+        ANK1015_MACHINE_TOKEN_FILE: tokenPath,
+        EXISTING_ENV: "kept",
+      })).toMatchObject({
+        ANK1015_CODEX_GATEWAY_TOKEN: "machine-token-value",
+        EXISTING_ENV: "kept",
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails clearly when cloud machine registration has not produced a token yet", () => {
+    expect(() => resolveCodexAppServerEnv({
+      ANK1015_MACHINE_TOKEN_FILE: "/tmp/ank1015-missing-machine-token",
+    })).toThrow("Machine registration is not ready");
+  });
+
+  it("leaves local Codex app-server environments unchanged", () => {
+    const env = { EXISTING_ENV: "kept" };
+
+    expect(resolveCodexAppServerEnv(env)).toBe(env);
+  });
+
   it("dispatches JSON-RPC notifications to subscribers", () => {
     const client = new CodexStdioAppServerClient();
     const notifications: CodexAppServerNotification[] = [];
