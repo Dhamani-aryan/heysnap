@@ -11,22 +11,28 @@
   "scripts": {
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "peerDependencies": {
     "react": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.2",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.1",
     "@hugeicons/react": "^1.1.6",
+    "@legendapp/list": "3.0.0-beta.44",
     "@monaco-editor/react": "^4.7.0",
+    "@pierre/diffs": "^1.1.20",
     "docx-preview": "^0.3.7",
     "monaco-editor": "^0.55.1",
     "motion": "^12.38.0",
-    "streamdown": "^2.5.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.13"
   }
 }
