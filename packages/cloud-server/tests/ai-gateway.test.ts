@@ -280,7 +280,7 @@ describe("AI gateway", () => {
       headers: adminHeaders(),
     });
     expect(summary.status).toBe(200);
-    expect(await summary.json()).toEqual({
+    expect(await summary.json()).toMatchObject({
       summary: {
         requestCount: 1,
         inputTokens: 5,
@@ -288,6 +288,13 @@ describe("AI gateway", () => {
         cachedInputTokens: 0,
         reasoningOutputTokens: 0,
         totalTokens: 11,
+        successCount: 1,
+        failedCount: 0,
+        abortedCount: 0,
+        startedCount: 0,
+        distinctUsers: 1,
+        distinctComputers: 1,
+        distinctModels: 1,
       },
     });
   });

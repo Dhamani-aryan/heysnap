@@ -290,6 +290,363 @@ describe("admin overview tunnel state", () => {
   });
 });
 
+describe("admin AI usage analytics", () => {
+  it("filters list by status, model, and from", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "ai-list@example.com");
+    const computer = await createComputer(app, owner.token, "AI VM");
+    const [identity] = await store.listMachineIdentitiesForComputer(computer.id);
+
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 100,
+      outputTokens: 50,
+      durationMs: 800,
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o-mini",
+      status: "failed",
+      inputTokens: 10,
+      outputTokens: 0,
+      durationMs: 50,
+      startedAt: new Date("2026-04-02T10:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 200,
+      outputTokens: 80,
+      durationMs: 1200,
+      startedAt: new Date("2026-04-03T10:00:00Z"),
+    });
+
+    const filteredByStatus = await app.request(
+      "/admin/ai-usage?status=failed",
+      { headers: adminHeaders() },
+    );
+    expect(filteredByStatus.status).toBe(200);
+    const failedBody = await filteredByStatus.json() as { readonly usage: ReadonlyArray<{ readonly status: string }> };
+    expect(failedBody.usage).toHaveLength(1);
+    expect(failedBody.usage[0]!.status).toBe("failed");
+
+    const filteredByModel = await app.request(
+      "/admin/ai-usage?model=gpt-4o",
+      { headers: adminHeaders() },
+    );
+    expect(filteredByModel.status).toBe(200);
+    const modelBody = await filteredByModel.json() as { readonly usage: ReadonlyArray<{ readonly model: string }> };
+    expect(modelBody.usage).toHaveLength(2);
+    expect(modelBody.usage.every((row) => row.model === "gpt-4o")).toBe(true);
+
+    const filteredByFrom = await app.request(
+      "/admin/ai-usage?from=2026-04-02T00:00:00Z",
+      { headers: adminHeaders() },
+    );
+    expect(filteredByFrom.status).toBe(200);
+    const fromBody = await filteredByFrom.json() as { readonly usage: unknown[] };
+    expect(fromBody.usage).toHaveLength(2);
+  });
+
+  it("returns rich summary fields", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "ai-summary@example.com");
+    const computer = await createComputer(app, owner.token, "Summary VM");
+    const [identity] = await store.listMachineIdentitiesForComputer(computer.id);
+
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 100,
+      outputTokens: 80,
+      durationMs: 100,
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "failed",
+      inputTokens: 5,
+      outputTokens: 0,
+      durationMs: null,
+      startedAt: new Date("2026-04-01T11:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o-mini",
+      status: "succeeded",
+      inputTokens: 20,
+      outputTokens: 5,
+      durationMs: 300,
+      startedAt: new Date("2026-04-01T12:00:00Z"),
+    });
+
+    const response = await app.request("/admin/ai-usage/summary", { headers: adminHeaders() });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      readonly summary: {
+        readonly requestCount: number;
+        readonly successCount: number;
+        readonly failedCount: number;
+        readonly distinctModels: number;
+        readonly distinctUsers: number;
+        readonly distinctComputers: number;
+        readonly avgDurationMs: number | null;
+        readonly p50DurationMs: number | null;
+        readonly p95DurationMs: number | null;
+      };
+    };
+    expect(body.summary.requestCount).toBe(3);
+    expect(body.summary.successCount).toBe(2);
+    expect(body.summary.failedCount).toBe(1);
+    expect(body.summary.distinctModels).toBe(2);
+    expect(body.summary.distinctUsers).toBe(1);
+    expect(body.summary.distinctComputers).toBe(1);
+    expect(body.summary.avgDurationMs).toBe(200);
+    expect(body.summary.p50DurationMs).not.toBeNull();
+    expect(body.summary.p95DurationMs).not.toBeNull();
+  });
+
+  it("returns daily token buckets", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "ai-buckets@example.com");
+    const computer = await createComputer(app, owner.token, "Buckets VM");
+    const [identity] = await store.listMachineIdentitiesForComputer(computer.id);
+
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 10,
+      outputTokens: 5,
+      durationMs: 100,
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 20,
+      outputTokens: 10,
+      durationMs: 100,
+      startedAt: new Date("2026-04-01T22:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "failed",
+      inputTokens: 1,
+      outputTokens: 0,
+      durationMs: null,
+      startedAt: new Date("2026-04-02T03:00:00Z"),
+    });
+
+    const response = await app.request(
+      "/admin/ai-usage/buckets?bucket=day&from=2026-03-30T00:00:00Z&to=2026-04-05T00:00:00Z",
+      { headers: adminHeaders() },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      readonly buckets: ReadonlyArray<{
+        readonly bucketStart: string;
+        readonly requestCount: number;
+        readonly inputTokens: number;
+        readonly successCount: number;
+        readonly failedCount: number;
+      }>;
+    };
+    expect(body.buckets).toHaveLength(2);
+    const [first, second] = body.buckets;
+    expect(first!.bucketStart).toBe("2026-04-01T00:00:00.000Z");
+    expect(first!.requestCount).toBe(2);
+    expect(first!.inputTokens).toBe(30);
+    expect(first!.successCount).toBe(2);
+    expect(second!.bucketStart).toBe("2026-04-02T00:00:00.000Z");
+    expect(second!.failedCount).toBe(1);
+  });
+
+  it("returns model and user breakdowns with labels", async () => {
+    const { app, store } = createTestApp();
+    const userA = await registerUser(app, "ai-break-a@example.com");
+    const userB = await registerUser(app, "ai-break-b@example.com");
+    const computerA = await createComputer(app, userA.token, "VM A");
+    const computerB = await createComputer(app, userB.token, "VM B");
+    const [identityA] = await store.listMachineIdentitiesForComputer(computerA.id);
+    const [identityB] = await store.listMachineIdentitiesForComputer(computerB.id);
+
+    await seedAiUsage(store, {
+      userId: userA.userId,
+      computerId: computerA.id,
+      identityId: identityA!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 100,
+      outputTokens: 50,
+      durationMs: 500,
+      startedAt: new Date("2026-04-01T00:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: userA.userId,
+      computerId: computerA.id,
+      identityId: identityA!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 200,
+      outputTokens: 100,
+      durationMs: 500,
+      startedAt: new Date("2026-04-01T01:00:00Z"),
+    });
+    await seedAiUsage(store, {
+      userId: userB.userId,
+      computerId: computerB.id,
+      identityId: identityB!.id,
+      model: "gpt-4o-mini",
+      status: "succeeded",
+      inputTokens: 5,
+      outputTokens: 5,
+      durationMs: 100,
+      startedAt: new Date("2026-04-01T02:00:00Z"),
+    });
+
+    const modelResponse = await app.request(
+      "/admin/ai-usage/breakdown?groupBy=model&limit=10",
+      { headers: adminHeaders() },
+    );
+    expect(modelResponse.status).toBe(200);
+    const modelBody = await modelResponse.json() as {
+      readonly groupBy: string;
+      readonly groups: ReadonlyArray<{ readonly key: string; readonly label: string; readonly totalTokens: number }>;
+    };
+    expect(modelBody.groupBy).toBe("model");
+    expect(modelBody.groups[0]!.key).toBe("gpt-4o");
+    expect(modelBody.groups[0]!.totalTokens).toBeGreaterThan(modelBody.groups[1]!.totalTokens);
+
+    const userResponse = await app.request(
+      "/admin/ai-usage/breakdown?groupBy=user",
+      { headers: adminHeaders() },
+    );
+    expect(userResponse.status).toBe(200);
+    const userBody = await userResponse.json() as {
+      readonly groups: ReadonlyArray<{ readonly key: string; readonly label: string }>;
+    };
+    const labelByKey = new Map(userBody.groups.map((row) => [row.key, row.label]));
+    expect(labelByKey.get(userA.userId)).toBe("ai-break-a@example.com");
+    expect(labelByKey.get(userB.userId)).toBe("ai-break-b@example.com");
+  });
+
+  it("returns combined per-user analytics", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "ai-user@example.com");
+    const computer = await createComputer(app, owner.token, "User AI VM");
+    const [identity] = await store.listMachineIdentitiesForComputer(computer.id);
+
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 100,
+      outputTokens: 50,
+      durationMs: 200,
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+    });
+
+    const response = await app.request(
+      `/admin/users/${owner.userId}/ai-usage?from=2026-03-30T00:00:00Z`,
+      { headers: adminHeaders() },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      readonly summary: { readonly requestCount: number };
+      readonly buckets: ReadonlyArray<{ readonly requestCount: number }>;
+      readonly breakdown: {
+        readonly models: ReadonlyArray<{ readonly key: string }>;
+        readonly computers: ReadonlyArray<{ readonly key: string; readonly label: string }>;
+      };
+    };
+    expect(body.summary.requestCount).toBe(1);
+    expect(body.buckets).toHaveLength(1);
+    expect(body.breakdown.models[0]!.key).toBe("gpt-4o");
+    expect(body.breakdown.computers[0]!.key).toBe(computer.id);
+    expect(body.breakdown.computers[0]!.label).toBe("User AI VM");
+  });
+
+  it("returns 404 for unknown user/computer ai-usage", async () => {
+    const { app } = createTestApp();
+    const userResponse = await app.request(
+      "/admin/users/00000000-0000-0000-0000-000000000000/ai-usage",
+      { headers: adminHeaders() },
+    );
+    expect(userResponse.status).toBe(404);
+
+    const computerResponse = await app.request(
+      "/admin/computers/00000000-0000-0000-0000-000000000000/ai-usage",
+      { headers: adminHeaders() },
+    );
+    expect(computerResponse.status).toBe(404);
+  });
+
+  it("returns combined per-computer analytics", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "ai-comp@example.com");
+    const computer = await createComputer(app, owner.token, "Computer AI VM");
+    const [identity] = await store.listMachineIdentitiesForComputer(computer.id);
+
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-4o",
+      status: "succeeded",
+      inputTokens: 50,
+      outputTokens: 25,
+      durationMs: 150,
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+    });
+
+    const response = await app.request(
+      `/admin/computers/${computer.id}/ai-usage`,
+      { headers: adminHeaders() },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      readonly summary: { readonly requestCount: number };
+      readonly breakdown: {
+        readonly models: ReadonlyArray<{ readonly key: string }>;
+        readonly users: ReadonlyArray<{ readonly key: string; readonly label: string }>;
+      };
+    };
+    expect(body.summary.requestCount).toBe(1);
+    expect(body.breakdown.models[0]!.key).toBe("gpt-4o");
+    expect(body.breakdown.users[0]!.key).toBe(owner.userId);
+    expect(body.breakdown.users[0]!.label).toBe("ai-comp@example.com");
+  });
+});
+
 describe("admin release management", () => {
   it("deletes a release manifest", async () => {
     const { app } = createTestApp();
@@ -369,6 +726,51 @@ const createComputer = async (
   });
   const body = await response.json() as { readonly computer: { readonly id: string; readonly name: string } };
   return body.computer;
+};
+
+const seedAiUsage = async (
+  store: InMemoryCloudStore,
+  input: {
+    readonly userId: string;
+    readonly computerId: string;
+    readonly identityId: string;
+    readonly model: string | null;
+    readonly status: "started" | "succeeded" | "failed" | "aborted";
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly durationMs: number | null;
+    readonly startedAt: Date;
+  },
+): Promise<void> => {
+  const usage = await store.createAiUsageRequest({
+    userId: input.userId,
+    computerId: input.computerId,
+    machineIdentityId: input.identityId,
+    provider: "azure",
+    model: input.model,
+    method: "POST",
+    upstreamPath: "/openai/v1/chat/completions",
+    status: input.status === "succeeded" || input.status === "failed" || input.status === "aborted"
+      ? "started"
+      : input.status,
+    startedAt: input.startedAt,
+  });
+  if (input.status === "started") {
+    return;
+  }
+  const completedAt = input.durationMs !== null
+    ? new Date(input.startedAt.getTime() + input.durationMs)
+    : input.startedAt;
+  await store.updateAiUsageRequest({
+    id: usage.id,
+    status: input.status,
+    httpStatus: input.status === "succeeded" ? 200 : 500,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    totalTokens: input.inputTokens + input.outputTokens,
+    completedAt,
+    durationMs: input.durationMs,
+  });
 };
 
 const authHeaders = (token: string) => ({
