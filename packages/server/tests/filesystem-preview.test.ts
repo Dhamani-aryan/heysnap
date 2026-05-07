@@ -15,6 +15,20 @@ afterEach(async () => {
 });
 
 describe("filesystem preview", () => {
+  it("serves pdf files inline", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "manual.pdf"), "%PDF manual");
+    const server = await startTestServer(root);
+
+    const response = await fetch(previewUrl(server, "manual.pdf"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe("inline; filename=\"manual.pdf\"");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await response.text()).toBe("%PDF manual");
+  });
+
   it("converts xlsx files to PDF previews", async () => {
     const root = await createRoot();
     const sourcePath = join(root, "budget.xlsx");
@@ -27,6 +41,20 @@ describe("filesystem preview", () => {
     expect(response.headers.get("content-type")).toBe("application/pdf");
     expect(response.headers.get("content-disposition")).toBe("inline; filename=\"budget.pdf\"");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await response.text()).toBe("%PDF fake");
+  });
+
+  it("converts pptx files to PDF previews", async () => {
+    const root = await createRoot();
+    const sourcePath = join(root, "deck.pptx");
+    await writeFile(sourcePath, "pptx bytes");
+    const server = await startTestServer(root);
+
+    const response = await fetch(previewUrl(server, "deck.pptx"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("content-disposition")).toBe("inline; filename=\"deck.pdf\"");
     expect(await response.text()).toBe("%PDF fake");
   });
 
