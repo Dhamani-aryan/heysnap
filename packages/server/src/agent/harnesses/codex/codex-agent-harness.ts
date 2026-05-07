@@ -4,13 +4,16 @@ import { promisify } from "node:util";
 
 import type {
   AgentContent,
+  AgentErrorPayload,
   AgentMessage,
   AgentRunEvent,
+  AgentRuntimeEventBase,
+  AgentRuntimeEventType,
+  AgentRuntimeItem,
   AgentThread,
   AgentThreadGroup,
   AgentThreadSummary,
   AssistantMessage,
-  AssistantStreamEvent,
   CancelRunInput,
   CustomMessage,
   GetThreadInput,
@@ -72,7 +75,6 @@ export class CodexAgentHarness implements IAgentHarness {
   private readonly filesystemRoot: string;
   private readonly codexBin?: string;
   private readonly client: CodexAppServerClient;
-  private readonly liveThreadMessages = new Map<string, AgentMessage[]>();
 
   constructor(options: CodexAgentHarnessOptions) {
     this.filesystemRoot = options.filesystemRoot;
@@ -179,13 +181,7 @@ export class CodexAgentHarness implements IAgentHarness {
     });
 
     const thread = mapCodexThreadToAgentThread(response.thread, this.filesystemRoot);
-    const messages = mergeAgentMessages(thread.messages, this.liveThreadMessages.get(input.threadId) ?? []);
-
-    return {
-      ...thread,
-      messages,
-      messageCount: messages.filter((message) => message.role === "user").length,
-    };
+    return thread;
   }
 
   async *sendMessage(_input: SendMessageInput): AsyncIterable<AgentRunEvent> {
@@ -196,6 +192,7 @@ export class CodexAgentHarness implements IAgentHarness {
     const queue = new AsyncQueue<CodexAppServerNotification>();
     const pendingNotifications: CodexAppServerNotification[] = [];
     let turnId: string | undefined;
+    let sequence = 0;
     const unsubscribe = this.client.subscribe((notification) => {
       if (!notificationBelongsToThread(notification, threadId)) {
         return;
@@ -218,12 +215,36 @@ export class CodexAgentHarness implements IAgentHarness {
       });
       turnId = turnResponse.turn.id;
       const scope = { runId: turnId, threadId };
+      const nextBase = <TType extends AgentRuntimeEventType>(
+        type: TType,
+        options: {
+          readonly createdAt?: number;
+          readonly providerItemId?: string;
+          readonly providerRequestId?: string;
+        } = {},
+      ): AgentRuntimeEventBase & { readonly type: TType } => ({
+        version: 2,
+        type,
+        runId: scope.runId,
+        threadId: scope.threadId,
+        turnId,
+        sequence: ++sequence,
+        createdAt: options.createdAt ?? Date.now(),
+        provider: "codex",
+        providerRefs: compactRecord({
+          providerThreadId: scope.threadId,
+          providerTurnId: turnId,
+          providerItemId: options.providerItemId,
+          providerRequestId: options.providerRequestId,
+        }),
+      });
       const mapper = new CodexLiveTurnMapper({
         scope,
         thread,
         turn: turnResponse.turn,
         path,
         filesystemRoot: this.filesystemRoot,
+        nextBase,
         readUpdatedThread: () => this.client.request<CodexThreadReadResponse>("thread/read", {
           threadId,
           includeTurns: true,
@@ -236,17 +257,18 @@ export class CodexAgentHarness implements IAgentHarness {
         }
       }
 
-      yield { ...scope, type: "agent_start" };
-
       if (isNewThread) {
         yield {
-          ...scope,
-          type: "thread_created",
+          ...nextBase("thread.created", { createdAt: threadTimestampMs(thread) }),
           thread: toThreadSummary(thread, this.filesystemRoot, 1),
         };
       }
 
-      yield { ...scope, type: "turn_start" };
+      yield {
+        ...nextBase("turn.started", { createdAt: turnTimestampMs(turnResponse.turn, thread) }),
+        input: _input.content,
+        path,
+      };
 
       for (;;) {
         const notification = await queue.shift();
@@ -259,12 +281,6 @@ export class CodexAgentHarness implements IAgentHarness {
 
         for (const event of result.events) {
           yield event;
-        }
-
-        const agentEnd = result.events.find(isAgentEndEvent);
-
-        if (agentEnd !== undefined) {
-          this.rememberLiveThreadMessages(threadId, agentEnd.agentMessages);
         }
 
         if (result.done) {
@@ -306,14 +322,6 @@ export class CodexAgentHarness implements IAgentHarness {
     return thread.source === "appServer";
   }
 
-  private rememberLiveThreadMessages(threadId: string, messages: readonly AgentMessage[]): void {
-    const merged = mergeAgentMessages(this.liveThreadMessages.get(threadId) ?? [], messages);
-
-    if (merged.length > 0) {
-      this.liveThreadMessages.set(threadId, merged);
-    }
-  }
-
   private async startThread(path: string): Promise<CodexThread> {
     const cwd = resolveClientPath(this.filesystemRoot, path);
     const response = await this.client.request<CodexThreadStartResponse>("thread/start", {
@@ -348,6 +356,14 @@ interface CodexLiveTurnMapperOptions {
   readonly turn: CodexTurn;
   readonly path: string;
   readonly filesystemRoot: string;
+  readonly nextBase: <TType extends AgentRuntimeEventType>(
+    type: TType,
+    options?: {
+      readonly createdAt?: number;
+      readonly providerItemId?: string;
+      readonly providerRequestId?: string;
+    },
+  ) => AgentRuntimeEventBase & { readonly type: TType };
   readonly readUpdatedThread: () => Promise<CodexThreadReadResponse>;
 }
 
@@ -362,6 +378,7 @@ class CodexLiveTurnMapper {
   private readonly turn: CodexTurn;
   private readonly path: string;
   private readonly filesystemRoot: string;
+  private readonly nextBase: CodexLiveTurnMapperOptions["nextBase"];
   private readonly readUpdatedThread: () => Promise<CodexThreadReadResponse>;
   private readonly messages: AgentMessage[] = [];
   private readonly assistantMessages = new Map<string, AssistantMessage>();
@@ -375,6 +392,7 @@ class CodexLiveTurnMapper {
     this.turn = options.turn;
     this.path = options.path;
     this.filesystemRoot = options.filesystemRoot;
+    this.nextBase = options.nextBase;
     this.readUpdatedThread = options.readUpdatedThread;
   }
 
@@ -389,6 +407,12 @@ class CodexLiveTurnMapper {
       case "item/fileChange/patchUpdated":
       case "item/mcpToolCall/progress":
         return { events: this.handleToolUpdate(notification.params), done: false };
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+        return { events: this.handleRequestOpened(notification.method, notification.params), done: false };
+      case "item/commandExecution/requestApproval/resolved":
+      case "item/fileChange/requestApproval/resolved":
+        return { events: this.handleRequestResolved(notification.method, notification.params), done: false };
       case "item/completed":
         return { events: this.handleItemCompleted(notification.params), done: false };
       case "turn/completed":
@@ -424,8 +448,10 @@ class CodexLiveTurnMapper {
       this.messages.push(message);
       return [
         {
-          ...this.scope,
-          type: "message_start",
+          ...this.nextBase("message.started", {
+            createdAt: message.timestamp,
+            providerItemId: item.id,
+          }),
           messageType: "assistant",
           messageId: message.id,
           message,
@@ -440,20 +466,28 @@ class CodexLiveTurnMapper {
       this.toolNames.set(item.id, toolName);
       return [
         {
-          ...this.scope,
-          type: "tool_execution_start",
-          toolCallId: item.id,
-          toolName,
-          args,
+          ...this.nextBase("item.started", {
+            createdAt: turnTimestampMs(this.turn, this.thread),
+            providerItemId: item.id,
+          }),
+          item: toRuntimeItem(item, "running", { args }),
         },
       ];
     }
 
-    return [];
+    return [
+      {
+        ...this.nextBase("item.started", {
+          createdAt: turnTimestampMs(this.turn, this.thread),
+          providerItemId: item.id,
+        }),
+        item: toRuntimeItem(item, "running"),
+      },
+    ];
   }
 
   private handleAgentMessageDelta(params: unknown): AgentRunEvent[] {
-    const payload = asRecord(params);
+    const payload = asRecord(params) ?? {};
     const itemId = stringField(payload, "itemId");
     const delta = stringField(payload, "delta");
 
@@ -466,40 +500,101 @@ class CodexLiveTurnMapper {
     this.assistantMessages.set(itemId, updated);
     this.replaceMessage(updated);
 
-    const streamEvent: AssistantStreamEvent = {
-      type: "text_delta",
-      contentIndex: 0,
-      delta,
-      message: updated,
-    };
-
     return [
       {
-        ...this.scope,
-        type: "message_update",
-        messageType: "assistant",
+        ...this.nextBase("content.delta", {
+          createdAt: updated.timestamp,
+          providerItemId: itemId,
+        }),
         messageId: itemId,
-        message: streamEvent,
+        contentIndex: 0,
+        streamKind: "assistant_text",
+        delta,
       },
     ];
   }
 
   private handleToolUpdate(params: unknown): AgentRunEvent[] {
-    const payload = asRecord(params);
+    const payload = asRecord(params) ?? {};
     const itemId = stringField(payload, "itemId");
 
     if (itemId === undefined) {
       return [];
     }
 
+    const progressSummary = extractToolProgressSummary(payload);
+    const events: AgentRunEvent[] = [
+      {
+        ...this.nextBase("item.updated", {
+          providerItemId: itemId,
+        }),
+        item: {
+          id: itemId,
+          itemType: "unknown",
+          status: "running",
+          title: this.toolNames.get(itemId) ?? "Codex tool",
+          summary: progressSummary,
+          args: this.toolArgs.get(itemId),
+          raw: payload,
+        },
+      },
+    ];
+
+    if (progressSummary !== undefined && progressSummary.length > 0) {
+      events.push({
+        ...this.nextBase("content.delta", {
+          providerItemId: itemId,
+        }),
+        messageId: itemId,
+        contentIndex: 0,
+        streamKind: "tool_output",
+        delta: progressSummary,
+      });
+    }
+
+    return events;
+  }
+
+  private handleRequestOpened(method: string, params: unknown): AgentRunEvent[] {
+    const payload = asRecord(params);
+    const requestId = stringField(payload, "requestId") ?? `${this.scope.runId}:${method}`;
+    const itemId = stringField(payload, "itemId");
     return [
       {
-        ...this.scope,
-        type: "tool_execution_update",
-        toolCallId: itemId,
-        toolName: this.toolNames.get(itemId) ?? "codex",
-        args: this.toolArgs.get(itemId),
-        partialResult: payload,
+        ...this.nextBase("request.opened", {
+          providerItemId: itemId,
+          providerRequestId: requestId,
+        }),
+        request: {
+          id: requestId,
+          requestType: method.includes("fileChange") ? "file_change_approval" : "command_execution_approval",
+          title: method.includes("fileChange") ? "File change approved" : "Command approved",
+          summary: "Auto-accepted",
+          payload,
+        },
+      },
+    ];
+  }
+
+  private handleRequestResolved(method: string, params: unknown): AgentRunEvent[] {
+    const payload = asRecord(params);
+    const requestId = stringField(payload, "requestId") ?? `${this.scope.runId}:${method}`;
+    const itemId = stringField(payload, "itemId");
+    const decision = stringField(payload, "decision");
+    return [
+      {
+        ...this.nextBase("request.resolved", {
+          providerItemId: itemId,
+          providerRequestId: requestId,
+        }),
+        request: {
+          id: requestId,
+          requestType: method.includes("fileChange") ? "file_change_approval" : "command_execution_approval",
+          title: method.includes("fileChange") ? "File change approved" : "Command approved",
+          summary: "Auto-accepted",
+          payload,
+          decision: decision === "deny" || decision === "cancel" ? decision : "accept",
+        },
       },
     ];
   }
@@ -530,8 +625,10 @@ class CodexLiveTurnMapper {
 
       if (!hadStart) {
         events.push({
-          ...this.scope,
-          type: "message_start",
+          ...this.nextBase("message.started", {
+            createdAt: message.timestamp,
+            providerItemId: item.id,
+          }),
           messageType: "assistant",
           messageId: message.id,
           message,
@@ -540,8 +637,10 @@ class CodexLiveTurnMapper {
 
       events.push(
         {
-          ...this.scope,
-          type: "message_end",
+          ...this.nextBase("message.completed", {
+            createdAt: message.timestamp + message.duration,
+            providerItemId: item.id,
+          }),
           messageType: "assistant",
           messageId: message.id,
           message,
@@ -554,21 +653,18 @@ class CodexLiveTurnMapper {
     this.messages.push(...messages);
     const events: AgentRunEvent[] = [];
 
-    if (isToolLikeItem(item)) {
-      const toolMessage = messages.find((message): message is ToolResultMessage => message.role === "toolResult");
-      events.push({
-        ...this.scope,
-        type: "tool_execution_end",
-        toolCallId: item.id,
-        toolName: toolNameForItem(item),
+    const toolMessage = messages.find((message): message is ToolResultMessage => message.role === "toolResult");
+    events.push({
+      ...this.nextBase("item.completed", {
+        createdAt: turnTimestampMs(this.turn, this.thread),
+        providerItemId: item.id,
+      }),
+      item: toRuntimeItem(item, toolMessage?.isError === true ? "failed" : "completed", {
         result: item,
         isError: toolMessage?.isError ?? false,
-      });
-    }
-
-    for (const message of messages) {
-      events.push(...this.messageStartEndEvents(message));
-    }
+        summary: toolMessage ? getTextContent(toolMessage.content) : undefined,
+      }),
+    });
 
     return events;
   }
@@ -578,36 +674,33 @@ class CodexLiveTurnMapper {
     const turn = asRecord(payload?.["turn"]);
     const status = stringField(turn, "status");
     const events: AgentRunEvent[] = [];
-    let messagesForOverlay = this.messages;
+    const completedAt = numberField(turn, "completedAt") !== undefined
+      ? Math.round(numberField(turn, "completedAt")! * 1000)
+      : Date.now();
 
     if (status === "failed") {
       events.push(this.toAgentErrorEvent({ error: turn?.["error"] }));
     }
 
-    events.push({ ...this.scope, type: "turn_end" });
+    events.push({
+      ...this.nextBase("turn.completed", { createdAt: completedAt }),
+      status: status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed",
+      ...(status === "failed" ? { error: this.toAgentErrorPayload({ error: turn?.["error"] }) } : {}),
+    });
 
     try {
       const response = await this.readUpdatedThread();
       const updatedThread = mapCodexThreadToAgentThread(response.thread, this.filesystemRoot);
-      messagesForOverlay = missingAgentMessages(updatedThread.messages, this.messages);
       events.push({
-        ...this.scope,
-        type: "thread_updated",
+        ...this.nextBase("thread.updated", { createdAt: threadTimestampMs(response.thread) }),
         thread: toThreadSummary(response.thread, this.filesystemRoot, countUserMessages(response.thread)),
       });
     } catch {
       events.push({
-        ...this.scope,
-        type: "thread_updated",
+        ...this.nextBase("thread.updated", { createdAt: threadTimestampMs(this.thread) }),
         thread: toThreadSummary(this.thread, this.filesystemRoot),
       });
     }
-
-    events.push({
-      ...this.scope,
-      type: "agent_end",
-      agentMessages: messagesForOverlay,
-    });
 
     return { events, done: true };
   }
@@ -615,15 +708,19 @@ class CodexLiveTurnMapper {
   private messageStartEndEvents(message: AgentMessage): AgentRunEvent[] {
     return [
       {
-        ...this.scope,
-        type: "message_start",
+        ...this.nextBase("message.started", {
+          createdAt: message.timestamp,
+          providerItemId: message.id,
+        }),
         messageType: message.role,
         messageId: message.id,
         message,
       },
       {
-        ...this.scope,
-        type: "message_end",
+        ...this.nextBase("message.completed", {
+          createdAt: message.timestamp,
+          providerItemId: message.id,
+        }),
         messageType: message.role,
         messageId: message.id,
         message,
@@ -635,7 +732,7 @@ class CodexLiveTurnMapper {
     return {
       role: "assistant",
       id: itemId,
-      timestamp: Date.now(),
+      timestamp: turnTimestampMs(this.turn, this.thread),
       duration: 0,
       provider: this.thread.modelProvider,
       stopReason: "stop",
@@ -699,18 +796,21 @@ class CodexLiveTurnMapper {
   }
 
   private toAgentErrorEvent(params: unknown): AgentRunEvent {
+    return {
+      ...this.nextBase("runtime.error"),
+      error: this.toAgentErrorPayload(params),
+    };
+  }
+
+  private toAgentErrorPayload(params: unknown): AgentErrorPayload {
     const payload = asRecord(params);
     const error = asRecord(payload?.["error"]);
     const message = stringField(error, "message") ?? "Codex turn failed";
 
     return {
-      ...this.scope,
-      type: "agent_error",
-      error: {
-        phase: "server",
-        message,
-        canRetry: true,
-      },
+      phase: "server",
+      message,
+      canRetry: true,
     };
   }
 }
@@ -730,132 +830,6 @@ const groupThreads = (threads: readonly AgentThreadSummary[]): AgentThreadGroup[
       path,
       threads: groupThreadsForPath.sort((left, right) => right.updatedAt - left.updatedAt),
     }));
-};
-
-const isAgentEndEvent = (
-  event: AgentRunEvent,
-): event is Extract<AgentRunEvent, { readonly type: "agent_end" }> =>
-  event.type === "agent_end";
-
-const mergeAgentMessages = (
-  persistedMessages: readonly AgentMessage[],
-  liveMessages: readonly AgentMessage[],
-): AgentMessage[] => {
-  const seenMessageIds = new Set<string>();
-  const seenMessageKeys = new Set<string>();
-  const entries: Array<{ readonly message: AgentMessage; readonly index: number }> = [];
-
-  for (const message of persistedMessages) {
-    seenMessageIds.add(message.id);
-    const key = agentMessageSemanticKey(message);
-
-    if (key !== undefined) {
-      seenMessageKeys.add(key);
-    }
-
-    entries.push({ message, index: entries.length });
-  }
-
-  for (const message of liveMessages) {
-    const key = agentMessageSemanticKey(message);
-
-    if (seenMessageIds.has(message.id) || (key !== undefined && seenMessageKeys.has(key))) {
-      continue;
-    }
-
-    seenMessageIds.add(message.id);
-    if (key !== undefined) {
-      seenMessageKeys.add(key);
-    }
-
-    entries.push({ message, index: entries.length });
-  }
-
-  return entries
-    .sort((left, right) => {
-      const timestampDifference = left.message.timestamp - right.message.timestamp;
-      return timestampDifference === 0 ? left.index - right.index : timestampDifference;
-    })
-    .map((entry) => entry.message);
-};
-
-const missingAgentMessages = (
-  persistedMessages: readonly AgentMessage[],
-  liveMessages: readonly AgentMessage[],
-): AgentMessage[] => {
-  const persistedIds = new Set(persistedMessages.map((message) => message.id));
-  const persistedKeys = new Set(
-    persistedMessages
-      .map(agentMessageSemanticKey)
-      .filter((key): key is string => key !== undefined),
-  );
-
-  return liveMessages.filter((message) => {
-    const key = agentMessageSemanticKey(message);
-    return !persistedIds.has(message.id) && (key === undefined || !persistedKeys.has(key));
-  });
-};
-
-const agentMessageSemanticKey = (message: AgentMessage): string | undefined => {
-  switch (message.role) {
-    case "user":
-      return `user:${message.path}:${agentContentSignature(message.content)}`;
-    case "assistant":
-      return `assistant:${assistantContentSignature(message.content)}`;
-    case "toolResult":
-      return `toolResult:${message.toolName}:${message.toolCallId}:${agentContentSignature(message.content)}`;
-    case "custom":
-      return undefined;
-  }
-};
-
-const assistantContentSignature = (content: AssistantMessage["content"]): string => {
-  return content
-    .map((part) => {
-      switch (part.type) {
-        case "response":
-          return `response:${agentContentSignature(part.response)}`;
-        case "thinking":
-          return `thinking:${part.thinkingText}`;
-        case "toolCall":
-          return `toolCall:${part.name}:${part.toolCallId}:${stableStringify(part.arguments)}`;
-      }
-    })
-    .join("\n---\n");
-};
-
-const agentContentSignature = (content: AgentContent): string => {
-  return content
-    .map((part) => {
-      switch (part.type) {
-        case "text":
-          return `text:${part.content}`;
-        case "image":
-          return `image:${part.mimeType}:${stableStringify(part.metadata)}`;
-        case "file":
-          return `file:${part.filename}:${part.mimeType}:${stableStringify(part.metadata)}`;
-      }
-    })
-    .join("\n---\n");
-};
-
-const stableStringify = (value: unknown): string => {
-  if (value === undefined) {
-    return "";
-  }
-
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableStringify(nestedValue)}`)
-    .join(",")}}`;
 };
 
 const isThreadInRoot = (thread: AgentThreadSummary, rootPath: string | undefined): boolean => {
@@ -992,6 +966,109 @@ const toolArgsForItem = (item: CodexThreadItem): unknown => {
   }
 };
 
+const toRuntimeItem = (
+  item: CodexThreadItem,
+  status: AgentRuntimeItem["status"],
+  overrides: Partial<AgentRuntimeItem> = {},
+): AgentRuntimeItem => {
+  const itemType = runtimeItemType(item);
+  const title = runtimeItemTitle(item);
+
+  return {
+    id: item.id,
+    itemType,
+    status,
+    title,
+    summary: runtimeItemSummary(item),
+    raw: item,
+    ...overrides,
+  };
+};
+
+const runtimeItemType = (item: CodexThreadItem): AgentRuntimeItem["itemType"] => {
+  switch (item.type) {
+    case "reasoning":
+      return "reasoning";
+    case "plan":
+      return "plan";
+    case "commandExecution":
+      return "command_execution";
+    case "fileChange":
+      return "file_change";
+    case "mcpToolCall":
+      return "mcp_tool_call";
+    case "dynamicToolCall":
+      return "dynamic_tool_call";
+    case "webSearch":
+      return "web_search";
+    case "imageView":
+      return "image_view";
+    default:
+      return "custom";
+  }
+};
+
+const runtimeItemTitle = (item: CodexThreadItem): string => {
+  switch (item.type) {
+    case "reasoning":
+      return "Thinking";
+    case "plan":
+      return "Plan";
+    case "commandExecution":
+      return "Command";
+    case "fileChange":
+      return "File change";
+    case "mcpToolCall":
+      return `${item.server}/${item.tool}`;
+    case "dynamicToolCall":
+      return item.namespace ? `${item.namespace}/${item.tool}` : item.tool;
+    case "webSearch":
+      return "Web search";
+    case "imageView":
+      return "Image view";
+    case "contextCompaction":
+      return "Context compacted";
+    default:
+      return item.type;
+  }
+};
+
+const runtimeItemSummary = (item: CodexThreadItem): string | undefined => {
+  switch (item.type) {
+    case "commandExecution":
+      return `$ ${item.command}`;
+    case "fileChange":
+      return `${String(item.changes?.length ?? 0)} file change${item.changes?.length === 1 ? "" : "s"}`;
+    case "reasoning":
+      return [...(item.summary ?? []), ...(item.content ?? [])].join("\n\n") || undefined;
+    default:
+      return undefined;
+  }
+};
+
+const extractToolProgressSummary = (payload: Record<string, unknown>): string | undefined => {
+  const delta = stringField(payload, "delta") ?? stringField(payload, "outputDelta");
+  if (delta !== undefined && delta.length > 0) {
+    return delta;
+  }
+
+  const status = stringField(payload, "status");
+  return status === undefined ? undefined : `Status: ${status}`;
+};
+
+const getTextContent = (content: AgentContent): string =>
+  content
+    .filter((block): block is Extract<AgentContent[number], { readonly type: "text" }> => block.type === "text")
+    .map((block) => block.content)
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+
+const threadTimestampMs = (thread: CodexThread): number =>
+  Math.round((thread.updatedAt ?? thread.createdAt) * 1000);
+
+const turnTimestampMs = (turn: CodexTurn, thread: CodexThread): number =>
+  Math.round((turn.startedAt ?? turn.completedAt ?? thread.updatedAt ?? thread.createdAt) * 1000);
+
 const readThreadOriginator = async (path: string | null | undefined): Promise<string | undefined> => {
   if (path === undefined || path === null || path === "") {
     return undefined;
@@ -1046,9 +1123,19 @@ const parseJsonRecord = (value: string | undefined): Record<string, unknown> | u
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
+const compactRecord = <TRecord extends Record<string, unknown>>(record: TRecord): TRecord | undefined => {
+  const entries = Object.entries(record).filter(([, value]) => value !== undefined);
+  return entries.length === 0 ? undefined : Object.fromEntries(entries) as TRecord;
+};
+
 const stringField = (record: Record<string, unknown> | undefined, key: string): string | undefined => {
   const value = record?.[key];
   return typeof value === "string" ? value : undefined;
+};
+
+const numberField = (record: Record<string, unknown> | undefined, key: string): number | undefined => {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 };
 
 const normalizeSetupInput = (input: SetupInput): NormalizedSetupInput => {
