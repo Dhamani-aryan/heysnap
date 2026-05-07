@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AiUsagePayloadRecord,
+  AiUsageRequestRecord,
+  AiUsageStatus,
+  AiUsageSummary,
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerKind,
@@ -20,6 +24,8 @@ export class InMemoryCloudStore implements CloudStore {
   readonly machineIdentities = new Map<string, MachineIdentityRecord>();
   readonly computerAccessSessions = new Map<string, ComputerAccessSessionRecord>();
   readonly releaseManifests = new Map<string, ReleaseManifestRecord>();
+  readonly aiUsageRequests = new Map<string, AiUsageRequestRecord>();
+  readonly aiUsagePayloads = new Map<string, AiUsagePayloadRecord>();
 
   async createUser(input: { readonly email: string; readonly passwordHash: string }): Promise<UserRecord> {
     const now = new Date();
@@ -445,6 +451,162 @@ export class InMemoryCloudStore implements CloudStore {
       }
     }
     return false;
+  }
+
+  async createAiUsageRequest(input: {
+    readonly userId: string;
+    readonly computerId: string;
+    readonly machineIdentityId: string;
+    readonly provider: string;
+    readonly model?: string | null;
+    readonly method: string;
+    readonly upstreamPath: string;
+    readonly status: AiUsageStatus;
+    readonly httpStatus?: number | null;
+    readonly metadata?: unknown;
+    readonly startedAt?: Date;
+  }): Promise<AiUsageRequestRecord> {
+    const usage = {
+      id: randomUUID(),
+      userId: input.userId,
+      computerId: input.computerId,
+      machineIdentityId: input.machineIdentityId,
+      provider: input.provider,
+      model: input.model ?? null,
+      method: input.method,
+      upstreamPath: input.upstreamPath,
+      status: input.status,
+      httpStatus: input.httpStatus ?? null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens: 0,
+      startedAt: input.startedAt ?? new Date(),
+      completedAt: null,
+      durationMs: null,
+      errorMessage: null,
+      metadata: input.metadata ?? {},
+    };
+    this.aiUsageRequests.set(usage.id, usage);
+    return usage;
+  }
+
+  async updateAiUsageRequest(input: {
+    readonly id: string;
+    readonly status: AiUsageStatus;
+    readonly httpStatus?: number | null;
+    readonly model?: string | null;
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly cachedInputTokens?: number;
+    readonly reasoningOutputTokens?: number;
+    readonly totalTokens?: number;
+    readonly completedAt?: Date | null;
+    readonly durationMs?: number | null;
+    readonly errorMessage?: string | null;
+    readonly metadata?: unknown;
+  }): Promise<AiUsageRequestRecord | null> {
+    const usage = this.aiUsageRequests.get(input.id);
+
+    if (usage === undefined) {
+      return null;
+    }
+
+    const updated = {
+      ...usage,
+      status: input.status,
+      ...(input.httpStatus !== undefined ? { httpStatus: input.httpStatus } : {}),
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.inputTokens !== undefined ? { inputTokens: input.inputTokens } : {}),
+      ...(input.outputTokens !== undefined ? { outputTokens: input.outputTokens } : {}),
+      ...(input.cachedInputTokens !== undefined ? { cachedInputTokens: input.cachedInputTokens } : {}),
+      ...(input.reasoningOutputTokens !== undefined
+        ? { reasoningOutputTokens: input.reasoningOutputTokens }
+        : {}),
+      ...(input.totalTokens !== undefined ? { totalTokens: input.totalTokens } : {}),
+      ...(input.completedAt !== undefined ? { completedAt: input.completedAt } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.errorMessage !== undefined ? { errorMessage: input.errorMessage } : {}),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    };
+    this.aiUsageRequests.set(input.id, updated);
+    return updated;
+  }
+
+  async createAiUsagePayload(input: {
+    readonly usageRequestId: string;
+    readonly requestHeaders: unknown;
+    readonly requestBody: string | null;
+    readonly requestBodyTruncated: boolean;
+    readonly responseHeaders: unknown;
+    readonly responseBody: string | null;
+    readonly responseBodyTruncated: boolean;
+  }): Promise<AiUsagePayloadRecord> {
+    const payload = {
+      id: randomUUID(),
+      usageRequestId: input.usageRequestId,
+      requestHeaders: input.requestHeaders,
+      requestBody: input.requestBody,
+      requestBodyTruncated: input.requestBodyTruncated,
+      responseHeaders: input.responseHeaders,
+      responseBody: input.responseBody,
+      responseBodyTruncated: input.responseBodyTruncated,
+      createdAt: new Date(),
+    };
+    this.aiUsagePayloads.set(payload.id, payload);
+    return payload;
+  }
+
+  async getAiUsageRequestById(id: string): Promise<AiUsageRequestRecord | null> {
+    return this.aiUsageRequests.get(id) ?? null;
+  }
+
+  async getAiUsagePayloadByRequestId(usageRequestId: string): Promise<AiUsagePayloadRecord | null> {
+    return Array.from(this.aiUsagePayloads.values())
+      .find((payload) => payload.usageRequestId === usageRequestId) ?? null;
+  }
+
+  async listAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly limit?: number;
+    readonly before?: Date;
+  } = {}): Promise<AiUsageRequestRecord[]> {
+    const rows = Array.from(this.aiUsageRequests.values())
+      .filter((usage) => input.userId === undefined || usage.userId === input.userId)
+      .filter((usage) => input.computerId === undefined || usage.computerId === input.computerId)
+      .filter((usage) => input.before === undefined || usage.startedAt.getTime() < input.before.getTime())
+      .sort((left, right) => right.startedAt.getTime() - left.startedAt.getTime());
+    return input.limit !== undefined ? rows.slice(0, input.limit) : rows;
+  }
+
+  async summarizeAiUsageRequests(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly from?: Date;
+    readonly to?: Date;
+  } = {}): Promise<AiUsageSummary> {
+    return Array.from(this.aiUsageRequests.values())
+      .filter((usage) => input.userId === undefined || usage.userId === input.userId)
+      .filter((usage) => input.computerId === undefined || usage.computerId === input.computerId)
+      .filter((usage) => input.from === undefined || usage.startedAt.getTime() >= input.from.getTime())
+      .filter((usage) => input.to === undefined || usage.startedAt.getTime() <= input.to.getTime())
+      .reduce<AiUsageSummary>((summary, usage) => ({
+        requestCount: summary.requestCount + 1,
+        inputTokens: summary.inputTokens + usage.inputTokens,
+        outputTokens: summary.outputTokens + usage.outputTokens,
+        cachedInputTokens: summary.cachedInputTokens + usage.cachedInputTokens,
+        reasoningOutputTokens: summary.reasoningOutputTokens + usage.reasoningOutputTokens,
+        totalTokens: summary.totalTokens + usage.totalTokens,
+      }), {
+        requestCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        reasoningOutputTokens: 0,
+        totalTokens: 0,
+      });
   }
 }
 

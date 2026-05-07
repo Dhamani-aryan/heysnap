@@ -22,6 +22,13 @@
       "when": 1777994983216,
       "tag": "0002_shiny_tusk",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778156796787,
+      "tag": "0003_ai_gateway_usage",
+      "breakpoints": true
     }
   ]
 }
