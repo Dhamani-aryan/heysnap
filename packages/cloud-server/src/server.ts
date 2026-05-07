@@ -7,6 +7,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 
 import { createAdminRoutes } from "./admin/routes.js";
+import { createAiGatewayRoutes } from "./ai-gateway/routes.js";
 import { AuthService } from "./auth/service.js";
 import { createAuthRoutes } from "./auth/routes.js";
 import type { CloudServerConfig } from "./config.js";
@@ -83,6 +84,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     );
   });
   app.route("/machines", createMachineRoutes(options.store, options.config));
+  app.route("/llm", createAiGatewayRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));
 
   app.notFound((context) => context.json({
