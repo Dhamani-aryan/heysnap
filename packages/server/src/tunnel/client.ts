@@ -106,9 +106,9 @@ class MachineTunnelClient {
         }
 
         if (localConnection.opened && localConnection.webSocket.readyState === WebSocket.OPEN) {
-          localConnection.webSocket.send(Buffer.from(message.data, "base64"));
+          localConnection.webSocket.send(tunnelPayloadToRawData(message));
         } else {
-          localConnection.pendingData.push(message.data);
+          localConnection.pendingData.push(message);
         }
         break;
       }
@@ -160,12 +160,16 @@ class MachineTunnelClient {
       localConnection.opened = true;
       this.sendToCloud({ type: "openResult", connectionId, ok: true });
 
-      for (const data of localConnection.pendingData.splice(0)) {
-        localWebSocket.send(Buffer.from(data, "base64"));
+      for (const message of localConnection.pendingData.splice(0)) {
+        localWebSocket.send(tunnelPayloadToRawData(message));
       }
     });
-    localWebSocket.on("message", (data) => {
-      this.sendToCloud({ type: "data", connectionId, data: rawDataToBase64(data) });
+    localWebSocket.on("message", (data, isBinary) => {
+      this.sendToCloud({
+        type: "data",
+        connectionId,
+        ...rawDataToTunnelPayload(data, isBinary),
+      });
     });
     localWebSocket.on("close", (code, reason) => {
       this.localConnections.delete(connectionId);
@@ -208,13 +212,13 @@ class MachineTunnelClient {
 interface LocalTunnelConnection {
   readonly webSocket: WebSocket;
   opened: boolean;
-  readonly pendingData: string[];
+  readonly pendingData: Extract<CloudTunnelMessage, { readonly type: "data" }>[];
 }
 
 type CloudTunnelMessage =
   | { readonly type: "open"; readonly connectionId: string; readonly path: string }
   | { readonly type: "httpRequest"; readonly connectionId: string; readonly path: string }
-  | { readonly type: "data"; readonly connectionId: string; readonly data: string }
+  | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType?: TunnelPayloadType }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
 
 type MachineTunnelMessage =
@@ -227,8 +231,10 @@ type MachineTunnelMessage =
       readonly headers: Record<string, string>;
       readonly bodyBase64: string;
     }
-  | { readonly type: "data"; readonly connectionId: string; readonly data: string }
+  | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType: TunnelPayloadType }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
+
+type TunnelPayloadType = "text" | "binary";
 
 const buildTunnelUrl = (cloudServerPublicUrl: string): string => {
   const url = new URL("/machines/tunnel", cloudServerPublicUrl);
@@ -266,7 +272,12 @@ const parseCloudMessage = (data: RawData): CloudTunnelMessage | null => {
         : null;
     case "data":
       return typeof message["data"] === "string"
-        ? { type: "data", connectionId: message["connectionId"], data: message["data"] }
+        ? {
+            type: "data",
+            connectionId: message["connectionId"],
+            data: message["data"],
+            dataType: parseTunnelPayloadType(message["dataType"]),
+          }
         : null;
     case "close":
       return {
@@ -311,6 +322,24 @@ const rawDataToBase64 = (data: RawData): string => {
 
   return Buffer.concat(data).toString("base64");
 };
+
+const rawDataToTunnelPayload = (
+  data: RawData,
+  isBinary: boolean,
+): { readonly data: string; readonly dataType: TunnelPayloadType } => ({
+  data: rawDataToBase64(data),
+  dataType: isBinary ? "binary" : "text",
+});
+
+const tunnelPayloadToRawData = (
+  message: { readonly data: string; readonly dataType?: TunnelPayloadType },
+): string | Buffer => {
+  const buffer = Buffer.from(message.data, "base64");
+  return message.dataType === "text" ? buffer.toString("utf8") : buffer;
+};
+
+const parseTunnelPayloadType = (value: unknown): TunnelPayloadType | undefined =>
+  value === "text" || value === "binary" ? value : undefined;
 
 export const normalizeWebSocketCloseCode = (code: number | undefined): number => {
   if (code === undefined) {

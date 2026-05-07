@@ -53,13 +53,17 @@ describe("gateway tunnel", () => {
       type: "data",
       connectionId: openMessage.connectionId,
       data: Buffer.from(JSON.stringify({ type: "hello", serverTime: "now" }), "utf8").toString("base64"),
+      dataType: "text",
     }));
 
-    await expect(waitForJsonMessage(gateway)).resolves.toMatchObject({ type: "hello" });
+    const gatewayHello = await waitForJsonFrame(gateway);
+    expect(gatewayHello.isBinary).toBe(false);
+    expect(gatewayHello.message).toMatchObject({ type: "hello" });
     gateway.send(JSON.stringify({ type: "ping", requestId: "ping-1" }));
 
     const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
     expect(dataMessage.type).toBe("data");
+    expect(dataMessage.dataType).toBe("text");
     expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
       type: "ping",
       requestId: "ping-1",
@@ -89,12 +93,16 @@ describe("gateway tunnel", () => {
       type: "data",
       connectionId: openMessage.connectionId,
       data: Buffer.from(JSON.stringify({ type: "hello", serverTime: "now" }), "utf8").toString("base64"),
+      dataType: "text",
     }));
 
-    await expect(waitForJsonMessage(gateway)).resolves.toMatchObject({ type: "hello" });
+    const gatewayHello = await waitForJsonFrame(gateway);
+    expect(gatewayHello.isBinary).toBe(false);
+    expect(gatewayHello.message).toMatchObject({ type: "hello" });
     gateway.send(JSON.stringify({ type: "ping", requestId: "agent-ping-1" }));
 
     const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
+    expect(dataMessage.dataType).toBe("text");
     expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
       type: "ping",
       requestId: "agent-ping-1",
@@ -194,6 +202,7 @@ interface CloudDataMessage {
   readonly type: "data";
   readonly connectionId: string;
   readonly data: string;
+  readonly dataType?: "text" | "binary";
 }
 
 interface CloudHttpRequestMessage {
@@ -288,6 +297,25 @@ const waitForJsonMessage = <TMessage>(webSocket: WebSocket): Promise<TMessage> =
       clearTimeout(timeout);
       try {
         resolve(JSON.parse(data.toString("utf8")) as TMessage);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+
+const waitForJsonFrame = <TMessage>(webSocket: WebSocket): Promise<{
+  readonly message: TMessage;
+  readonly isBinary: boolean;
+}> =>
+  new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out waiting for websocket message")), 3000);
+    webSocket.once("message", (data, isBinary) => {
+      clearTimeout(timeout);
+      try {
+        resolve({
+          message: JSON.parse(data.toString("utf8")) as TMessage,
+          isBinary,
+        });
       } catch (error) {
         reject(error);
       }
