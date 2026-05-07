@@ -17,5 +17,5 @@ export const getDev8gbPreset = (config: CloudServerConfig): Ec2Preset => ({
   region: config.awsRegion,
   instanceType: config.awsEc2InstanceType,
   rootVolumeGb: config.awsEc2RootVolumeGb,
-  amiSsmParameterName: UBUNTU_2404_AMD64_SSM_PARAMETER,
+  amiSsmParameterName: config.awsMachineAmiSsmParameter || UBUNTU_2404_AMD64_SSM_PARAMETER,
 });
