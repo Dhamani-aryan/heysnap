@@ -1,5 +1,3 @@
-@import "streamdown/styles.css";
-
 :root {
   color-scheme: light;
   --font-geist-sans:
@@ -714,7 +712,7 @@ button:disabled {
   min-height: 0;
   flex: 1;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
 
 .agent-thread-content {
@@ -729,21 +727,86 @@ button:disabled {
   padding: 28px 36px 24px;
 }
 
+.agent-thread-list {
+  height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  padding: 0 36px;
+}
+
+.agent-thread-list-spacer {
+  height: 28px;
+}
+
+.agent-thread-list-spacer.bottom {
+  height: 24px;
+}
+
 .agent-message-row {
   display: flex;
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  margin: 0 auto 28px;
+  max-width: 820px;
 }
 
 .agent-message-row.user {
   justify-content: flex-end;
+  margin-bottom: 8px;
 }
 
 .agent-message-row.assistant {
   flex-direction: column;
   align-items: flex-start;
   gap: 14px;
+}
+
+.agent-message-row.status {
+  justify-content: flex-start;
+  min-height: 18px;
+  margin-bottom: 14px;
+}
+
+.agent-turn-status {
+  min-height: 18px;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+:root.dark .agent-turn-status {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.agent-turn-status.working {
+  width: fit-content;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.42) 0%,
+      rgba(0, 0, 0, 0.9) 45%,
+      rgba(0, 0, 0, 0.42) 90%
+    );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: agent-status-shimmer 1.4s ease-in-out infinite;
+}
+
+:root.dark .agent-turn-status.working {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.46) 0%,
+      rgba(255, 255, 255, 0.96) 45%,
+      rgba(255, 255, 255, 0.46) 90%
+    );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
 }
 
 .agent-user-bubble {
@@ -892,7 +955,8 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-worked-label.live {
+  .agent-worked-label.live,
+  .agent-turn-status.working {
     animation: none;
     background-position: 0 0;
   }
@@ -908,6 +972,461 @@ button:disabled {
   line-height: 1.6;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.chat-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown blockquote,
+.chat-markdown pre,
+.chat-markdown table {
+  margin: 0.65rem 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.chat-markdown ul {
+  list-style-type: disc;
+}
+
+.chat-markdown ol {
+  list-style-type: decimal;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.chat-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 0, 0, 0.32);
+}
+
+:root.dark .chat-markdown a {
+  text-decoration-color: rgba(255, 255, 255, 0.34);
+}
+
+.chat-markdown blockquote {
+  border-left: 2px solid rgba(0, 0, 0, 0.12);
+  padding-left: 0.8rem;
+  color: rgba(0, 0, 0, 0.58);
+}
+
+:root.dark .chat-markdown blockquote {
+  border-left-color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.chat-markdown :not(pre) > code {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.1rem 0.35rem;
+  color: inherit;
+  font-size: 0.86em;
+}
+
+:root.dark .chat-markdown :not(pre) > code {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.045);
+  padding: 0.8rem 0.9rem;
+}
+
+:root.dark .chat-markdown pre {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.chat-markdown pre code {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+}
+
+.chat-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 0.35rem 0.45rem;
+  text-align: left;
+}
+
+:root.dark .chat-markdown th,
+:root.dark .chat-markdown td {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.chat-markdown-codeblock {
+  position: relative;
+  margin: 0.65rem 0;
+}
+
+.chat-markdown-codeblock pre {
+  margin: 0;
+  padding-right: 4rem;
+}
+
+.chat-markdown-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  height: 24px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.78);
+  color: rgba(0, 0, 0, 0.58);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  opacity: 0;
+  padding: 0 7px;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+:root.dark .chat-markdown-copy-button {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(18, 18, 20, 0.82);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.chat-markdown-codeblock:hover .chat-markdown-copy-button,
+.chat-markdown-codeblock:focus-within .chat-markdown-copy-button {
+  opacity: 1;
+}
+
+.chat-markdown-shiki .shiki {
+  margin: 0;
+  background: transparent !important;
+}
+
+.chat-markdown-file-link {
+  position: relative;
+  top: 2px;
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.045);
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.1;
+  padding: 2px 6px;
+  text-decoration: none;
+  vertical-align: text-bottom;
+}
+
+:root.dark .chat-markdown-file-link {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-markdown-file-icon {
+  width: 8px;
+  height: 10px;
+  border-radius: 1px;
+  border: 1px solid currentColor;
+  opacity: 0.55;
+}
+
+.chat-markdown-file-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-markdown-file-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  min-width: 160px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.14);
+  padding: 5px;
+}
+
+:root.dark .chat-markdown-file-menu {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #171719;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.4);
+}
+
+.chat-markdown-file-menu button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.chat-markdown-file-menu button:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:root.dark .chat-markdown-file-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.agent-work-card {
+  width: 100%;
+  max-width: 680px;
+  min-width: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.025);
+  padding: 8px 10px;
+}
+
+:root.dark .agent-work-card {
+  border-color: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.agent-work-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.agent-work-card-heading {
+  color: rgba(0, 0, 0, 0.52);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
+:root.dark .agent-work-card-heading {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.agent-work-list {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-work-entry {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  color: rgba(0, 0, 0, 0.64);
+  font-size: 11px;
+  line-height: 18px;
+  padding: 3px 2px;
+}
+
+:root.dark .agent-work-entry {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.agent-work-entry.error {
+  color: #b42318;
+}
+
+:root.dark .agent-work-entry.error {
+  color: #ffb4ab;
+}
+
+.agent-work-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: rgba(0, 0, 0, 0.52);
+  font-family: var(--font-geist-mono), ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+:root.dark .agent-work-icon {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.agent-work-entry-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-work-title {
+  flex: 0 0 auto;
+  color: inherit;
+  font-weight: 500;
+}
+
+.agent-work-status,
+.agent-work-preview,
+.agent-work-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.46);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root.dark .agent-work-status,
+:root.dark .agent-work-preview,
+:root.dark .agent-work-summary {
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.agent-work-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.agent-work-files span {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.035);
+  color: rgba(0, 0, 0, 0.52);
+  font-family: var(--font-geist-mono), ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  line-height: 15px;
+  padding: 1px 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root.dark .agent-work-files span {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.agent-assistant-meta {
+  min-height: 16px;
+  margin-top: 6px;
+  color: rgba(0, 0, 0, 0.28);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+:root.dark .agent-assistant-meta {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.agent-work-toggle {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+}
+
+.agent-work-detail {
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.045);
+  margin: 6px 0 0;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+:root.dark .agent-work-detail {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.agent-working-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+:root.dark .agent-working-row {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.agent-working-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.agent-working-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: agent-working-pulse 1.2s ease-in-out infinite;
+}
+
+.agent-working-dots span:nth-child(2) {
+  animation-delay: 160ms;
+}
+
+.agent-working-dots span:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+@keyframes agent-working-pulse {
+  0%, 80%, 100% {
+    opacity: 0.26;
+  }
+
+  40% {
+    opacity: 0.9;
+  }
 }
 
 .agent-assistant-markdown * {
@@ -933,8 +1452,7 @@ button:disabled {
   overflow-x: auto;
 }
 
-.agent-assistant-markdown > *:last-child,
-.agent-assistant-markdown [data-streamdown] > *:last-child {
+.agent-assistant-markdown > *:last-child {
   margin-bottom: 0;
 }
 
@@ -984,8 +1502,7 @@ button:disabled {
   padding: 0;
 }
 
-.agent-assistant-markdown .code-block,
-.agent-assistant-markdown [data-streamdown="code-block"] {
+.agent-assistant-markdown .code-block {
   width: 100%;
   max-width: 100%;
   margin-bottom: 12px;
@@ -996,21 +1513,17 @@ button:disabled {
   padding: 0;
 }
 
-:root.dark .agent-assistant-markdown .code-block,
-:root.dark .agent-assistant-markdown [data-streamdown="code-block"] {
+:root.dark .agent-assistant-markdown .code-block {
   border-color: rgba(255, 255, 255, 0.08);
   background: #151515;
 }
 
 .agent-assistant-markdown .code-block-header,
-.agent-assistant-markdown .code-block-actions,
-.agent-assistant-markdown [data-streamdown="code-block-header"],
-.agent-assistant-markdown [data-streamdown="code-block-actions"] {
+.agent-assistant-markdown .code-block-actions {
   display: none !important;
 }
 
-.agent-assistant-markdown .code-block-body,
-.agent-assistant-markdown [data-streamdown="code-block-body"] {
+.agent-assistant-markdown .code-block-body {
   max-width: 100%;
   overflow-x: auto;
   border-radius: 8px;
@@ -1019,33 +1532,27 @@ button:disabled {
   scrollbar-width: thin;
 }
 
-.agent-assistant-markdown .code-block-body::-webkit-scrollbar,
-.agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar {
+.agent-assistant-markdown .code-block-body::-webkit-scrollbar {
   height: 6px;
 }
 
-.agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb,
-.agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb {
+.agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.22);
 }
 
-:root.dark .agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb,
-:root.dark .agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb {
+:root.dark .agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.22);
 }
 
-.agent-assistant-markdown .code-block pre,
-.agent-assistant-markdown [data-streamdown="code-block"] pre {
+.agent-assistant-markdown .code-block pre {
   margin: 0;
   border: 0;
   background: transparent;
 }
 
 .agent-assistant-markdown .code-block pre code,
-.agent-assistant-markdown .code-block pre code span,
-.agent-assistant-markdown [data-streamdown="code-block-body"] code,
-.agent-assistant-markdown [data-streamdown="code-block-body"] code span {
+.agent-assistant-markdown .code-block pre code span {
   background: transparent !important;
   background-color: transparent !important;
   text-shadow: none;
