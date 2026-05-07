@@ -66,6 +66,7 @@ class FilesystemSocketSession {
   private watcher: FSWatcher | null = null;
   private watchTimer: ReturnType<typeof setTimeout> | null = null;
   private openFilePaths: string[] = [];
+  private openFileVersions = new Map<string, string>();
   private fileWatcher: FSWatcher | null = null;
   private fileWatchTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -181,6 +182,9 @@ class FilesystemSocketSession {
 
     await this.closeFileWatcher();
     this.openFilePaths = nextOpenFilePaths;
+    this.openFileVersions = new Map(
+      [...this.openFileVersions.entries()].filter(([path]) => this.openFilePaths.includes(path)),
+    );
 
     if (this.openFilePaths.length === 0) {
       return;
@@ -225,20 +229,40 @@ class FilesystemSocketSession {
 
     const entries: FilesystemEntry[] = [];
     const missingPaths: string[] = [];
+    const nextOpenFileVersions = new Map<string, string>();
 
     await Promise.all(this.openFilePaths.map(async (path) => {
       try {
         const entry = await this.service.getEntry(path);
 
         if (entry.type === "file") {
-          entries.push(entry);
+          const version = getFileEntryVersion(entry);
+          nextOpenFileVersions.set(path, version);
+
+          if (this.openFileVersions.get(path) !== version) {
+            entries.push(entry);
+          }
         } else {
-          missingPaths.push(path);
+          nextOpenFileVersions.set(path, "missing");
+
+          if (this.openFileVersions.get(path) !== "missing") {
+            missingPaths.push(path);
+          }
         }
       } catch {
-        missingPaths.push(path);
+        nextOpenFileVersions.set(path, "missing");
+
+        if (this.openFileVersions.get(path) !== "missing") {
+          missingPaths.push(path);
+        }
       }
     }));
+
+    this.openFileVersions = nextOpenFileVersions;
+
+    if (entries.length === 0 && missingPaths.length === 0) {
+      return;
+    }
 
     entries.sort((left, right) => left.path.localeCompare(right.path));
     missingPaths.sort((left, right) => left.localeCompare(right));
@@ -414,6 +438,9 @@ const parseBoolean = (rawValue: string | null): boolean => {
 
   return rawValue === "true" || rawValue === "1";
 };
+
+const getFileEntryVersion = (entry: FilesystemEntry): string =>
+  `${entry.updatedAt}\0${String(entry.size ?? "")}`;
 
 const dataToText = (data: WebSocket.RawData): string => {
   if (typeof data === "string") {

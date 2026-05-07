@@ -163,6 +163,9 @@ describe("filesystem websocket", () => {
       entries: [{ path: "open/report.txt", size: 3 }],
     });
 
+    await writeFile(join(root, "open", "unwatched.txt"), "noise");
+    await client.none("fileUpdates");
+
     await writeFile(join(root, "open", "report.txt"), "new content");
 
     expect(await client.next("fileUpdates")).toMatchObject({
@@ -251,6 +254,7 @@ interface WebSocketClient {
   readonly next: <TType extends FilesystemServerMessage["type"]>(
     type: TType,
   ) => Promise<Extract<FilesystemServerMessage, { readonly type: TType }>>;
+  readonly none: <TType extends FilesystemServerMessage["type"]>(type: TType) => Promise<void>;
 }
 
 const connect = async (url: string): Promise<WebSocketClient> => {
@@ -278,6 +282,43 @@ const connect = async (url: string): Promise<WebSocketClient> => {
 
   return {
     socket,
+    none: async (type) => {
+      const existingIndex = messages.findIndex((message) => message.type === type);
+
+      if (existingIndex >= 0) {
+        throw new Error(`Received unexpected ${type}`);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout>;
+        const waiter = (message: FilesystemServerMessage): boolean => {
+          if (message.type !== type) {
+            return false;
+          }
+
+          clearTimeout(timer);
+          const waiterIndex = waiters.indexOf(waiter);
+
+          if (waiterIndex >= 0) {
+            waiters.splice(waiterIndex, 1);
+          }
+
+          reject(new Error(`Received unexpected ${type}`));
+          return true;
+        };
+
+        timer = setTimeout(() => {
+          const waiterIndex = waiters.indexOf(waiter);
+
+          if (waiterIndex >= 0) {
+            waiters.splice(waiterIndex, 1);
+          }
+
+          resolve();
+        }, 150);
+        waiters.push(waiter);
+      });
+    },
     next: async (type) => {
       const existingIndex = messages.findIndex((message) => message.type === type);
 

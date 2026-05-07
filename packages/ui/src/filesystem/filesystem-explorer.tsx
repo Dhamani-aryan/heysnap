@@ -8,7 +8,7 @@ import {
   FolderUploadIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
 import { ThreadHistoryButton } from "../agent/thread-history";
@@ -19,21 +19,8 @@ import { FilesystemClient } from "./filesystem-client";
 import { ThemeToggle } from "./theme-toggle";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
-type ReactPdfModule = typeof import("react-pdf");
-type ReactPdfComponents = Pick<ReactPdfModule, "Document" | "Page">;
 type DocxPreviewModule = typeof import("docx-preview");
 type MonacoEditorModule = typeof import("@monaco-editor/react");
-type PromiseWithResolversResult<T> = {
-  readonly promise: Promise<T>;
-  readonly resolve: (value: T | PromiseLike<T>) => void;
-  readonly reject: (reason?: unknown) => void;
-};
-type PromiseWithResolvers = <T>() => PromiseWithResolversResult<T>;
-
-const PDF_WORKER_SRC = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 const HISTORY_LIMIT = 64;
 const DEFAULT_LEFT_PANE_RATIO = 0.5;
@@ -183,7 +170,6 @@ export function FilesystemExplorer({
     const client = new FilesystemClient(websocketUrl, {
       onListing: (nextListing) => {
         setListing(nextListing);
-        setOpenFileTabs((currentTabs) => syncOpenFileTabsFromListing(currentTabs, nextListing));
       },
       onFileUpdates: ({ entries }) => {
         setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
@@ -637,41 +623,49 @@ export function FilesystemExplorer({
         currentPath={currentPath}
         onSelectThread={setSelectedThread}
       >
-        {activeFileTab === null ? (
-          <FinderBody
-            error={listingError}
-            isLoading={isFetching && listing === null}
-            entries={listing?.entries ?? []}
-            selectedPaths={selectedPaths}
-            renamingPath={renamingPath}
-            onSelect={selectEntry}
-            onSelectionChange={(paths) => {
-              setSelectedPaths(paths);
-              setSelectionAnchorPath(paths[0] ?? null);
-            }}
-            onActivate={handleEntryDoubleClick}
-            onBackgroundClick={() => {
-              setSelectedPaths([]);
-              setSelectionAnchorPath(null);
-            }}
-            onCreateNewFolder={() => void createNewFolder()}
-            onUploadFiles={() => uploadFilesInputRef.current?.click()}
-            onUploadFolder={chooseUploadFolder}
-            onRenameStart={(entry) => {
-              setSelectedPaths([entry.path]);
-              setSelectionAnchorPath(entry.path);
-              setRenamingPath(entry.path);
-            }}
-            onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
-            onRenameCancel={() => setRenamingPath(null)}
-            onOpenEntry={openEntry}
-            onGetInfo={showEntryInfo}
-            onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
-            onDownloadEntries={downloadEntries}
+        <div className="left-pane-surface-stack">
+          <div
+            className={activeFileTab === null ? "left-pane-surface active" : "left-pane-surface inactive"}
+            aria-hidden={activeFileTab !== null}
+          >
+            <FinderBody
+              error={listingError}
+              isLoading={isFetching && listing === null}
+              entries={listing?.entries ?? []}
+              selectedPaths={selectedPaths}
+              renamingPath={renamingPath}
+              onSelect={selectEntry}
+              onSelectionChange={(paths) => {
+                setSelectedPaths(paths);
+                setSelectionAnchorPath(paths[0] ?? null);
+              }}
+              onActivate={handleEntryDoubleClick}
+              onBackgroundClick={() => {
+                setSelectedPaths([]);
+                setSelectionAnchorPath(null);
+              }}
+              onCreateNewFolder={() => void createNewFolder()}
+              onUploadFiles={() => uploadFilesInputRef.current?.click()}
+              onUploadFolder={chooseUploadFolder}
+              onRenameStart={(entry) => {
+                setSelectedPaths([entry.path]);
+                setSelectionAnchorPath(entry.path);
+                setRenamingPath(entry.path);
+              }}
+              onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
+              onRenameCancel={() => setRenamingPath(null)}
+              onOpenEntry={openEntry}
+              onGetInfo={showEntryInfo}
+              onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
+              onDownloadEntries={downloadEntries}
+            />
+          </div>
+          <FileViewerStack
+            openFileTabs={openFileTabs}
+            activeFilePath={activeFileTab?.path ?? null}
+            websocketUrl={websocketUrl}
           />
-        ) : (
-          <FileViewer file={activeFileTab} websocketUrl={websocketUrl} />
-        )}
+        </div>
       </DesktopSplitPane>
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
     </main>
@@ -878,7 +872,7 @@ const FileViewer = ({
     return (
       <PdfViewer
         fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+        fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
       />
     );
   }
@@ -892,7 +886,7 @@ const FileViewer = ({
     );
   }
 
-  if (isSpreadsheetFile(file.name)) {
+  if (isOfficePdfPreviewFile(file.name)) {
     return (
       <PreviewPdfViewer
         fileName={file.name}
@@ -959,6 +953,34 @@ const FileViewer = ({
   return <FileViewerPlaceholder file={file} />;
 };
 
+const MemoizedFileViewer = memo(FileViewer);
+
+const FileViewerStack = ({
+  openFileTabs,
+  activeFilePath,
+  websocketUrl,
+}: {
+  readonly openFileTabs: OpenFileTab[];
+  readonly activeFilePath: string | null;
+  readonly websocketUrl: string;
+}): React.ReactElement => (
+  <>
+    {openFileTabs.map((tab) => {
+      const isActive = tab.path === activeFilePath;
+
+      return (
+        <div
+          key={tab.path}
+          className={isActive ? "left-pane-surface active" : "left-pane-surface inactive"}
+          aria-hidden={!isActive}
+        >
+          <MemoizedFileViewer file={tab} websocketUrl={websocketUrl} />
+        </div>
+      );
+    })}
+  </>
+);
+
 const FileViewerPlaceholder = ({
   file,
 }: {
@@ -975,109 +997,11 @@ const PdfViewer = ({
 }: {
   readonly fileName: string;
   readonly fileUrl: string;
-}): React.ReactElement => {
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [numPages, setNumPages] = useState(0);
-  const [pageWidth, setPageWidth] = useState(720);
-  const [reactPdf, setReactPdf] = useState<ReactPdfComponents | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-
-    if (viewport === null) {
-      return;
-    }
-
-    const updateWidth = (): void => {
-      const nextWidth = Math.floor(viewport.getBoundingClientRect().width - 48);
-      setPageWidth(Math.max(240, nextWidth));
-    };
-
-    updateWidth();
-    const resizeObserver = new ResizeObserver(updateWidth);
-    resizeObserver.observe(viewport);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    installPdfJsPolyfills();
-    void import("react-pdf")
-      .then((module) => {
-        module.pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER_SRC;
-
-        if (!isCancelled) {
-          setReactPdf({
-            Document: module.Document,
-            Page: module.Page,
-          });
-          setLoadError(null);
-        }
-      })
-      .catch((error) => {
-        if (!isCancelled) {
-          setLoadError(toViewerErrorMessage(error, "Failed to load PDF viewer."));
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    setNumPages(0);
-  }, [fileUrl]);
-
-  if (loadError !== null) {
-    return (
-      <section ref={viewportRef} className="pdf-viewer" aria-label={fileName}>
-        <PdfViewerState message={loadError} variant="error" />
-      </section>
-    );
-  }
-
-  if (reactPdf === null) {
-    return (
-      <section ref={viewportRef} className="pdf-viewer" aria-label={fileName}>
-        <PdfViewerState message="Loading PDF viewer..." />
-      </section>
-    );
-  }
-
-  const { Document: PdfDocument, Page: PdfPage } = reactPdf;
-
-  return (
-    <section ref={viewportRef} className="pdf-viewer" aria-label={fileName}>
-      <PdfDocument
-        key={fileUrl}
-        file={fileUrl}
-        loading={<PdfViewerState message="Loading PDF..." />}
-        error={<PdfViewerState message="Failed to load PDF." variant="error" />}
-        onLoadSuccess={(document) => setNumPages(document.numPages)}
-        onLoadError={() => setNumPages(0)}
-      >
-        <div className="pdf-pages">
-          {Array.from({ length: numPages }, (_, index) => (
-            <PdfPage
-              key={`${fileUrl}:${String(index + 1)}`}
-              pageNumber={index + 1}
-              width={pageWidth}
-              renderAnnotationLayer={false}
-              renderTextLayer={false}
-              loading={<div className="pdf-page-loading">Loading page...</div>}
-            />
-          ))}
-        </div>
-      </PdfDocument>
-    </section>
-  );
-};
+}): React.ReactElement => (
+  <section className="pdf-viewer" aria-label={fileName}>
+    <iframe className="pdf-native-frame" src={fileUrl} title={fileName} />
+  </section>
+);
 
 const PdfViewerState = ({
   message,
@@ -1151,7 +1075,7 @@ const PreviewPdfViewer = ({
   if (pdfUrl === null) {
     return (
       <section className="pdf-viewer" aria-label={fileName}>
-        <PdfViewerState message="Preparing spreadsheet preview..." />
+        <PdfViewerState message="Preparing preview..." />
       </section>
     );
   }
@@ -2629,11 +2553,6 @@ const toOpenFileTab = (entry: FilesystemEntry): OpenFileTab => ({
   updatedAt: entry.updatedAt,
 });
 
-const syncOpenFileTabsFromListing = (
-  currentTabs: OpenFileTab[],
-  listing: FilesystemListing,
-): OpenFileTab[] => syncOpenFileTabsFromEntries(currentTabs, listing.entries);
-
 const syncOpenFileTabsFromEntries = (
   currentTabs: OpenFileTab[],
   entries: readonly FilesystemEntry[],
@@ -2754,8 +2673,8 @@ const isPdfFile = (fileName: string): boolean =>
 const isDocxFile = (fileName: string): boolean =>
   fileName.toLowerCase().endsWith(".docx");
 
-const isSpreadsheetFile = (fileName: string): boolean =>
-  /\.(xls|xlsx)$/iu.test(fileName);
+const isOfficePdfPreviewFile = (fileName: string): boolean =>
+  /\.(ppt|pptx|xls|xlsx)$/iu.test(fileName);
 
 const isDelimitedTextFile = (fileName: string): boolean =>
   /\.(csv|tsv)$/iu.test(fileName);
@@ -2911,31 +2830,6 @@ const parseDelimitedText = (text: string, delimiter: "," | "\t"): string[][] => 
   return rows;
 };
 
-const installPdfJsPolyfills = (): void => {
-  const promiseConstructor = Promise as PromiseConstructor & {
-    withResolvers?: PromiseWithResolvers;
-  };
-
-  if (promiseConstructor.withResolvers !== undefined) {
-    return;
-  }
-
-  promiseConstructor.withResolvers = <T,>(): PromiseWithResolversResult<T> => {
-    let resolveValue: (value: T | PromiseLike<T>) => void = () => {};
-    let rejectValue: (reason?: unknown) => void = () => {};
-    const promise = new Promise<T>((resolve, reject) => {
-      resolveValue = resolve;
-      rejectValue = reject;
-    });
-
-    return {
-      promise,
-      resolve: resolveValue,
-      reject: rejectValue,
-    };
-  };
-};
-
 const readPreviewErrorMessage = async (response: Response, url: string): Promise<string> => {
   try {
     const body = await response.json() as {
@@ -2953,7 +2847,7 @@ const readPreviewErrorMessage = async (response: Response, url: string): Promise
 
     if (typeof body.error?.message === "string" && body.error.message.length > 0) {
       if (response.status === 404 && url.includes("/filesystem/preview")) {
-        return "Spreadsheet preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
+        return "File preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
       }
 
       return body.error.message;
@@ -2963,7 +2857,7 @@ const readPreviewErrorMessage = async (response: Response, url: string): Promise
   }
 
   if (response.status === 404 && url.includes("/filesystem/preview")) {
-    return "Spreadsheet preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
+    return "File preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
   }
 
   return `Failed to load preview (${String(response.status)}).`;

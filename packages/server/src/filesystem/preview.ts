@@ -14,7 +14,8 @@ import type { FilesystemRoot } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const PREVIEW_TIMEOUT_MS = 60_000;
-const SUPPORTED_SPREADSHEET_EXTENSIONS = new Set([".xls", ".xlsx"]);
+const PDF_EXTENSION = ".pdf";
+const SUPPORTED_OFFICE_PDF_PREVIEW_EXTENSIONS = new Set([".ppt", ".pptx", ".xls", ".xlsx"]);
 
 export interface OfficePdfConversionInput {
   readonly sourcePath: string;
@@ -52,7 +53,21 @@ export const handleFilesystemPreviewRequest = async (
 
   const extension = extname(targetPath).toLowerCase();
 
-  if (!SUPPORTED_SPREADSHEET_EXTENSIONS.has(extension)) {
+  if (extension === PDF_EXTENSION) {
+    const pdf = await readFile(targetPath);
+
+    response.writeHead(200, {
+      ...filesystemDownloadCorsHeaders,
+      "content-type": "application/pdf",
+      "content-length": String(pdf.byteLength),
+      "content-disposition": `inline; filename="${escapeHeaderValue(basename(targetPath))}"`,
+      "cache-control": "no-store",
+    });
+    response.end(pdf);
+    return;
+  }
+
+  if (!SUPPORTED_OFFICE_PDF_PREVIEW_EXTENSIONS.has(extension)) {
     throw new FilesystemError("UNSUPPORTED_PREVIEW_TYPE", "This file type does not support PDF preview");
   }
 
