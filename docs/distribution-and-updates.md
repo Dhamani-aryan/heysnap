@@ -122,35 +122,65 @@ gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
 What it does:
 
 - Runs machine-server typecheck and tests.
-- Builds a multi-arch Docker image for `linux/amd64` and `linux/arm64`.
-- Pushes the image to ECR with `<version>` and `<channel>` tags.
+- Builds `packages/server`.
+- Packages a `linux-x64` host artifact tarball with production runtime
+  dependencies.
+- Uploads the tarball to S3.
 - Publishes the cloud release manifest through:
   `POST /admin/releases/machine-server`
 - For `stable` releases, updates the cloud-server host's
-  `MACHINE_SERVER_IMAGE` and `MACHINE_SERVER_VERSION` defaults, then recreates
-  the cloud-server container with the same cloud-server image so newly created
-  VMs boot directly into the released machine-server version.
+  `MACHINE_SERVER_VERSION` default and recreates the cloud-server container.
 
 Runtime update behavior:
 
 - VM heartbeat loop receives update info from `POST /machines/heartbeat`.
 - The VM supervisor checks the running machine server's `/status`.
-- If `safeToRestart` is true, the supervisor pulls the new Docker image and
-  restarts the container.
+- If `safeToRestart` is true, the supervisor downloads the release tarball,
+  verifies `metadata.sha256`, switches `/opt/ank1015/machine-server/current`,
+  and restarts `ank1015-machine-server.service`.
 - If sessions are active, the update is deferred to a later heartbeat.
 
 Electron embeds the machine server in the desktop app. Local desktop
 machine-server changes are delivered by the desktop release workflow, not by
-the machine-server Docker release workflow.
+the host artifact release workflow.
 
 Required GitHub variables/secrets:
 
 - `AWS_REGION`
-- `MACHINE_SERVER_IMAGE_URI`
+- `MACHINE_SERVER_ARTIFACT_BUCKET`
+- `MACHINE_SERVER_ARTIFACT_BASE_URL`
 - `AWS_MACHINE_SERVER_RELEASE_ROLE_ARN`
 - `AWS_CLOUD_SERVER_DEPLOY_ROLE_ARN`
 - `CLOUD_SERVER_INSTANCE_ID`
 - `CLOUD_SERVER_ADMIN_TOKEN`
+
+## Machine Image Build
+
+Workflow:
+
+```text
+.github/workflows/build-machine-image.yml
+```
+
+Run when the base EC2 developer environment should change:
+
+```sh
+gh workflow run build-machine-image.yml --repo ank1015/heysnap --ref main \
+  -f channel=stable
+```
+
+What it does:
+
+- Builds the Ubuntu 24.04 host AMI with Packer from `infra/machine-image`.
+- Installs the global developer tools, Python environment, Docker, and Codex.
+- Runs the AMI validation script.
+- Publishes the resulting AMI id to `AWS_MACHINE_AMI_SSM_PARAMETER`.
+
+Required GitHub variables/secrets:
+
+- `AWS_REGION`
+- `AWS_MACHINE_AMI_SSM_PARAMETER`
+- `AWS_MACHINE_IMAGE_BUILD_ROLE_ARN`
 
 ## Current Hosted Release Sources
 

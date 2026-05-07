@@ -62,7 +62,7 @@ User creates machine in UI
   -> POST /computers
   -> cloud server creates DB row and machine identity
   -> cloud server starts EC2 instance
-  -> EC2 user-data starts Docker machine server
+  -> EC2 user-data starts host machine server systemd units
   -> VM registers with POST /machines/register
   -> VM heartbeats with POST /machines/heartbeat
   -> VM opens outbound WS /machines/tunnel
@@ -116,7 +116,7 @@ The local machine is not exposed through the cloud gateway yet.
 - `WS /agent`: agent thread retrieval and run streaming.
 
 The `/status` endpoint is important for VM updates. VM supervisors only replace
-the machine-server container when `safeToRestart` is true.
+the machine-server host artifact when `safeToRestart` is true.
 
 ## Admin Flow
 

@@ -15,8 +15,8 @@ CLOUD_SERVER_PUBLIC_URL=https://api.heysnap.xyz
 AWS_REGION=ap-south-1
 AWS_EC2_INSTANCE_TYPE=t3.large
 AWS_EC2_ROOT_VOLUME_GB=80
+AWS_MACHINE_AMI_SSM_PARAMETER=/ank1015/machine-images/stable/ami-id
 AWS_MACHINE_INSTANCE_PROFILE_NAME=ank1015-machine-profile
-MACHINE_SERVER_IMAGE=001961766272.dkr.ecr.ap-south-1.amazonaws.com/ank1015-machine-server:stable
 MACHINE_SERVER_VERSION=stable
 ```
 
@@ -24,7 +24,6 @@ Build the Docker image from the repo root:
 
 ```sh
 docker build -f packages/cloud-server/Dockerfile -t ank1015-cloud-server .
-docker build -f packages/server/Dockerfile -t ank1015-machine-server .
 ```
 
 Run migrations before starting a new deployment:
@@ -44,8 +43,8 @@ docker run --rm -p 4100:4100 \
   -e CLOUD_SERVER_ADMIN_TOKEN=... \
   -e CLOUD_SERVER_PUBLIC_URL=https://api.heysnap.xyz \
   -e AWS_REGION=ap-south-1 \
+  -e AWS_MACHINE_AMI_SSM_PARAMETER=/ank1015/machine-images/stable/ami-id \
   -e AWS_MACHINE_INSTANCE_PROFILE_NAME=ank1015-machine-profile \
-  -e MACHINE_SERVER_IMAGE=001961766272.dkr.ecr.ap-south-1.amazonaws.com/ank1015-machine-server:stable \
   -e MACHINE_SERVER_VERSION=stable \
   ank1015-cloud-server
 ```

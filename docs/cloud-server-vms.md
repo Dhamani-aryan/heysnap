@@ -8,18 +8,16 @@ Default AWS settings:
 AWS_REGION=ap-south-1
 AWS_EC2_INSTANCE_TYPE=t3.large
 AWS_EC2_ROOT_VOLUME_GB=80
+AWS_MACHINE_AMI_SSM_PARAMETER=/ank1015/machine-images/stable/ami-id
 ```
 
-The provisioner resolves the Ubuntu 24.04 amd64 AMI from this public SSM
-parameter:
+The provisioner resolves the machine AMI from `AWS_MACHINE_AMI_SSM_PARAMETER`.
+That AMI is built from Ubuntu 24.04 by `infra/machine-image` and contains the
+global developer tools Codex should see from bash.
 
-```sh
-/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
-```
-
-`POST /computers` now creates a cloud computer record, creates a one-time
-machine bootstrap token, and starts EC2 provisioning. The bootstrap token is
-stored only as a hash in Postgres and is passed to the VM through EC2 user-data.
+`POST /computers` creates a cloud computer record, creates a one-time machine
+bootstrap token, and starts EC2 provisioning. The bootstrap token is stored only
+as a hash in Postgres and is passed to the VM through EC2 user-data.
 
 The EC2 instance calls back to:
 
@@ -34,12 +32,12 @@ can register successfully. Do not use `localhost` for real EC2 provisioning.
 
 VM user-data starts two systemd services:
 
-- `ank1015-machine-server.service`: pulls and runs the configured machine-server
-  Docker image on the VM. The machine server waits for the machine token file
-  and then opens the outbound gateway tunnel.
+- `ank1015-machine-server.service`: runs the host-installed machine-server
+  artifact with Node. It starts Codex directly on the EC2 host, with
+  `/workspace` as the filesystem root and `/home/agent` as `HOME`.
 - `ank1015-machine-heartbeat.service`: exchanges the bootstrap token for a
   machine token, reports heartbeat and capabilities to the cloud server, checks
-  release manifests, and restarts the machine-server container only when
+  release manifests, and updates the machine-server artifact only when
   `/status.safeToRestart` is true.
 
 Current v1 behavior:
@@ -47,32 +45,26 @@ Current v1 behavior:
 - machine server ports are not opened publicly
 - default VPC/subnet behavior is used
 - root EBS volume is encrypted gp3, 80 GB, and not deleted on termination
+- Docker is installed on the host for developer workflows, but the machine
+  server itself does not run in Docker
 - EC2 lifecycle routes are available through the protected computer API:
   - `POST /computers/:computerId/start`
   - `POST /computers/:computerId/stop`
   - `POST /computers/:computerId/restart`
   - `DELETE /computers/:computerId`
 
-The initial machine-server image is configured with:
+Machine-server releases are published by `release-machine-server.yml`. The
+workflow uploads a tarball to S3 and publishes a release manifest containing
+`downloadUrl` and `metadata.sha256`. VM heartbeats receive the latest manifest,
+download and verify the tarball, atomically move
+`/opt/ank1015/machine-server/current`, and restart the host systemd service
+when idle. If the health check fails, the updater rolls back to the previous
+release.
 
-```sh
-MACHINE_SERVER_IMAGE=001961766272.dkr.ecr.ap-south-1.amazonaws.com/ank1015-machine-server:stable
-MACHINE_SERVER_VERSION=stable
-AWS_MACHINE_INSTANCE_PROFILE_NAME=ank1015-machine-profile
-```
-
-Machine-server releases are published by `release-machine-server.yml`. After a
-release, heartbeats receive the latest manifest and the host-side supervisor
-pulls the versioned image when the machine is idle.
-
-For `stable` releases, the same workflow also updates the cloud-server host's
-machine-server defaults and recreates the cloud-server container. New VMs then
-boot directly from the released versioned image instead of waiting for their
-first heartbeat update.
-
-The machine instance profile only needs ECR read access for this step. The
-machine server is reached through the cloud gateway, so no public machine-server
-inbound port is required.
+The machine instance profile needs permissions for EC2 lifecycle operations,
+SSM AMI parameter reads, and any artifact bucket access required by deployment.
+The machine server is reached through the cloud gateway, so no public
+machine-server inbound port is required.
 
 Gateway access flow:
 
