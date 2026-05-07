@@ -1,0 +1,63 @@
+name: Build machine image
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Machine image channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: Build and publish AMI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_MACHINE_IMAGE_BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Packer
+        uses: hashicorp/setup-packer@v3
+
+      - name: Build AMI
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          packer init infra/machine-image
+          packer validate \
+            -var "aws_region=$AWS_REGION" \
+            -var "channel=$CHANNEL" \
+            infra/machine-image
+          packer build \
+            -var "aws_region=$AWS_REGION" \
+            -var "channel=$CHANNEL" \
+            infra/machine-image
+
+      - name: Upload Packer manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: machine-image-manifest-${{ inputs.channel }}
+          path: infra/machine-image/manifest.json
+          if-no-files-found: error
+
+      - name: Publish AMI SSM parameter
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_MACHINE_AMI_SSM_PARAMETER: ${{ vars.AWS_MACHINE_AMI_SSM_PARAMETER }}
+        run: infra/machine-image/scripts/publish-ami-ssm.sh

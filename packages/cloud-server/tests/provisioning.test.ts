@@ -2,7 +2,9 @@ import { Buffer } from "node:buffer";
 
 import { describe, expect, it } from "vitest";
 
+import type { CloudServerConfig } from "../src/config.js";
 import { buildRunInstancesRequest } from "../src/provisioning/aws-ec2-provisioner.js";
+import { getDev8gbPreset } from "../src/provisioning/presets.js";
 import { renderMachineUserData } from "../src/provisioning/user-data.js";
 import type { ComputerRecord } from "../src/db/types.js";
 
@@ -13,7 +15,6 @@ describe("AWS EC2 provisioning", () => {
       cloudServerPublicUrl: "https://cloud.example.com",
       computer,
       bootstrapToken: "bootstrap-token",
-      machineServerImage: "example.com/ank1015-machine-server:test",
       machineServerVersion: "test-version",
     });
     const request = buildRunInstancesRequest({
@@ -54,29 +55,54 @@ describe("AWS EC2 provisioning", () => {
     ]));
   });
 
+  it("resolves the machine AMI from the configured SSM parameter", () => {
+    expect(getDev8gbPreset(createConfig()).amiSsmParameterName)
+      .toBe("/ank1015/machine-images/test/ami-id");
+  });
+
   it("renders user data with cloud server URL, computer id, and bootstrap token", () => {
     const computer = createComputer();
     const userData = renderMachineUserData({
       cloudServerPublicUrl: "https://cloud.example.com",
       computer,
       bootstrapToken: "bootstrap-token",
-      machineServerImage: "example.com/ank1015-machine-server:test",
       machineServerVersion: "test-version",
     });
 
     expect(userData).toContain("CLOUD_SERVER_PUBLIC_URL=https://cloud.example.com");
     expect(userData).toContain(`ANK1015_COMPUTER_ID=${computer.id}`);
-    expect(userData).toContain("ANK1015_MACHINE_BOOTSTRAP_TOKEN=bootstrap-token");
-    expect(userData).toContain("MACHINE_SERVER_IMAGE=example.com/ank1015-machine-server:test");
+    expect(userData).toContain("cat >/opt/ank1015/bootstrap-token");
+    expect(userData).toContain("bootstrap-token");
     expect(userData).toContain("MACHINE_SERVER_VERSION=test-version");
     expect(userData).toContain("MACHINE_SERVER_CHANNEL=stable");
     expect(userData).toContain("http://127.0.0.1:$PORT/status");
     expect(userData).toContain("install_update_if_idle");
-    expect(userData).toContain("docker run --rm");
+    expect(userData).toContain("downloadUrl");
+    expect(userData).toContain("metadata.sha256");
+    expect(userData).toContain("ExecStart=/usr/bin/node /opt/ank1015/machine-server/current/dist/index.js");
+    expect(userData).toContain("User=agent");
+    expect(userData).not.toContain("docker run --rm");
     expect(userData).toContain("ank1015-machine-heartbeat.service");
     expect(userData).toContain("/machines/register");
     expect(userData).not.toContain("bootstrap-placeholder");
   });
+});
+
+const createConfig = (): CloudServerConfig => ({
+  port: 4100,
+  databaseUrl: "postgres://test",
+  sessionSecret: "test-session-secret",
+  sessionTtlSeconds: 60 * 60,
+  computerAccessSessionTtlSeconds: 60,
+  cloudServerPublicUrl: "https://cloud.example.com",
+  awsRegion: "ap-south-1",
+  awsEc2InstanceType: "t3.large",
+  awsEc2RootVolumeGb: 80,
+  awsMachineAmiSsmParameter: "/ank1015/machine-images/test/ami-id",
+  awsMachineInstanceProfileName: "ank1015-machine-profile",
+  machineServerVersion: "test-version",
+  allowedOrigins: ["https://app.example.com"],
+  adminToken: "test-admin-token",
 });
 
 const createComputer = (): ComputerRecord => ({

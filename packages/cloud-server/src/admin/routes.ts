@@ -19,7 +19,7 @@ import {
   readReleasePlatform,
 } from "../releases/routes.js";
 import type { AppVariables } from "../shared/context.js";
-import { notFound, unauthorized } from "../shared/errors.js";
+import { badRequest, notFound, unauthorized } from "../shared/errors.js";
 import { serializeComputer, serializeUser } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
 
@@ -331,14 +331,24 @@ export const createAdminRoutes = (
 
   app.post("/releases/machine-server", async (context) => {
     const body = await readJsonBody(context.req.raw);
+    const downloadUrl = optionalNonEmptyString(body, "downloadUrl", 2000);
+    const dockerImage = optionalNonEmptyString(body, "dockerImage", 2000);
+
+    if (downloadUrl === null && dockerImage === null) {
+      throw badRequest(
+        "MACHINE_SERVER_RELEASE_ARTIFACT_REQUIRED",
+        "Machine server releases require downloadUrl or dockerImage.",
+      );
+    }
+
     const manifest = await store.upsertReleaseManifest({
       target: "machine-server",
       channel: readReleaseChannel(body),
       platform: readReleasePlatform(body),
       version: stringField(body, "version", { required: true, maxLength: 120 }) ?? "",
-      downloadUrl: null,
+      downloadUrl,
       signatureUrl: null,
-      dockerImage: stringField(body, "dockerImage", { required: true, maxLength: 2000 }) ?? "",
+      dockerImage,
       notes: stringField(body, "notes", { maxLength: 4000 }) ?? null,
       metadata: readMetadata(body["metadata"]),
       releasedAt: readReleasedAt(body["releasedAt"]),
@@ -433,6 +443,20 @@ const readReleasedAt = (value: unknown): Date => {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? new Date() : date;
+};
+
+const optionalNonEmptyString = (
+  body: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+): string | null => {
+  const value = stringField(body, key, { maxLength });
+
+  if (value === undefined || value.length === 0) {
+    return null;
+  }
+
+  return value;
 };
 
 const readBearerToken = (authorizationHeader: string | undefined): string | null => {

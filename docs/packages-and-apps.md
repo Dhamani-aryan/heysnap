@@ -47,7 +47,7 @@ Machine server that runs on every computer.
 - WebSocket `/filesystem`.
 - WebSocket `/agent`.
 - Outbound machine tunnel client for cloud VMs.
-- Docker image used by EC2 machines.
+- Host artifact used by EC2 machines.
 - Released through `.github/workflows/release-machine-server.yml`.
 
 ### `packages/cloud-server`

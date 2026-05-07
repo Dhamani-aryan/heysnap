@@ -30,7 +30,8 @@ logical responsibilities:
   WebSocket proxying and tunnel management.
 
 The machine server is the same server on every computer. It runs on cloud VMs
-as a Docker container and is embedded in Electron main for local desktop work.
+as a host systemd service and is embedded in Electron main for local desktop
+work.
 
 ## Packages
 

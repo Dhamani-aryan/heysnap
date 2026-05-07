@@ -20,6 +20,7 @@ const config: CloudServerConfig = {
   awsEc2InstanceType: "t3.large",
   awsEc2RootVolumeGb: 80,
   awsMachineInstanceProfileName: "ank1015-machine-profile",
+  awsMachineAmiSsmParameter: "/ank1015/machine-images/test/ami-id",
   machineServerImage: "example.com/ank1015-machine-server:test",
   machineServerVersion: "test-version",
   allowedOrigins: ["https://app.example.com"],
