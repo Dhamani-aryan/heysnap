@@ -16,6 +16,7 @@ describe("AWS EC2 provisioning", () => {
       computer,
       bootstrapToken: "bootstrap-token",
       machineServerVersion: "test-version",
+      codexDefaultModel: "gpt-5.5",
     });
     const request = buildRunInstancesRequest({
       computer,
@@ -67,6 +68,7 @@ describe("AWS EC2 provisioning", () => {
       computer,
       bootstrapToken: "bootstrap-token",
       machineServerVersion: "test-version",
+      codexDefaultModel: "gpt-5.5",
     });
 
     expect(userData).toContain("CLOUD_SERVER_PUBLIC_URL=https://cloud.example.com");
@@ -81,6 +83,11 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("metadata.sha256");
     expect(userData).toContain("ExecStart=/usr/bin/node /opt/ank1015/machine-server/current/dist/index.js");
     expect(userData).toContain("User=agent");
+    expect(userData).toContain("cat >/home/agent/.codex/config.toml");
+    expect(userData).toContain('model = "gpt-5.5"');
+    expect(userData).toContain('base_url = "https://cloud.example.com/llm/openai/v1"');
+    expect(userData).toContain('"api-key" = "ANK1015_CODEX_GATEWAY_TOKEN"');
+    expect(userData).not.toContain("AZURE_OPENAI_API_KEY");
     expect(userData).not.toContain("docker run --rm");
     expect(userData).toContain("ank1015-machine-heartbeat.service");
     expect(userData).toContain("/machines/register");
