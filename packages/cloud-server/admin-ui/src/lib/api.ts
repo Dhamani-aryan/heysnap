@@ -149,7 +149,9 @@ export const adminApi = {
   upsertMachineServerRelease: (input: {
     readonly channel: string;
     readonly version: string;
-    readonly dockerImage: string;
+    readonly downloadUrl?: string | null;
+    readonly dockerImage?: string | null;
+    readonly metadata?: unknown;
     readonly notes?: string | null;
   }) =>
     request<{ readonly release: AdminRelease }>("/admin/releases/machine-server", {
