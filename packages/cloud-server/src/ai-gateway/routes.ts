@@ -381,12 +381,12 @@ class UsageStreamParser {
   }
 
   private observeEvent(eventText: string): void {
-    const data = eventText
+    const dataLines = eventText
       .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice("data:".length).trimStart())
-      .join("\n")
-      .trim();
+      .filter((line) => line.startsWith("data:"));
+    const data = (dataLines.length > 0
+      ? dataLines.map((line) => line.slice("data:".length).trimStart()).join("\n")
+      : eventText).trim();
 
     if (data.length === 0 || data === "[DONE]") {
       return;

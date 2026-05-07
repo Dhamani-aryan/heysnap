@@ -143,6 +143,51 @@ describe("AI gateway", () => {
     }
   });
 
+  it("logs token usage from non-stream JSON responses", async () => {
+    const { app, store, machineToken } = await createTestApp();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      model: "gpt-5.5",
+      usage: {
+        input_tokens: 25,
+        input_tokens_details: { cached_tokens: 3 },
+        output_tokens: 9,
+        output_tokens_details: { reasoning_tokens: 2 },
+        total_tokens: 34,
+      },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5.5", input: "hi" }),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+
+      const [usage] = await store.listAiUsageRequests();
+      expect(usage).toMatchObject({
+        status: "succeeded",
+        httpStatus: 200,
+        model: "gpt-5.5",
+        inputTokens: 25,
+        outputTokens: 9,
+        cachedInputTokens: 3,
+        reasoningOutputTokens: 2,
+        totalTokens: 34,
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("stores redacted payloads only when body capture is enabled", async () => {
     const { app, store, machineToken } = await createTestApp({
       aiGatewayCaptureBodies: true,
