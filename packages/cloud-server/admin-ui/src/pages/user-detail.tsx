@@ -3,6 +3,7 @@ import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import { AiUsagePanel } from "@/components/ai-usage-panel";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyButton } from "@/components/copy-button";
 import { ErrorState } from "@/components/error-state";
@@ -164,6 +165,7 @@ export const UserDetailPage = () => {
       <Tabs defaultValue="computers" className="space-y-4">
         <TabsList>
           <TabsTrigger value="computers">Machines</TabsTrigger>
+          <TabsTrigger value="ai-usage">AI usage</TabsTrigger>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
         </TabsList>
 
@@ -230,6 +232,10 @@ export const UserDetailPage = () => {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="ai-usage">
+          <AiUsagePanel scope={{ kind: "user", userId }} />
         </TabsContent>
 
         <TabsContent value="sessions">

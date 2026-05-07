@@ -1,6 +1,8 @@
-import { Activity, AlertTriangle, Cloud, Cpu, Laptop, RefreshCw, Server, Users as UsersIcon } from "lucide-react";
+import { Activity, AlertTriangle, Cloud, Cpu, Laptop, RefreshCw, Server, Sparkles, Users as UsersIcon } from "lucide-react";
+import * as React from "react";
 import { Link } from "react-router-dom";
 
+import { TopBarList, type TopBarItem } from "@/components/charts/top-bar";
 import { ErrorState } from "@/components/error-state";
 import { KindBadge } from "@/components/kind-badge";
 import { PageHeader } from "@/components/page-header";
@@ -20,10 +22,34 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAdminQuery } from "@/hooks/use-admin-query";
+import { formatTokens } from "@/lib/ai-usage";
 import { adminApi } from "@/lib/api";
 
 export const OverviewPage = () => {
   const overview = useAdminQuery(() => adminApi.getOverview());
+  const fromIso = React.useMemo(
+    () => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    [],
+  );
+  const aiSummary = useAdminQuery(
+    () => adminApi.summarizeAiUsage({ from: fromIso }),
+    [fromIso],
+  );
+  const aiTopModels = useAdminQuery(
+    () => adminApi.breakdownAiUsage({ from: fromIso, groupBy: "model", limit: 5 }),
+    [fromIso],
+  );
+
+  const aiTopModelItems: TopBarItem[] = React.useMemo(
+    () =>
+      (aiTopModels.data?.groups ?? []).map((row) => ({
+        key: row.key,
+        label: row.label,
+        value: row.totalTokens,
+        secondary: `${row.requestCount.toLocaleString()} requests`,
+      })),
+    [aiTopModels.data?.groups],
+  );
 
   return (
     <>
@@ -31,7 +57,17 @@ export const OverviewPage = () => {
         title="Overview"
         description="Live snapshot of users, machines, and active connections."
         actions={
-          <Button variant="outline" size="sm" onClick={overview.reload} disabled={overview.loading} className="gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              overview.reload();
+              aiSummary.reload();
+              aiTopModels.reload();
+            }}
+            disabled={overview.loading}
+            className="gap-2"
+          >
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </Button>
         }
@@ -66,6 +102,51 @@ export const OverviewPage = () => {
                   tone={overview.data.stats.failedComputers > 0 ? "destructive" : "default"}
                   icon={<AlertTriangle className="h-5 w-5" />}
                 />
+              </>
+            )}
+          </section>
+
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {aiSummary.loading || aiSummary.data === undefined ? (
+              Array.from({ length: 2 }).map((_, index) => (
+                <Skeleton key={index} className="h-24 sm:col-span-1 lg:col-span-2" />
+              ))
+            ) : (
+              <>
+                <StatCard
+                  label="AI requests (24h)"
+                  value={aiSummary.data.summary.requestCount.toLocaleString()}
+                  hint={`${aiSummary.data.summary.successCount} ok · ${aiSummary.data.summary.failedCount} failed · ${aiSummary.data.summary.distinctUsers} users`}
+                  icon={<Sparkles className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="AI tokens (24h)"
+                  value={formatTokens(aiSummary.data.summary.totalTokens)}
+                  hint={`${formatTokens(aiSummary.data.summary.inputTokens)} in · ${formatTokens(aiSummary.data.summary.outputTokens)} out`}
+                  icon={<Sparkles className="h-5 w-5" />}
+                />
+                <Card className="sm:col-span-2 lg:col-span-2">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <div>
+                      <CardTitle className="text-sm">Top models (24h)</CardTitle>
+                      <CardDescription>Token consumption by model.</CardDescription>
+                    </div>
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to="/ai-usage">View AI usage</Link>
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    {aiTopModels.loading ? (
+                      <Skeleton className="h-16" />
+                    ) : (
+                      <TopBarList
+                        items={aiTopModelItems}
+                        valueFormatter={formatTokens}
+                        emptyLabel="No AI usage yet"
+                      />
+                    )}
+                  </CardContent>
+                </Card>
               </>
             )}
           </section>
