@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 
 import { AgentError } from "../../errors.js";
@@ -49,6 +50,8 @@ interface PendingRequest {
 }
 
 const DEFAULT_CODEX_BIN = "codex";
+const CODEX_GATEWAY_TOKEN_ENV = "ANK1015_CODEX_GATEWAY_TOKEN";
+const MACHINE_TOKEN_FILE_ENV = "ANK1015_MACHINE_TOKEN_FILE";
 const CLIENT_INFO = {
   name: "ank1015_app",
   title: "ank1015 app",
@@ -124,6 +127,7 @@ export class CodexStdioAppServerClient implements CodexAppServerClient {
     }
 
     const child = spawn(this.codexBin, ["app-server"], {
+      env: resolveCodexAppServerEnv(process.env),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -273,6 +277,39 @@ export class CodexStdioAppServerClient implements CodexAppServerClient {
     return `: ${stderr.slice(-1000)}`;
   }
 }
+
+export const resolveCodexAppServerEnv = (
+  sourceEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv => {
+  const tokenFile = sourceEnv[MACHINE_TOKEN_FILE_ENV]?.trim();
+
+  if (tokenFile === undefined || tokenFile.length === 0) {
+    return sourceEnv;
+  }
+
+  let token: string;
+
+  try {
+    token = readFileSync(tokenFile, "utf8").trim();
+  } catch {
+    throw new AgentError(
+      "CODEX_MACHINE_TOKEN_NOT_READY",
+      `Machine registration is not ready; ${MACHINE_TOKEN_FILE_ENV} does not point to a readable token file.`,
+    );
+  }
+
+  if (token.length === 0) {
+    throw new AgentError(
+      "CODEX_MACHINE_TOKEN_NOT_READY",
+      "Machine registration is not ready; machine token file is empty.",
+    );
+  }
+
+  return {
+    ...sourceEnv,
+    [CODEX_GATEWAY_TOKEN_ENV]: token,
+  };
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
