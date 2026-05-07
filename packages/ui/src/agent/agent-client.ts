@@ -144,10 +144,14 @@ export const startAgentRun = (
   }
 
   function handleMessage(event: MessageEvent): void {
+    void handleParsedMessage(event.data);
+  }
+
+  async function handleParsedMessage(data: unknown): Promise<void> {
     let message: AgentServerMessage;
 
     try {
-      message = parseMessage(event.data);
+      message = await parseMessage(data);
     } catch (error) {
       fail(error instanceof Error ? error : new Error("Failed to parse agent run message."));
       return;
@@ -294,7 +298,19 @@ const waitForMessage = async (
     }, REQUEST_TIMEOUT_MS);
 
     const handleMessage = (event: MessageEvent): void => {
-      const message = parseMessage(event.data);
+      void handleParsedMessage(event.data);
+    };
+
+    const handleParsedMessage = async (data: unknown): Promise<void> => {
+      let message: AgentServerMessage;
+
+      try {
+        message = await parseMessage(data);
+      } catch (error) {
+        cleanup();
+        reject(error instanceof Error ? error : new Error("Failed to parse agent history message."));
+        return;
+      }
 
       if (message.type === "hello" || message.type === "pong") {
         return;
@@ -329,12 +345,25 @@ const sendMessage = (socket: WebSocket, message: AgentClientMessage): void => {
   socket.send(JSON.stringify(message));
 };
 
-const parseMessage = (data: unknown): AgentServerMessage => {
+const parseMessage = async (data: unknown): Promise<AgentServerMessage> => {
+  const text = await messageDataToText(data);
+  return JSON.parse(text) as AgentServerMessage;
+};
+
+const messageDataToText = async (data: unknown): Promise<string> => {
   if (typeof data !== "string") {
+    if (data instanceof ArrayBuffer) {
+      return new TextDecoder().decode(data);
+    }
+
+    if (typeof Blob !== "undefined" && data instanceof Blob) {
+      return data.text();
+    }
+
     throw new Error("Agent history message must be text.");
   }
 
-  return JSON.parse(data) as AgentServerMessage;
+  return data;
 };
 
 const createRequestId = (): string => {
