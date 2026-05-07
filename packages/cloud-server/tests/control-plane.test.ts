@@ -19,6 +19,7 @@ const config: CloudServerConfig = {
   awsEc2InstanceType: "t3.large",
   awsEc2RootVolumeGb: 80,
   awsMachineInstanceProfileName: "ank1015-machine-profile",
+  awsMachineAmiSsmParameter: "/ank1015/machine-images/test/ami-id",
   machineServerImage: "example.com/ank1015-machine-server:test",
   machineServerVersion: "test-version",
   allowedOrigins: ["https://app.example.com", "http://localhost:3000"],
@@ -160,7 +161,8 @@ describe("cloud server auth", () => {
       body: JSON.stringify({
         channel: "stable",
         version: "1.0.0",
-        dockerImage: "example.com/machine-server:1.0.0",
+        downloadUrl: "https://downloads.example.com/machine-server-1.0.0-linux-x64.tar.gz",
+        metadata: { sha256: "abc123" },
       }),
       headers: adminHeaders(),
     });
@@ -759,7 +761,10 @@ describe("cloud server release manifests", () => {
       body: JSON.stringify({
         channel: "stable",
         version: "1.1.0",
-        dockerImage: "example.com/ank1015-machine-server:1.1.0",
+        downloadUrl: "https://downloads.example.com/machine-server-1.1.0-linux-x64.tar.gz",
+        metadata: {
+          sha256: "abc123",
+        },
         notes: "Machine server rollout",
       }),
       headers: adminHeaders(),
@@ -781,7 +786,10 @@ describe("cloud server release manifests", () => {
           channel: "stable",
           platform: "default",
           version: "1.1.0",
-          dockerImage: "example.com/ank1015-machine-server:1.1.0",
+          downloadUrl: "https://downloads.example.com/machine-server-1.1.0-linux-x64.tar.gz",
+          metadata: {
+            sha256: "abc123",
+          },
         },
       },
     });
