@@ -70,6 +70,8 @@ export class MockAgentHarness implements IAgentHarness {
   async *sendMessage(input: SendMessageInput): AsyncIterable<AgentRunEvent> {
     const runId = randomUUID();
     const now = Date.now();
+    const turnId = runId;
+    let sequence = 0;
     const existingThread = input.threadId === undefined ? undefined : this.threads.get(input.threadId);
 
     if (input.threadId !== undefined && existingThread === undefined) {
@@ -78,18 +80,30 @@ export class MockAgentHarness implements IAgentHarness {
 
     const thread = existingThread ?? createThread(input, now);
     const threadId = thread.id;
-    const scope = { runId, threadId };
+    const base = <TType extends AgentRunEvent["type"]>(type: TType, createdAt = Date.now()) => ({
+      version: 2 as const,
+      type,
+      runId,
+      threadId,
+      turnId,
+      sequence: ++sequence,
+      createdAt,
+      provider: "mock",
+      providerRefs: {
+        providerThreadId: threadId,
+        providerTurnId: turnId,
+      },
+    });
 
     if (existingThread === undefined) {
       this.threads.set(thread.id, thread);
+      yield {
+        ...base("thread.created", now),
+        thread: toThreadSummary(thread),
+      };
     }
 
-    yield { ...scope, type: "agent_start" };
-    yield { ...scope, type: "turn_start" };
-
-    if (existingThread === undefined) {
-      yield { ...scope, type: "thread_created", thread: toThreadSummary(thread) };
-    }
+    yield { ...base("turn.started", now), input: cloneContent(input.content), path: input.path };
 
     const userMessage: UserMessage = {
       role: "user",
@@ -102,49 +116,104 @@ export class MockAgentHarness implements IAgentHarness {
     updateThread(thread, input.path, now);
 
     yield {
-      ...scope,
-      type: "message_start",
+      ...base("message.started", now),
       messageType: "user",
       messageId: userMessage.id,
       message: userMessage,
     };
     yield {
-      ...scope,
-      type: "message_end",
+      ...base("message.completed", now),
       messageType: "user",
       messageId: userMessage.id,
       message: userMessage,
     };
 
-    const assistantMessage = createAssistantMessage(now);
+    const toolItemId = `${runId}:tool:scan`;
+    const toolActivity = {
+      id: `activity:${toolItemId}`,
+      runId,
+      turnId,
+      itemId: toolItemId,
+      kind: "tool.completed" as const,
+      tone: "tool" as const,
+      status: "completed" as const,
+      title: "Command",
+      summary: "$ ls",
+      createdAt: now + 1,
+      updatedAt: now + 1,
+      sequence: sequence + 1,
+      payload: { command: "ls" },
+    };
+    thread.activities.push(toolActivity);
+
+    yield {
+      ...base("item.started", now + 1),
+      providerRefs: { providerThreadId: threadId, providerTurnId: turnId, providerItemId: toolItemId },
+      item: {
+        id: toolItemId,
+        itemType: "command_execution",
+        status: "running",
+        title: "Command",
+        summary: "$ ls",
+        args: { command: "ls" },
+      },
+    };
+    yield {
+      ...base("item.completed", now + 1),
+      providerRefs: { providerThreadId: threadId, providerTurnId: turnId, providerItemId: toolItemId },
+      item: {
+        id: toolItemId,
+        itemType: "command_execution",
+        status: "completed",
+        title: "Command",
+        summary: "$ ls",
+        result: { exitCode: 0 },
+        isError: false,
+      },
+    };
+
+    const assistantMessage = {
+      ...createAssistantMessage(now + 2),
+      content: [
+        {
+          type: "response" as const,
+          response: [{ type: "text" as const, content: "" }],
+        },
+      ],
+    };
+    const completedAssistantMessage = {
+      ...createAssistantMessage(now + 2),
+      id: assistantMessage.id,
+    };
     thread.messages.push(assistantMessage);
     updateThread(thread, input.path, Date.now());
 
     yield {
-      ...scope,
-      type: "message_start",
+      ...base("message.started", now + 2),
       messageType: "assistant",
       messageId: assistantMessage.id,
       message: assistantMessage,
     };
     yield {
-      ...scope,
-      type: "message_update",
-      messageType: "assistant",
+      ...base("content.delta", now + 2),
       messageId: assistantMessage.id,
-      message: assistantMessage,
+      contentIndex: 0,
+      streamKind: "assistant_text",
+      delta: "Mock response...",
     };
+    thread.messages[thread.messages.length - 1] = completedAssistantMessage;
     yield {
-      ...scope,
-      type: "message_end",
+      ...base("message.completed", now + 3),
       messageType: "assistant",
-      messageId: assistantMessage.id,
-      message: assistantMessage,
+      messageId: completedAssistantMessage.id,
+      message: completedAssistantMessage,
     };
 
-    yield { ...scope, type: "thread_updated", thread: toThreadSummary(thread) };
-    yield { ...scope, type: "turn_end" };
-    yield { ...scope, type: "agent_end", agentMessages: [userMessage, assistantMessage] };
+    yield {
+      ...base("turn.completed", now + 3),
+      status: "completed",
+    };
+    yield { ...base("thread.updated", now + 3), thread: toThreadSummary(thread) };
   }
 
   async cancelRun(): Promise<void> {
@@ -161,6 +230,8 @@ const createThread = (input: SendMessageInput, now: number): AgentThread => ({
   updatedAt: now,
   messageCount: 0,
   messages: [],
+  activities: [],
+  proposedPlans: [],
 });
 
 const createSeedThreads = (): MutableAgentThread[] => {
@@ -330,6 +401,22 @@ const createSeedThread = (input: {
     updatedAt: input.updatedAt,
     messageCount: messages.length,
     messages,
+    activities: [
+      {
+        id: `${input.id}-activity-command`,
+        itemId: `${input.id}-command`,
+        kind: "tool.completed",
+        tone: "tool",
+        status: "completed",
+        title: "Command",
+        summary: "$ pnpm typecheck",
+        createdAt: input.updatedAt - 1000,
+        updatedAt: input.updatedAt - 1000,
+        sequence: 0,
+        payload: { command: "pnpm typecheck", exitCode: 0 },
+      },
+    ],
+    proposedPlans: [],
   };
 };
 
@@ -393,6 +480,8 @@ const isThreadInRoot = (thread: AgentThread, rootPath: string | undefined): bool
 const cloneThread = (thread: AgentThread): AgentThread => ({
   ...thread,
   messages: thread.messages.map(cloneMessage),
+  activities: thread.activities.map((activity) => ({ ...activity })),
+  proposedPlans: thread.proposedPlans?.map((plan) => ({ ...plan })),
 });
 
 const cloneMessage = (message: AgentMessage): AgentMessage => {

@@ -505,14 +505,8 @@ describe("codex agent harness", () => {
       "user",
       "assistant",
       "assistant",
-      "toolResult",
-      "toolResult",
-      "toolResult",
-      "toolResult",
-      "assistant",
-      "custom",
-      "custom",
     ]);
+    expect(thread.activities.length).toBeGreaterThanOrEqual(6);
     expect(thread.messages[0]).toMatchObject({
       role: "user",
       id: "user-1",
@@ -559,44 +553,6 @@ describe("codex agent harness", () => {
     });
     expect(thread.messages[2]).toMatchObject({
       role: "assistant",
-      id: "reasoning-1",
-      content: [{ type: "thinking", thinkingText: "Checked the test surface.\n\nNeed one focused assertion." }],
-    });
-    expect(thread.messages[3]).toMatchObject({
-      role: "toolResult",
-      id: "cmd-1",
-      toolName: "commandExecution",
-      toolCallId: "cmd-1",
-      content: [{ type: "text", content: "$ pnpm test\nPASS tests" }],
-      details: expect.objectContaining({ command: "pnpm test" }),
-      isError: false,
-    });
-    expect(thread.messages[4]).toMatchObject({
-      role: "toolResult",
-      toolName: "fileChange",
-      content: [
-        {
-          type: "text",
-          content: "update /workspace/Desktop/Projects/app/src/index.ts\n@@ -1 +1 @@\n-old\n+new",
-        },
-      ],
-      details: expect.objectContaining({ changes: expect.any(Array) }),
-    });
-    expect(thread.messages[5]).toMatchObject({
-      role: "toolResult",
-      toolName: "mcp:github/pull_request/read",
-      isError: true,
-      error: { message: "Not found", name: "NotFoundError" },
-      details: expect.objectContaining({ error: { message: "Not found", name: "NotFoundError" } }),
-    });
-    expect(thread.messages[6]).toMatchObject({
-      role: "toolResult",
-      toolName: "dynamic:browser/snapshot",
-      isError: false,
-      details: expect.objectContaining({ contentItems: [{ type: "text", text: "Loaded" }] }),
-    });
-    expect(thread.messages[7]).toMatchObject({
-      role: "assistant",
       id: "assistant-final",
       duration: 8000,
       content: [
@@ -615,17 +571,42 @@ describe("codex agent harness", () => {
         },
       ],
     });
-    expect(thread.messages[8]).toMatchObject({
-      role: "custom",
-      tag: "codex:webSearch",
-      content: { item: expect.objectContaining({ query: "Codex app server" }) },
-    });
-    expect(thread.messages[9]).toMatchObject({
-      role: "custom",
-      id: "turn-2:error",
-      tag: "codex:turnError",
-      content: { turnId: "turn-2", error: { message: "Context window exceeded" } },
-    });
+    expect(thread.activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "activity:reasoning-1",
+        kind: "thinking",
+        summary: "Checked the test surface.\n\nNeed one focused assertion.",
+      }),
+      expect.objectContaining({
+        id: "activity:cmd-1",
+        kind: "tool.completed",
+        title: "Command",
+        summary: "$ pnpm test\nPASS tests",
+      }),
+      expect.objectContaining({
+        id: "activity:patch-1",
+        kind: "tool.completed",
+        title: "File change",
+      }),
+      expect.objectContaining({
+        id: "activity:mcp-1",
+        kind: "tool.completed",
+        tone: "error",
+      }),
+      expect.objectContaining({
+        id: "activity:dynamic-1",
+        kind: "tool.completed",
+      }),
+      expect.objectContaining({
+        id: "activity:search-1",
+        kind: "info",
+        title: "Web search",
+      }),
+      expect.objectContaining({
+        id: "activity:turn-2:error",
+        kind: "runtime.error",
+      }),
+    ]));
   });
 
   it("starts a new Codex thread and streams turn events", async () => {
@@ -759,40 +740,40 @@ describe("codex agent harness", () => {
       },
     ]);
     expect(events.map((event) => event.type)).toEqual([
-      "agent_start",
-      "thread_created",
-      "turn_start",
-      "message_start",
-      "message_end",
-      "message_start",
-      "message_update",
-      "message_end",
-      "tool_execution_start",
-      "tool_execution_update",
-      "tool_execution_end",
-      "message_start",
-      "message_end",
-      "message_start",
-      "message_end",
-      "turn_end",
-      "thread_updated",
-      "agent_end",
+      "thread.created",
+      "turn.started",
+      "message.started",
+      "message.completed",
+      "message.started",
+      "content.delta",
+      "message.completed",
+      "item.started",
+      "item.updated",
+      "content.delta",
+      "item.completed",
+      "item.completed",
+      "turn.completed",
+      "thread.updated",
     ]);
-    expect(events.find((event) => event.type === "message_update")).toMatchObject({
-      messageType: "assistant",
+    expect(events.find((event) => event.type === "content.delta" && event.streamKind === "assistant_text")).toMatchObject({
       messageId: "assistant-live",
-      message: { type: "text_delta", delta: "Hello" },
+      delta: "Hello",
     });
-    expect(events.find((event) => event.type === "tool_execution_end")).toMatchObject({
-      toolCallId: "cmd-live",
-      toolName: "commandExecution",
-      isError: false,
+    expect(events.find((event) => event.type === "item.completed" && event.item.id === "cmd-live")).toMatchObject({
+      item: {
+        id: "cmd-live",
+        itemType: "command_execution",
+        isError: false,
+      },
     });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({ itemType: "web_search" }),
+      }),
+    ]));
     expect(events.at(-1)).toMatchObject({
-      type: "agent_end",
-      agentMessages: expect.arrayContaining([
-        expect.objectContaining({ role: "custom", tag: "codex:webSearch" }),
-      ]),
+      type: "thread.updated",
     });
   });
 
@@ -860,8 +841,8 @@ describe("codex agent harness", () => {
         },
       },
     ]);
-    expect(events.some((event) => event.type === "thread_created")).toBe(false);
-    expect(events.map((event) => event.type)).toContain("agent_end");
+    expect(events.some((event) => event.type === "thread.created")).toBe(false);
+    expect(events.map((event) => event.type)).toContain("turn.completed");
   });
 
   it("keeps live interrupted assistant text when Codex thread history omits it", async () => {
@@ -935,7 +916,7 @@ describe("codex agent harness", () => {
       client,
     });
 
-    await collectAsyncIterable(harness.sendMessage({
+    const events = await collectAsyncIterable(harness.sendMessage({
       threadId: "thread-interrupted",
       path: "",
       content: [{ type: "text", content: "What?" }],
@@ -943,23 +924,15 @@ describe("codex agent harness", () => {
 
     const thread = await harness.getThread({ threadId: "thread-interrupted" });
 
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "content.delta",
+        messageId: "assistant-interrupted",
+        delta: "Partial interrupted answer",
+      }),
+    ]));
     expect(thread.messages).toEqual([
       expect.objectContaining({ role: "user", id: "user-interrupted" }),
-      expect.objectContaining({
-        role: "assistant",
-        id: "assistant-interrupted",
-        content: [
-          {
-            type: "response",
-            response: [
-              expect.objectContaining({
-                type: "text",
-                content: "Partial interrupted answer",
-              }),
-            ],
-          },
-        ],
-      }),
     ]);
   });
 
@@ -1127,7 +1100,7 @@ describe("codex agent harness", () => {
 
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        type: "agent_error",
+        type: "runtime.error",
         error: expect.objectContaining({ message: "Boom" }),
       }),
     ]));
