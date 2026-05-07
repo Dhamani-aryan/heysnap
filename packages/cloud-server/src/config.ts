@@ -12,6 +12,11 @@ export interface CloudServerConfig {
   readonly awsMachineInstanceProfileName: string | undefined;
   readonly machineServerImage?: string;
   readonly machineServerVersion: string;
+  readonly codexDefaultModel?: string;
+  readonly aiGatewayAzureBaseUrl?: string;
+  readonly aiGatewayAzureApiKey?: string;
+  readonly aiGatewayCaptureBodies?: boolean;
+  readonly aiGatewayCaptureBodyMaxBytes?: number;
   readonly allowedOrigins: readonly string[];
   readonly adminToken: string;
 }
@@ -35,6 +40,11 @@ export const getCloudServerConfig = (
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
   machineServerImage: readOptionalEnv(env, "MACHINE_SERVER_IMAGE"),
   machineServerVersion: readOptionalEnv(env, "MACHINE_SERVER_VERSION") ?? "latest",
+  codexDefaultModel: readOptionalEnv(env, "CODEX_DEFAULT_MODEL") ?? "gpt-5.5",
+  aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
+  aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
+  aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
+  aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS),
   adminToken: readRequiredEnv(env, "CLOUD_SERVER_ADMIN_TOKEN"),
 });
@@ -55,6 +65,11 @@ export const getDevelopmentCloudServerConfig = (
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
   machineServerImage: readOptionalEnv(env, "MACHINE_SERVER_IMAGE"),
   machineServerVersion: env.MACHINE_SERVER_VERSION?.trim() || "development",
+  codexDefaultModel: env.CODEX_DEFAULT_MODEL?.trim() || "gpt-5.5",
+  aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
+  aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
+  aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
+  aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS, [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -92,6 +107,14 @@ const parsePositiveInteger = (rawValue: string | undefined, defaultValue: number
   }
 
   return value;
+};
+
+const parseBooleanEnv = (rawValue: string | undefined, defaultValue: boolean): boolean => {
+  if (rawValue === undefined || rawValue.trim().length === 0) {
+    return defaultValue;
+  }
+
+  return ["1", "true", "yes", "on"].includes(rawValue.trim().toLowerCase());
 };
 
 const parseCsvEnv = (rawValue: string | undefined, defaultValue: readonly string[] = []): readonly string[] => {
