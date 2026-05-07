@@ -1,5 +1,11 @@
 import { clearStoredAdminToken, getStoredAdminToken } from "./auth";
 import type {
+  AdminAiUsageBreakdownRow,
+  AdminAiUsageBucket,
+  AdminAiUsageDetail,
+  AdminAiUsageOverview,
+  AdminAiUsageRequest,
+  AdminAiUsageSummary,
   AdminComputer,
   AdminComputerDetail,
   AdminMachineIdentity,
@@ -8,6 +14,9 @@ import type {
   AdminUser,
   AdminUserDetail,
   AdminUserSummary,
+  AiUsageBucketGranularity,
+  AiUsageGroupBy,
+  AiUsageStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -160,4 +169,70 @@ export const adminApi = {
     }),
   deleteRelease: (releaseId: string) =>
     request<{ readonly ok: true }>(`/admin/releases/${encodeURIComponent(releaseId)}`, { method: "DELETE" }),
+  listAiUsage: (params: AiUsageListParams = {}) =>
+    request<{ readonly usage: AdminAiUsageRequest[] }>(buildPath("/admin/ai-usage", params)),
+  summarizeAiUsage: (params: AiUsageFilterParams = {}) =>
+    request<{ readonly summary: AdminAiUsageSummary }>(buildPath("/admin/ai-usage/summary", params)),
+  bucketAiUsage: (params: AiUsageBucketParams) =>
+    request<{ readonly buckets: AdminAiUsageBucket[] }>(buildPath("/admin/ai-usage/buckets", params)),
+  breakdownAiUsage: (params: AiUsageBreakdownParams) =>
+    request<{ readonly groupBy: AiUsageGroupBy; readonly groups: AdminAiUsageBreakdownRow[] }>(
+      buildPath("/admin/ai-usage/breakdown", params),
+    ),
+  getAiUsageDetail: (usageId: string) =>
+    request<AdminAiUsageDetail>(`/admin/ai-usage/${encodeURIComponent(usageId)}`),
+  getUserAiUsage: (userId: string, params: AiUsageRangeParams = {}) =>
+    request<AdminAiUsageOverview>(
+      buildPath(`/admin/users/${encodeURIComponent(userId)}/ai-usage`, params),
+    ),
+  getComputerAiUsage: (computerId: string, params: AiUsageRangeParams = {}) =>
+    request<AdminAiUsageOverview>(
+      buildPath(`/admin/computers/${encodeURIComponent(computerId)}/ai-usage`, params),
+    ),
+};
+
+interface AiUsageFilterParams {
+  readonly userId?: string;
+  readonly computerId?: string;
+  readonly model?: string;
+  readonly status?: AiUsageStatus;
+  readonly from?: string | Date;
+  readonly to?: string | Date;
+}
+
+interface AiUsageListParams extends AiUsageFilterParams {
+  readonly before?: string | Date;
+  readonly limit?: number;
+}
+
+interface AiUsageBucketParams extends AiUsageFilterParams {
+  readonly bucket: AiUsageBucketGranularity;
+}
+
+interface AiUsageBreakdownParams extends AiUsageFilterParams {
+  readonly groupBy: AiUsageGroupBy;
+  readonly limit?: number;
+}
+
+interface AiUsageRangeParams {
+  readonly from?: string | Date;
+  readonly to?: string | Date;
+  readonly bucket?: AiUsageBucketGranularity;
+  readonly breakdownLimit?: number;
+}
+
+const buildPath = (basePath: string, params: object): string => {
+  const search = new URLSearchParams();
+  for (const [key, rawValue] of Object.entries(params)) {
+    if (rawValue === undefined || rawValue === null) {
+      continue;
+    }
+    if (rawValue instanceof Date) {
+      search.set(key, rawValue.toISOString());
+    } else if (typeof rawValue === "string" || typeof rawValue === "number") {
+      search.set(key, String(rawValue));
+    }
+  }
+  const query = search.toString();
+  return query.length === 0 ? basePath : `${basePath}?${query}`;
 };
