@@ -233,7 +233,18 @@ rollback_release() {
   fi
 }
 
-install_latest_if_needed
+case "\${1:-latest}" in
+  latest)
+    install_latest_if_needed
+    ;;
+  update)
+    install_update_if_idle
+    ;;
+  *)
+    echo "Usage: $0 [latest|update]" >&2
+    exit 2
+    ;;
+esac
 SCRIPT
 chmod +x /opt/ank1015/install-machine-server-release.sh
 
@@ -285,7 +296,7 @@ while true; do
       -H 'content-type: application/json' \\
       -d "{\\"status\\":\\"$MACHINE_STATUS\\",\\"machineServerVersion\\":\\"$MACHINE_SERVER_VERSION\\",\\"capabilities\\":[\\"filesystem\\",\\"agent\\",\\"shell\\"]}" \\
       -o /opt/ank1015/heartbeat.json || rm -f /opt/ank1015/machine-token
-    /opt/ank1015/install-machine-server-release.sh || true
+    /opt/ank1015/install-machine-server-release.sh update || true
   fi
 
   sleep 30

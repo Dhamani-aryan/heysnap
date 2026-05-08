@@ -79,6 +79,7 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("MACHINE_SERVER_CHANNEL=stable");
     expect(userData).toContain("http://127.0.0.1:$PORT/status");
     expect(userData).toContain("install_update_if_idle");
+    expect(userData).toContain("install-machine-server-release.sh update");
     expect(userData).toContain("downloadUrl");
     expect(userData).toContain("metadata.sha256");
     expect(userData).toContain("ExecStart=/usr/bin/node /opt/ank1015/machine-server/current/dist/index.js");
