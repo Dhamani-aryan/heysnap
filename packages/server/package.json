@@ -21,6 +21,7 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^5.0.0",
     "trash": "^10.1.1",
     "ws": "^8.20.0"

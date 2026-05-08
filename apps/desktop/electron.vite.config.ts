@@ -6,7 +6,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ["@ank1015-app/server"] })],
     build: {
       rollupOptions: {
-        external: ["chokidar", "trash", "ws"],
+        external: ["@homebridge/node-pty-prebuilt-multiarch", "chokidar", "trash", "ws"],
       },
     },
   },

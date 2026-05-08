@@ -19,6 +19,7 @@
   "dependencies": {
     "@ank1015-app/server": "workspace:*",
     "@ank1015-app/ui": "workspace:*",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^5.0.0",
     "electron-updater": "^6.8.3",
     "react": "^19.0.0",
