@@ -559,6 +559,7 @@ describe("cloud server computer access sessions", () => {
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
       agentWebSocketUrl: `/gateway/computers/${computer.id}/agent`,
+      capabilitiesWebSocketUrl: `/gateway/computers/${computer.id}/capabilities`,
     });
 
     const tokenHash = hashToken(body.accessSession.token, config.sessionSecret);
