@@ -12,6 +12,7 @@ const runningServer = await startServer({
 console.log(`server listening on http://127.0.0.1:${runningServer.port}`);
 console.log(`filesystem root: ${runningServer.filesystemRoot.absolutePath}`);
 console.log(`agent websocket: ${runningServer.urls.agentWebSocketUrl}`);
+console.log(`capabilities websocket: ${runningServer.urls.capabilitiesWebSocketUrl}`);
 
 if (
   process.env.CLOUD_SERVER_PUBLIC_URL !== undefined &&

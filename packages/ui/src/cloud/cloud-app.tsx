@@ -54,6 +54,7 @@ export interface LocalMachineBridgeStatus {
     readonly urls: {
       readonly filesystemWebSocketUrl: string;
       readonly agentWebSocketUrl: string;
+      readonly capabilitiesWebSocketUrl?: string;
     } | null;
     readonly error: string | null;
   };
@@ -621,6 +622,7 @@ export function CloudApp({
       screenContent = (
         <MachineWorkspace
           agentWebsocketUrl={localWorkspaceUrls.agentWebSocketUrl}
+          capabilitiesWebsocketUrl={localWorkspaceUrls.capabilitiesWebSocketUrl}
           computer={selectedComputer}
           filesystemWebsocketUrl={localWorkspaceUrls.filesystemWebSocketUrl}
         />
@@ -644,6 +646,11 @@ export function CloudApp({
           agentWebsocketUrl={buildGatewayWebsocketUrl({
             baseUrl: client.baseUrl,
             path: accessSession.routes.agentWebSocketUrl,
+            token: accessSession.accessSession.token,
+          })}
+          capabilitiesWebsocketUrl={accessSession.routes.capabilitiesWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
+            baseUrl: client.baseUrl,
+            path: accessSession.routes.capabilitiesWebSocketUrl,
             token: accessSession.accessSession.token,
           })}
           computer={selectedComputer}
@@ -798,7 +805,7 @@ const buildGatewayWebsocketUrl = (input: {
 const getLocalWorkspaceUrls = (
   computer: CloudComputer | null,
   status: LocalMachineBridgeStatus | null,
-): { readonly filesystemWebSocketUrl: string; readonly agentWebSocketUrl: string } | null => {
+): { readonly filesystemWebSocketUrl: string; readonly agentWebSocketUrl: string; readonly capabilitiesWebSocketUrl?: string } | null => {
   if (
     computer === null ||
     computer.kind !== "local" ||

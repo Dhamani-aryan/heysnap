@@ -21,7 +21,12 @@ export const renderMachineUserData = (input: RenderMachineUserDataInput): string
     "HOME=/home/agent",
     "ANK1015_FILESYSTEM_ROOT=/workspace",
     "ANK1015_MACHINE_TOKEN_FILE=/opt/ank1015/machine-token",
-    "PATH=/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin",
+    "ANK1015_CAPABILITIES_ROOT=/opt/ank1015/agent-capabilities",
+    "ANK1015_AGENT_TOOLS_ROOT=/opt/ank1015/agent-tools",
+    "ANK1015_AGENT_TOOLS_BIN_DIR=/opt/ank1015/agent-tools/bin",
+    "ANK1015_AGENT_SKILLS_CATALOG_DIR=/opt/ank1015/agent-skills/catalog",
+    "ANK1015_ACTIVE_SKILLS_DIR=/home/agent/.codex/skills",
+    "PATH=/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin",
   ].join("\n");
 
   return `#!/usr/bin/env bash
@@ -39,7 +44,14 @@ fi
 install -d -m 0755 -o agent -g agent /workspace
 install -d -m 0755 -o agent -g agent /home/agent
 install -d -m 0700 -o agent -g agent /home/agent/.codex
+install -d -m 0755 -o agent -g agent /home/agent/.codex/skills
 install -d -m 0755 -o root -g root /opt/ank1015/machine-server/releases
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-capabilities
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-tools
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-tools/bin
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-tools/installed
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-skills
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-skills/catalog
 
 cat >/opt/ank1015/machine.env <<'ENV'
 ${envFile}
@@ -100,6 +112,25 @@ update_machine_version() {
   source /opt/ank1015/machine.env
 }
 
+install_capabilities_helper() {
+  if [ -f "$CURRENT_LINK/dist/capabilities/helper.js" ]; then
+    cat >/opt/ank1015/agent-capabilities-helper <<'HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+source /opt/ank1015/machine.env
+exec /usr/bin/node /opt/ank1015/machine-server/current/dist/capabilities/helper.js "$@"
+HELPER
+    chown root:root /opt/ank1015/agent-capabilities-helper
+    chmod 0755 /opt/ank1015/agent-capabilities-helper
+    if command -v sudo >/dev/null 2>&1; then
+      cat >/etc/sudoers.d/ank1015-agent-capabilities <<'SUDOERS'
+agent ALL=(root) NOPASSWD: /opt/ank1015/agent-capabilities-helper
+SUDOERS
+      chmod 0440 /etc/sudoers.d/ank1015-agent-capabilities
+    fi
+  fi
+}
+
 install_release() {
   local version="$1"
   local download_url="$2"
@@ -109,6 +140,7 @@ install_release() {
   if [ -x "$release_dir/dist/index.js" ] || [ -f "$release_dir/dist/index.js" ]; then
     ln -sfnT "$release_dir" "$CURRENT_LINK"
     update_machine_version "$version"
+    install_capabilities_helper
     return 0
   fi
 
@@ -132,6 +164,7 @@ install_release() {
   chown -R root:root "$release_dir"
   ln -sfnT "$release_dir" "$CURRENT_LINK"
   update_machine_version "$version"
+  install_capabilities_helper
 }
 
 install_latest_if_needed() {

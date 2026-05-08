@@ -372,6 +372,7 @@ button {
 }
 
 .cloud-workspace-content {
+  position: relative;
   min-height: 0;
   overflow: hidden;
 }

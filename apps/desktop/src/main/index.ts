@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { join } from "node:path";
 
 import { DesktopUpdateController } from "./desktop-updates.js";
@@ -30,6 +30,15 @@ function createWindow() {
       sandbox: true,
       contextIsolation: true,
     },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://") || url.startsWith("http://")) {
+      void shell.openExternal(url);
+      return { action: "deny" };
+    }
+
+    return { action: "deny" };
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {

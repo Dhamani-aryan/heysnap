@@ -55,6 +55,7 @@ export interface CodexAgentHarnessOptions {
   readonly filesystemRoot: string;
   readonly codexBin?: string;
   readonly client?: CodexAppServerClient;
+  readonly capabilitiesInstruction?: () => string | Promise<string>;
 }
 
 interface ConfigEdit {
@@ -75,11 +76,13 @@ export class CodexAgentHarness implements IAgentHarness {
   private readonly filesystemRoot: string;
   private readonly codexBin?: string;
   private readonly client: CodexAppServerClient;
+  private readonly capabilitiesInstruction?: () => string | Promise<string>;
 
   constructor(options: CodexAgentHarnessOptions) {
     this.filesystemRoot = options.filesystemRoot;
     this.codexBin = options.codexBin;
     this.client = options.client ?? new CodexStdioAppServerClient({ codexBin: options.codexBin });
+    this.capabilitiesInstruction = options.capabilitiesInstruction;
   }
 
   async setup(input: SetupInput): Promise<void> {
@@ -211,7 +214,7 @@ export class CodexAgentHarness implements IAgentHarness {
     try {
       const turnResponse = await this.client.request<CodexTurnStartResponse>("turn/start", {
         threadId,
-        input: agentContentToCodexInput(_input.content),
+        input: await this.agentContentWithCapabilities(_input.content),
       });
       turnId = turnResponse.turn.id;
       const scope = { runId: turnId, threadId };
@@ -291,6 +294,28 @@ export class CodexAgentHarness implements IAgentHarness {
       unsubscribe();
       queue.close();
     }
+  }
+
+  private async agentContentWithCapabilities(content: AgentContent): Promise<CodexUserInput[]> {
+    const inputs = agentContentToCodexInput(content);
+
+    if (this.capabilitiesInstruction === undefined) {
+      return inputs;
+    }
+
+    const instruction = (await this.capabilitiesInstruction()).trim();
+
+    if (instruction.length === 0) {
+      return inputs;
+    }
+
+    return [
+      {
+        type: "text",
+        text: `${instruction}\n\nUse these capabilities only when they are relevant to the user's task.`,
+      },
+      ...inputs,
+    ];
   }
 
   async cancelRun(input: CancelRunInput): Promise<void> {

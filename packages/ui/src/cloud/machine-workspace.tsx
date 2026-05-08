@@ -19,12 +19,14 @@ const getImageSrc = (asset: ImageAsset): string => {
 
 export interface MachineWorkspaceProps {
   readonly agentWebsocketUrl: string;
+  readonly capabilitiesWebsocketUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
 }
 
 export function MachineWorkspace({
   agentWebsocketUrl,
+  capabilitiesWebsocketUrl,
   computer,
   filesystemWebsocketUrl,
 }: MachineWorkspaceProps): React.ReactElement {
@@ -75,6 +77,7 @@ export function MachineWorkspace({
         <FilesystemExplorer
           websocketUrl={filesystemWebsocketUrl}
           agentWebsocketUrl={agentWebsocketUrl}
+          capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
           onFilesystemOpen={handleFilesystemOpen}
         />
       </motion.div>

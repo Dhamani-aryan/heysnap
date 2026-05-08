@@ -41,6 +41,7 @@ export interface LocalMachineStatus {
     readonly urls: {
       readonly filesystemWebSocketUrl: string;
       readonly agentWebSocketUrl: string;
+      readonly capabilitiesWebSocketUrl: string;
     } | null;
     readonly error: string | null;
   };
@@ -278,6 +279,7 @@ export class LocalMachineController {
       urls: {
         filesystemWebSocketUrl: server.urls.filesystemWebSocketUrl,
         agentWebSocketUrl: server.urls.agentWebSocketUrl,
+        capabilitiesWebSocketUrl: server.urls.capabilitiesWebSocketUrl,
       },
       error: null,
     };
