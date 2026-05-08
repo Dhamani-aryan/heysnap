@@ -6,6 +6,7 @@ import {
   FileUploadIcon,
   FolderAddIcon,
   FolderUploadIcon,
+  PlugSocketIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,6 +14,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPanel } from "../agent/agent-panel";
 import { ThreadHistoryButton } from "../agent/thread-history";
 import type { AgentThreadSummary } from "../agent/types";
+import { CapabilitiesPanel } from "../cloud/capabilities-panel";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient } from "./filesystem-client";
@@ -133,12 +135,14 @@ const getInitialLeftPaneRatio = (): number => {
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentWebsocketUrl?: string;
+  readonly capabilitiesWebsocketUrl?: string;
   readonly onFilesystemOpen?: () => void;
 }
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentWebsocketUrl = "ws://localhost:4000/agent",
+  capabilitiesWebsocketUrl,
   onFilesystemOpen,
 }: FilesystemExplorerProps): React.ReactElement {
   const clientRef = useRef<FilesystemClient | null>(null);
@@ -154,6 +158,7 @@ export function FilesystemExplorer({
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
+  const [workspaceView, setWorkspaceView] = useState<"files" | "connectors">("files");
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -629,9 +634,12 @@ export function FilesystemExplorer({
         title={listing?.name ?? "Desktop"}
         isFetching={isFetching}
         agentWebsocketUrl={agentWebsocketUrl}
+        capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
+        isConnectorsOpen={workspaceView === "connectors"}
         selectedThreadId={selectedThread?.id ?? null}
         onSelectThread={setSelectedThread}
         onNewThread={() => setSelectedThread(null)}
+        onToggleConnectors={() => setWorkspaceView((current) => current === "connectors" ? "files" : "connectors")}
         openFileTabs={openFileTabs}
         activeFilePath={activeFileTab?.path ?? null}
         onShowDirectory={() => setActiveFilePath(null)}
@@ -639,59 +647,63 @@ export function FilesystemExplorer({
         onCloseFileTab={closeFileTab}
       />
 
-      <DesktopSplitPane
-        leftPaneRatio={leftPaneRatio}
-        onLeftPaneRatioChange={handleLeftPaneRatioChange}
-        agentWebsocketUrl={agentWebsocketUrl}
-        selectedThreadId={selectedThread?.id ?? null}
-        currentPath={currentPath}
-        onOpenFilePath={openFilePath}
-        onSelectThread={setSelectedThread}
-      >
-        <div className="left-pane-surface-stack">
-          <div
-            className={activeFileTab === null ? "left-pane-surface active" : "left-pane-surface inactive"}
-            aria-hidden={activeFileTab !== null}
-          >
-            <FinderBody
-              error={listingError}
-              isLoading={isFetching && listing === null}
-              entries={listing?.entries ?? []}
-              selectedPaths={selectedPaths}
-              renamingPath={renamingPath}
-              onSelect={selectEntry}
-              onSelectionChange={(paths) => {
-                setSelectedPaths(paths);
-                setSelectionAnchorPath(paths[0] ?? null);
-              }}
-              onActivate={handleEntryDoubleClick}
-              onBackgroundClick={() => {
-                setSelectedPaths([]);
-                setSelectionAnchorPath(null);
-              }}
-              onCreateNewFolder={() => void createNewFolder()}
-              onUploadFiles={() => uploadFilesInputRef.current?.click()}
-              onUploadFolder={chooseUploadFolder}
-              onRenameStart={(entry) => {
-                setSelectedPaths([entry.path]);
-                setSelectionAnchorPath(entry.path);
-                setRenamingPath(entry.path);
-              }}
-              onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
-              onRenameCancel={() => setRenamingPath(null)}
-              onOpenEntry={openEntry}
-              onGetInfo={showEntryInfo}
-              onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
-              onDownloadEntries={downloadEntries}
+      {workspaceView === "connectors" ? (
+        <CapabilitiesPanel websocketUrl={capabilitiesWebsocketUrl} />
+      ) : (
+        <DesktopSplitPane
+          leftPaneRatio={leftPaneRatio}
+          onLeftPaneRatioChange={handleLeftPaneRatioChange}
+          agentWebsocketUrl={agentWebsocketUrl}
+          selectedThreadId={selectedThread?.id ?? null}
+          currentPath={currentPath}
+          onOpenFilePath={openFilePath}
+          onSelectThread={setSelectedThread}
+        >
+          <div className="left-pane-surface-stack">
+            <div
+              className={activeFileTab === null ? "left-pane-surface active" : "left-pane-surface inactive"}
+              aria-hidden={activeFileTab !== null}
+            >
+              <FinderBody
+                error={listingError}
+                isLoading={isFetching && listing === null}
+                entries={listing?.entries ?? []}
+                selectedPaths={selectedPaths}
+                renamingPath={renamingPath}
+                onSelect={selectEntry}
+                onSelectionChange={(paths) => {
+                  setSelectedPaths(paths);
+                  setSelectionAnchorPath(paths[0] ?? null);
+                }}
+                onActivate={handleEntryDoubleClick}
+                onBackgroundClick={() => {
+                  setSelectedPaths([]);
+                  setSelectionAnchorPath(null);
+                }}
+                onCreateNewFolder={() => void createNewFolder()}
+                onUploadFiles={() => uploadFilesInputRef.current?.click()}
+                onUploadFolder={chooseUploadFolder}
+                onRenameStart={(entry) => {
+                  setSelectedPaths([entry.path]);
+                  setSelectionAnchorPath(entry.path);
+                  setRenamingPath(entry.path);
+                }}
+                onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
+                onRenameCancel={() => setRenamingPath(null)}
+                onOpenEntry={openEntry}
+                onGetInfo={showEntryInfo}
+                onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
+                onDownloadEntries={downloadEntries}
+              />
+            </div>
+            <FileViewerStack
+              openFileTabs={openFileTabs}
+              activeFilePath={activeFileTab?.path ?? null}
+              websocketUrl={websocketUrl}
             />
           </div>
-          <FileViewerStack
-            openFileTabs={openFileTabs}
-            activeFilePath={activeFileTab?.path ?? null}
-            websocketUrl={websocketUrl}
-          />
-        </div>
-      </DesktopSplitPane>
+        </DesktopSplitPane>
+      )}
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
     </main>
   );
@@ -747,9 +759,12 @@ const FinderToolbar = ({
   title,
   isFetching,
   agentWebsocketUrl,
+  capabilitiesWebsocketUrl,
+  isConnectorsOpen,
   selectedThreadId,
   onSelectThread,
   onNewThread,
+  onToggleConnectors,
   openFileTabs,
   activeFilePath,
   onShowDirectory,
@@ -763,9 +778,12 @@ const FinderToolbar = ({
   readonly title: string;
   readonly isFetching: boolean;
   readonly agentWebsocketUrl: string;
+  readonly capabilitiesWebsocketUrl?: string;
+  readonly isConnectorsOpen: boolean;
   readonly selectedThreadId: string | null;
   readonly onSelectThread: (thread: AgentThreadSummary) => void;
   readonly onNewThread: () => void;
+  readonly onToggleConnectors: () => void;
   readonly openFileTabs: OpenFileTab[];
   readonly activeFilePath: string | null;
   readonly onShowDirectory: () => void;
@@ -821,6 +839,16 @@ const FinderToolbar = ({
         selectedThreadId={selectedThreadId}
         onSelectThread={onSelectThread}
       />
+      {capabilitiesWebsocketUrl === undefined ? null : (
+        <ToolbarButton
+          onClick={onToggleConnectors}
+          ariaLabel={isConnectorsOpen ? "Close connectors" : "Connectors"}
+          title={isConnectorsOpen ? "Close connectors" : "Connectors"}
+          active={isConnectorsOpen}
+        >
+          <HugeiconsIcon icon={PlugSocketIcon} size={18} color="currentColor" strokeWidth={1.8} />
+        </ToolbarButton>
+      )}
       <ThemeToggle />
     </div>
   </div>
@@ -867,18 +895,23 @@ const ToolbarButton = ({
   disabled,
   onClick,
   ariaLabel,
+  title,
+  active,
 }: {
   readonly children: React.ReactNode;
   readonly disabled?: boolean;
   readonly onClick: () => void;
   readonly ariaLabel: string;
+  readonly title?: string;
+  readonly active?: boolean;
 }): React.ReactElement => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
     aria-label={ariaLabel}
-    className="toolbar-button"
+    title={title ?? ariaLabel}
+    className={active === true ? "toolbar-button active" : "toolbar-button"}
   >
     {children}
   </button>
