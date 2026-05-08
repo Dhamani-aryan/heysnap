@@ -140,10 +140,16 @@ fi
 install -d -m 0755 -o agent -g agent /workspace
 install -d -m 0755 -o agent -g agent /home/agent
 install -d -m 0750 -o root -g ank1015 /opt/ank1015
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-capabilities
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-tools
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-tools/bin
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-tools/installed
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-skills
+install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-skills/catalog
 install -d -m 0755 -o root -g root /opt/ank1015/machine-server/releases
 
 cat >/etc/profile.d/ank1015-dev-env.sh <<'SCRIPT'
-export PATH="/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export ANK1015_FILESYSTEM_ROOT="${ANK1015_FILESYSTEM_ROOT:-/workspace}"
 SCRIPT
 chmod 0644 /etc/profile.d/ank1015-dev-env.sh

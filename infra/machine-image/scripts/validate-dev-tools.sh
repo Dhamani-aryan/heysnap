@@ -49,3 +49,6 @@ docker version
 test -d /workspace
 test -d /home/agent
 test -d /opt/ank1015/venvs/default
+test -d /opt/ank1015/agent-tools/bin
+test -d /opt/ank1015/agent-capabilities
+test -d /opt/ank1015/agent-skills/catalog
