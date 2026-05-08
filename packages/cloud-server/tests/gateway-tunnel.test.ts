@@ -113,6 +113,45 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
+  it("routes capabilities websocket data through the same machine tunnel", async () => {
+    const { server, baseUrl, computer, access, machine } = await startConnectedTunnel();
+    const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
+    const gateway = await openWebSocket(
+      `${baseUrl}/gateway/computers/${computer.id}/capabilities?accessToken=${access.token}`,
+    );
+    const openMessage = await machineOpen;
+
+    expect(openMessage).toMatchObject({
+      type: "open",
+      route: "capabilities",
+      path: "/capabilities",
+    });
+
+    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
+    machine.send(JSON.stringify({
+      type: "data",
+      connectionId: openMessage.connectionId,
+      data: Buffer.from(JSON.stringify({ type: "hello", serverTime: "now" }), "utf8").toString("base64"),
+      dataType: "text",
+    }));
+
+    const gatewayHello = await waitForJsonFrame(gateway);
+    expect(gatewayHello.isBinary).toBe(false);
+    expect(gatewayHello.message).toMatchObject({ type: "hello" });
+    gateway.send(JSON.stringify({ type: "listCapabilities", requestId: "capabilities-1" }));
+
+    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
+    expect(dataMessage.dataType).toBe("text");
+    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
+      type: "listCapabilities",
+      requestId: "capabilities-1",
+    });
+
+    gateway.close();
+    machine.close();
+    await closeServer(server);
+  });
+
   it("proxies HTTP download requests through the machine tunnel", async () => {
     const { server, computer, machine, registry } = await startConnectedTunnel();
     await waitForCondition(() => registry.isConnected(computer.id));

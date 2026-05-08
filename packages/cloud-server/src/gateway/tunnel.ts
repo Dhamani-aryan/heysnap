@@ -9,7 +9,7 @@ import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, MachineIdentityRecord } from "../db/types.js";
 import type { GatewayAccessService } from "./access-sessions.js";
 
-export type GatewayRoute = "filesystem" | "agent";
+export type GatewayRoute = "filesystem" | "agent" | "capabilities";
 
 export interface TunnelStatusRegistry {
   isConnected(computerId: string): boolean;
@@ -395,7 +395,7 @@ const matchGatewayRoute = (pathname: string): { readonly computerId: string; rea
 
   const route = match[2];
 
-  if (route !== "filesystem" && route !== "agent") {
+  if (route !== "filesystem" && route !== "agent" && route !== "capabilities") {
     return null;
   }
 
