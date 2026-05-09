@@ -97,6 +97,6 @@ const createCatalog = (
     label: "Fake Skill",
     version: "1.0",
     description: "Fake skill",
-    files: { "SKILL.md": "# Fake" },
+    sourcePath: join(process.cwd(), "tests", "fixtures", "fake-skill"),
   }],
 });
