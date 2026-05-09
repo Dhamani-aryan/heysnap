@@ -41,19 +41,12 @@ export const createComputerRoutes = (
   app.post("/", async (context) => {
     const body = await readJsonBody(context.req.raw);
     const name = stringField(body, "name", { required: true, maxLength: 120 }) ?? "";
-    const preset = getDev8gbPreset(config);
     const computer = await store.createComputer({
       ownerUserId: context.get("currentUser").id,
       name,
       kind: "cloud",
       status: "creating",
-      providerMetadata: {
-        provider: "aws-ec2",
-        preset: preset.id,
-        region: preset.region,
-        instanceType: preset.instanceType,
-        rootVolumeGb: preset.rootVolumeGb,
-      },
+      providerMetadata: createInitialProviderMetadata(config),
       capabilities: [],
     });
     const bootstrapToken = createOpaqueToken();
@@ -263,6 +256,25 @@ export const createComputerRoutes = (
   });
 
   return app;
+};
+
+const createInitialProviderMetadata = (config: CloudServerConfig): Record<string, unknown> => {
+  if (config.computerProvisioner === "docker") {
+    return {
+      provider: "docker",
+      image: config.localDockerMachineImage ?? "ank1015-machine-local:latest",
+      network: config.localDockerNetwork ?? "ank1015-local",
+    };
+  }
+
+  const preset = getDev8gbPreset(config);
+  return {
+    provider: "aws-ec2",
+    preset: preset.id,
+    region: preset.region,
+    instanceType: preset.instanceType,
+    rootVolumeGb: preset.rootVolumeGb,
+  };
 };
 
 const createActivatedMachineToken = async (
