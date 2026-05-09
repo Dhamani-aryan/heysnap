@@ -66,6 +66,11 @@ source "amazon-ebs" "machine" {
 build {
   sources = ["source.amazon-ebs.machine"]
 
+  provisioner "file" {
+    source      = "packages/machine-bootstrap/"
+    destination = "/tmp/ank1015-machine-bootstrap/"
+  }
+
   provisioner "shell" {
     execute_command = "sudo -E bash '{{ .Path }}'"
     scripts = [

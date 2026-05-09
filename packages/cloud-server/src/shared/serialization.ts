@@ -16,6 +16,7 @@ export const serializeComputer = (computer: ComputerRecord) => ({
   status: computer.status,
   providerMetadata: computer.providerMetadata,
   capabilities: computer.capabilities,
+  machineHealth: computer.machineHealth,
   machineServerVersion: computer.machineServerVersion,
   lastHeartbeatAt: computer.lastHeartbeatAt?.toISOString() ?? null,
   createdAt: computer.createdAt.toISOString(),

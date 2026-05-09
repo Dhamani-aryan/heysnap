@@ -50,8 +50,7 @@ export class AwsEc2Provisioner implements ComputerProvisioner {
       cloudServerPublicUrl: input.config.cloudServerPublicUrl,
       computer: input.computer,
       bootstrapToken: input.bootstrapToken,
-      machineServerVersion: input.config.machineServerVersion,
-      codexDefaultModel: input.config.codexDefaultModel,
+      machineServerChannel: input.config.machineServerChannel,
     });
     const request = buildRunInstancesRequest({
       computer: input.computer,

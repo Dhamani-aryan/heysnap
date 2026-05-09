@@ -18,7 +18,7 @@ const baseConfig: CloudServerConfig = {
   awsEc2RootVolumeGb: 80,
   awsMachineInstanceProfileName: "ank1015-machine-profile",
   awsMachineAmiSsmParameter: "/ank1015/machine-images/test/ami-id",
-  machineServerVersion: "test-version",
+  machineServerChannel: "stable",
   aiGatewayAzureBaseUrl: "https://azure.example.com/openai/v1",
   aiGatewayAzureImagesBaseUrl: "https://images.azure.example.com/openai/deployments/gpt-image-2",
   aiGatewayAzureApiKey: "azure-real-key",

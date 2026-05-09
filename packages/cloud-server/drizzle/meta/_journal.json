@@ -29,6 +29,13 @@
       "when": 1778156796787,
       "tag": "0003_ai_gateway_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778323200000,
+      "tag": "0004_machine_health",
+      "breakpoints": true
     }
   ]
 }

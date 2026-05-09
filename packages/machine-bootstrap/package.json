@@ -1,0 +1,11 @@
+{
+  "name": "@ank1015-app/machine-bootstrap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash -n scripts/ank1015-machine-bootstrap scripts/ank1015-machine-release scripts/ank1015-machine-heartbeat lib/ank1015-machine-common.sh",
+    "typecheck": "bash -n scripts/ank1015-machine-bootstrap scripts/ank1015-machine-release scripts/ank1015-machine-heartbeat lib/ank1015-machine-common.sh",
+    "lint": "bash -n scripts/ank1015-machine-bootstrap scripts/ank1015-machine-release scripts/ank1015-machine-heartbeat lib/ank1015-machine-common.sh",
+    "test": "bash tests/machine-bootstrap.test.sh"
+  }
+}

@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_PATH="${ANK1015_MACHINE_COMMON_SH:-}"
+if [ -z "$COMMON_PATH" ]; then
+  if [ -f "$SCRIPT_DIR/../lib/ank1015-machine-common.sh" ]; then
+    COMMON_PATH="$SCRIPT_DIR/../lib/ank1015-machine-common.sh"
+  else
+    COMMON_PATH="/usr/local/lib/ank1015-machine-bootstrap/ank1015-machine-common.sh"
+  fi
+fi
+# shellcheck disable=SC1090
+. "$COMMON_PATH"
+
+ank1015_machine_common_version_or_continue "${1:-}"
+ank1015_machine_load_env
+
+LATEST_JSON="${ANK1015_MACHINE_LATEST_JSON:-$(ank1015_machine_root)/latest-machine-server.json}"
+
+machine_status() {
+  curl -fsS "$(ank1015_machine_status_url)" || true
+}
+
+latest_release() {
+  local current_version="${MACHINE_SERVER_VERSION:-}"
+  local url="${CLOUD_SERVER_PUBLIC_URL%/}/releases/machine-server/latest?channel=$MACHINE_SERVER_CHANNEL"
+
+  if [ -n "$current_version" ]; then
+    url="${url}&currentVersion=${current_version}"
+  fi
+
+  mkdir -p "$(dirname "$LATEST_JSON")"
+  curl -fsS "$url" -o "$LATEST_JSON"
+}
+
+release_value() {
+  jq -r "$1 // empty" "$LATEST_JSON"
+}
+
+update_machine_version() {
+  local version="$1"
+  ank1015_machine_update_env_value "MACHINE_SERVER_VERSION" "$version"
+  MACHINE_SERVER_VERSION="$version"
+  export MACHINE_SERVER_VERSION
+}
+
+point_current_link_at() {
+  local target="$1"
+  local current_link
+  current_link="$(ank1015_machine_current_link)"
+
+  mkdir -p "$(dirname "$current_link")"
+  if [ -L "$current_link" ] || [ ! -e "$current_link" ]; then
+    rm -f "$current_link"
+  else
+    rm -rf "$current_link"
+  fi
+  ln -s "$target" "$current_link"
+}
+
+install_capabilities_helper() {
+  local current_link helper_path sudoers_dir
+  current_link="$(ank1015_machine_current_link)"
+  helper_path="${ANK1015_CAPABILITIES_HELPER:-$(ank1015_machine_root)/agent-capabilities-helper}"
+  sudoers_dir="${ANK1015_SUDOERS_DIR:-/etc/sudoers.d}"
+
+  if [ ! -f "$current_link/dist/capabilities/helper.js" ]; then
+    return 0
+  fi
+
+  cat >"$helper_path" <<'HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+set -a
+source "${ANK1015_MACHINE_ENV_FILE:-/opt/ank1015/machine.env}"
+set +a
+exec /usr/bin/node "${ANK1015_MACHINE_CURRENT_LINK:-/opt/ank1015/machine-server/current}/dist/capabilities/helper.js" "$@"
+HELPER
+  chown root:root "$helper_path" 2>/dev/null || true
+  chmod 0755 "$helper_path"
+
+  if command -v sudo >/dev/null 2>&1 && [ -d "$sudoers_dir" ]; then
+    cat >"$sudoers_dir/ank1015-agent-capabilities" <<SUDOERS
+agent ALL=(root) NOPASSWD: $helper_path
+SUDOERS
+    chmod 0440 "$sudoers_dir/ank1015-agent-capabilities"
+  fi
+}
+
+install_release() {
+  local version="$1"
+  local download_url="$2"
+  local sha256="$3"
+  local release_dir archive temp_dir releases_dir current_link
+  releases_dir="$(ank1015_machine_release_dir)"
+  current_link="$(ank1015_machine_current_link)"
+  release_dir="$releases_dir/$version"
+
+  if [ -f "$release_dir/dist/index.js" ]; then
+    point_current_link_at "$release_dir"
+    update_machine_version "$version"
+    install_capabilities_helper
+    ank1015_machine_set_update_state "installed"
+    return 0
+  fi
+
+  if [ -z "$version" ] || [ -z "$download_url" ] || [ -z "$sha256" ]; then
+    echo "Machine-server release is missing version, downloadUrl, or metadata.sha256" >&2
+    return 1
+  fi
+
+  ank1015_machine_set_update_state "downloading"
+  archive="$(ank1015_machine_download_dir)/machine-server-$version.tar.gz"
+  temp_dir="$releases_dir/.tmp-$version"
+  rm -rf "$temp_dir"
+  mkdir -p "$(ank1015_machine_download_dir)" "$temp_dir" "$(dirname "$current_link")"
+
+  curl -fL "$download_url" -o "$archive"
+  printf '%s  %s\n' "$sha256" "$archive" | sha256sum -c -
+  tar -xzf "$archive" -C "$temp_dir"
+
+  test -f "$temp_dir/dist/index.js"
+  rm -rf "$release_dir"
+  mv "$temp_dir" "$release_dir"
+  chown -R root:root "$release_dir" 2>/dev/null || true
+  point_current_link_at "$release_dir"
+  update_machine_version "$version"
+  install_capabilities_helper
+  ank1015_machine_set_update_state "installed"
+}
+
+install_latest_if_needed() {
+  if [ -f "$(ank1015_machine_current_link)/dist/index.js" ]; then
+    ank1015_machine_set_update_state "idle"
+    return 0
+  fi
+
+  ank1015_machine_set_update_state "checking"
+  latest_release
+  install_release \
+    "$(release_value '.latest.version')" \
+    "$(release_value '.latest.downloadUrl')" \
+    "$(release_value '.latest.metadata.sha256')"
+}
+
+rollback_release() {
+  local previous_target="$1"
+
+  if [ -n "$previous_target" ] && [ -d "$previous_target" ]; then
+    point_current_link_at "$previous_target"
+    update_machine_version "$(basename "$previous_target")"
+    systemctl restart ank1015-machine-server.service || true
+  fi
+}
+
+install_update_if_idle() {
+  local update_available next_version next_url next_sha256 status_json previous_target
+  ank1015_machine_set_update_state "checking"
+  latest_release
+  update_available="$(release_value '.updateAvailable')"
+
+  if [ "$update_available" != "true" ]; then
+    ank1015_machine_set_update_state "idle"
+    return 0
+  fi
+
+  next_version="$(release_value '.latest.version')"
+  next_url="$(release_value '.latest.downloadUrl')"
+  next_sha256="$(release_value '.latest.metadata.sha256')"
+
+  if [ -z "$next_version" ] || [ "$next_version" = "${MACHINE_SERVER_VERSION:-}" ]; then
+    ank1015_machine_set_update_state "idle"
+    return 0
+  fi
+
+  status_json="$(machine_status)"
+
+  if [ -n "$status_json" ] && [ "$(printf '%s' "$status_json" | jq -r '.safeToRestart // false')" != "true" ]; then
+    ank1015_machine_set_update_state "deferred"
+    return 0
+  fi
+
+  previous_target="$(readlink -f "$(ank1015_machine_current_link)" 2>/dev/null || true)"
+  install_release "$next_version" "$next_url" "$next_sha256"
+
+  if ! systemctl restart ank1015-machine-server.service; then
+    ank1015_machine_set_update_state "failed" "Failed to restart machine-server after installing $next_version"
+    rollback_release "$previous_target"
+    return 1
+  fi
+
+  sleep 2
+  if ! curl -fsS "$(ank1015_machine_health_url)" >/dev/null; then
+    ank1015_machine_set_update_state "failed" "Machine-server health check failed after installing $next_version"
+    rollback_release "$previous_target"
+    return 1
+  fi
+
+  ank1015_machine_set_update_state "installed"
+}
+
+main() {
+  case "${1:-latest}" in
+    latest)
+      install_latest_if_needed
+      ;;
+    update)
+      install_update_if_idle
+      ;;
+    *)
+      echo "Usage: ank1015-machine-release [latest|update|--version]" >&2
+      return 2
+      ;;
+  esac
+}
+
+if ! main "$@"; then
+  ank1015_machine_set_update_state "failed" "machine release command failed"
+  exit 1
+fi

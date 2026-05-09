@@ -24,6 +24,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test machine bootstrap
+        run: pnpm --filter @ank1015-app/machine-bootstrap test
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:

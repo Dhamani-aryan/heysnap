@@ -36,6 +36,7 @@ export interface ComputerRecord {
   readonly status: ComputerStatus;
   readonly providerMetadata: unknown;
   readonly capabilities: unknown;
+  readonly machineHealth: unknown;
   readonly machineServerVersion: string | null;
   readonly lastHeartbeatAt: Date | null;
   readonly createdAt: Date;
@@ -195,6 +196,7 @@ export interface CloudStore {
     readonly status: ComputerStatus;
     readonly providerMetadata: unknown;
     readonly capabilities: unknown;
+    readonly machineHealth?: unknown;
   }): Promise<ComputerRecord>;
   getComputerForUser(input: {
     readonly userId: string;
@@ -207,6 +209,7 @@ export interface CloudStore {
     readonly status?: ComputerStatus;
     readonly providerMetadata?: unknown;
     readonly capabilities?: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion?: string | null;
     readonly lastHeartbeatAt?: Date | null;
   }): Promise<ComputerRecord | null>;
@@ -216,6 +219,7 @@ export interface CloudStore {
     readonly status?: ComputerStatus;
     readonly providerMetadata?: unknown;
     readonly capabilities?: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion?: string | null;
     readonly lastHeartbeatAt?: Date | null;
   }): Promise<ComputerRecord | null>;
