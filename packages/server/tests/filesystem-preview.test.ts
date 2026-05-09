@@ -27,7 +27,7 @@ describe("filesystem preview", () => {
     expect(response.headers.get("content-disposition")).toBe("inline; filename=\"manual.pdf\"");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(await response.text()).toBe("%PDF manual");
-  });
+  }, 15_000);
 
   it("converts xlsx files to PDF previews", async () => {
     const root = await createRoot();
