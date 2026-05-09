@@ -18,6 +18,7 @@ export const startMachineTunnelClient = (options: MachineTunnelClientOptions): v
 class MachineTunnelClient {
   private cloudWebSocket: WebSocket | null = null;
   private readonly localConnections = new Map<string, LocalTunnelConnection>();
+  private readonly httpAbortControllers = new Map<string, AbortController>();
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -96,7 +97,7 @@ class MachineTunnelClient {
         this.openLocalConnection(message.connectionId, message.path);
         break;
       case "httpRequest":
-        void this.handleHttpRequest(message.connectionId, message.path);
+        void this.handleHttpRequest(message);
         break;
       case "data": {
         const localConnection = this.localConnections.get(message.connectionId);
@@ -113,6 +114,8 @@ class MachineTunnelClient {
         break;
       }
       case "close":
+        this.httpAbortControllers.get(message.connectionId)?.abort();
+        this.httpAbortControllers.delete(message.connectionId);
         this.localConnections.get(message.connectionId)?.webSocket.close(
           normalizeWebSocketCloseCode(message.code),
           message.reason,
@@ -122,13 +125,27 @@ class MachineTunnelClient {
     }
   }
 
-  private async handleHttpRequest(connectionId: string, path: string): Promise<void> {
+  private async handleHttpRequest(message: Extract<CloudTunnelMessage, { readonly type: "httpRequest" }>): Promise<void> {
+    const abortController = new AbortController();
+    this.httpAbortControllers.set(message.connectionId, abortController);
+
     try {
-      const response = await fetch(`http://127.0.0.1:${String(this.options.localPort)}${path}`);
+      const response = await fetch(`http://127.0.0.1:${String(this.options.localPort)}${message.path}`, {
+        method: message.method ?? "GET",
+        headers: message.headers,
+        body: message.bodyBase64 === undefined ? undefined : Buffer.from(message.bodyBase64, "base64"),
+        signal: abortController.signal,
+      });
+
+      if (message.stream === true) {
+        await this.streamHttpResponse(message.connectionId, response);
+        return;
+      }
+
       const body = Buffer.from(await response.arrayBuffer());
       this.sendToCloud({
         type: "httpResponse",
-        connectionId,
+        connectionId: message.connectionId,
         statusCode: response.status,
         headers: Object.fromEntries(response.headers.entries()),
         bodyBase64: body.toString("base64"),
@@ -137,14 +154,45 @@ class MachineTunnelClient {
       const body = Buffer.from(error instanceof Error ? error.message : "Failed to proxy HTTP request", "utf8");
       this.sendToCloud({
         type: "httpResponse",
-        connectionId,
+        connectionId: message.connectionId,
         statusCode: 502,
         headers: {
           "content-type": "text/plain; charset=utf-8",
         },
         bodyBase64: body.toString("base64"),
       });
+    } finally {
+      this.httpAbortControllers.delete(message.connectionId);
     }
+  }
+
+  private async streamHttpResponse(connectionId: string, response: Response): Promise<void> {
+    this.sendToCloud({
+      type: "httpResponseStart",
+      connectionId,
+      statusCode: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+    });
+
+    if (response.body !== null) {
+      const reader = response.body.getReader();
+
+      for (;;) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        this.sendToCloud({
+          type: "httpResponseChunk",
+          connectionId,
+          bodyBase64: Buffer.from(value).toString("base64"),
+        });
+      }
+    }
+
+    this.sendToCloud({ type: "httpResponseEnd", connectionId });
   }
 
   private openLocalConnection(connectionId: string, path: string): void {
@@ -217,7 +265,15 @@ interface LocalTunnelConnection {
 
 type CloudTunnelMessage =
   | { readonly type: "open"; readonly connectionId: string; readonly path: string }
-  | { readonly type: "httpRequest"; readonly connectionId: string; readonly path: string }
+  | {
+      readonly type: "httpRequest";
+      readonly connectionId: string;
+      readonly path: string;
+      readonly method?: string;
+      readonly headers?: Record<string, string>;
+      readonly bodyBase64?: string;
+      readonly stream?: boolean;
+    }
   | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType?: TunnelPayloadType }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
 
@@ -231,6 +287,14 @@ type MachineTunnelMessage =
       readonly headers: Record<string, string>;
       readonly bodyBase64: string;
     }
+  | {
+      readonly type: "httpResponseStart";
+      readonly connectionId: string;
+      readonly statusCode: number;
+      readonly headers: Record<string, string>;
+    }
+  | { readonly type: "httpResponseChunk"; readonly connectionId: string; readonly bodyBase64: string }
+  | { readonly type: "httpResponseEnd"; readonly connectionId: string }
   | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType: TunnelPayloadType }
   | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
 
@@ -268,7 +332,15 @@ const parseCloudMessage = (data: RawData): CloudTunnelMessage | null => {
         : null;
     case "httpRequest":
       return typeof message["path"] === "string"
-        ? { type: "httpRequest", connectionId: message["connectionId"], path: message["path"] }
+        ? {
+            type: "httpRequest",
+            connectionId: message["connectionId"],
+            path: message["path"],
+            method: typeof message["method"] === "string" ? message["method"] : undefined,
+            headers: isStringRecord(message["headers"]) ? message["headers"] : undefined,
+            bodyBase64: typeof message["bodyBase64"] === "string" ? message["bodyBase64"] : undefined,
+            stream: message["stream"] === true,
+          }
         : null;
     case "data":
       return typeof message["data"] === "string"
@@ -305,6 +377,14 @@ const rawDataToText = (data: RawData): string => {
   }
 
   return Buffer.concat(data).toString("utf8");
+};
+
+const isStringRecord = (value: unknown): value is Record<string, string> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every((entry) => typeof entry === "string");
 };
 
 const rawDataToBase64 = (data: RawData): string => {
