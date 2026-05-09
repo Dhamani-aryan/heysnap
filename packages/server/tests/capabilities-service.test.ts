@@ -22,7 +22,7 @@ describe("agent capabilities service", () => {
     await chmod(toolBin, 0o755);
 
     const service = new AgentCapabilitiesService({
-      catalog: createCatalog({ status: { command: "true" } }),
+      catalog: createCatalog({ tool: { status: { command: "true" } } }),
       paths,
       env: { PATH: `${join(root, "bin")}:${process.env.PATH ?? ""}`, HOME: root },
     });
@@ -51,13 +51,65 @@ describe("agent capabilities service", () => {
     await chmod(toolBin, 0o755);
 
     const service = new AgentCapabilitiesService({
-      catalog: createCatalog({ status: undefined }),
+      catalog: createCatalog({ tool: { status: undefined } }),
       paths,
       env: { PATH: `${join(root, "bin")}:${process.env.PATH ?? ""}`, HOME: root },
     });
 
     await service.initialize();
     expect(await service.buildInstructionBlock()).toContain("Fake Tool as `fake-tool`");
+  });
+
+  it("activates bundled skills marked active by default", async () => {
+    const { root, paths } = await createTempPaths();
+    const service = new AgentCapabilitiesService({
+      catalog: createCatalog({
+        skills: [{ activeByDefault: true }],
+      }),
+      paths,
+      env: { PATH: process.env.PATH ?? "", HOME: root },
+    });
+
+    await service.initialize();
+
+    expect((await service.getCapabilities()).skills[0]).toMatchObject({
+      id: "fake-skill",
+      installState: "installed",
+      active: true,
+    });
+  });
+
+  it("reactivates default-active bundled skills when their version changes", async () => {
+    const { root, paths } = await createTempPaths();
+    await writeFile(paths.stateFile, JSON.stringify({
+      catalogVersion: "older",
+      codexBin: null,
+      tools: {},
+      skills: {
+        "fake-skill": {
+          id: "fake-skill",
+          installedVersion: "1.0",
+          installState: "installed",
+          active: false,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }));
+    const service = new AgentCapabilitiesService({
+      catalog: createCatalog({
+        skills: [{ version: "1.1", activeByDefault: true }],
+      }),
+      paths,
+      env: { PATH: process.env.PATH ?? "", HOME: root },
+    });
+
+    await service.initialize();
+
+    expect((await service.getCapabilities()).skills[0]).toMatchObject({
+      installedVersion: "1.1",
+      active: true,
+    });
   });
 });
 
@@ -76,9 +128,10 @@ const createTempPaths = async (): Promise<{ readonly root: string; readonly path
   };
 };
 
-const createCatalog = (
-  overrides: Partial<CapabilitiesCatalog["tools"][number]> = {},
-): CapabilitiesCatalog => ({
+const createCatalog = (options: {
+  readonly tool?: Partial<CapabilitiesCatalog["tools"][number]>;
+  readonly skills?: readonly Partial<CapabilitiesCatalog["skills"][number]>[];
+} = {}): CapabilitiesCatalog => ({
   version: "test",
   codexToolId: "fake",
   tools: [{
@@ -90,13 +143,14 @@ const createCatalog = (
     versionCommand: { command: "fake-tool" },
     status: { command: "fake-tool", args: ["status"] },
     attachedSkillIds: ["fake-skill"],
-    ...overrides,
+    ...options.tool,
   }],
-  skills: [{
+  skills: (options.skills ?? [{}]).map((skill) => ({
     id: "fake-skill",
     label: "Fake Skill",
     version: "1.0",
     description: "Fake skill",
     sourcePath: join(process.cwd(), "tests", "fixtures", "fake-skill"),
-  }],
+    ...skill,
+  })),
 });
