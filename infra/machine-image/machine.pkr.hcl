@@ -66,6 +66,10 @@ source "amazon-ebs" "machine" {
 build {
   sources = ["source.amazon-ebs.machine"]
 
+  provisioner "shell" {
+    inline = ["mkdir -p /tmp/ank1015-machine-bootstrap"]
+  }
+
   provisioner "file" {
     source      = "packages/machine-bootstrap/"
     destination = "/tmp/ank1015-machine-bootstrap/"
