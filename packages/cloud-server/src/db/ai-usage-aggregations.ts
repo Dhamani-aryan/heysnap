@@ -1,3 +1,4 @@
+import { calculateAiUsageCost } from "../ai-usage/pricing.js";
 import type {
   AiUsageBreakdownRow,
   AiUsageBucket,
@@ -10,6 +11,7 @@ import type {
 interface BucketAccumulator {
   bucketStart: Date;
   requestCount: number;
+  estimatedCostUsd: number;
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
@@ -22,6 +24,7 @@ interface BucketAccumulator {
 interface GroupAccumulator {
   key: string;
   requestCount: number;
+  estimatedCostUsd: number;
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
@@ -33,6 +36,7 @@ interface GroupAccumulator {
 
 export const buildEmptyAiUsageSummary = (): AiUsageSummary => ({
   requestCount: 0,
+  estimatedCostUsd: 0,
   inputTokens: 0,
   outputTokens: 0,
   cachedInputTokens: 0,
@@ -57,6 +61,7 @@ export const summarizeAiUsageRows = (
     return buildEmptyAiUsageSummary();
   }
 
+  let estimatedCostUsd = 0;
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedInputTokens = 0;
@@ -72,6 +77,7 @@ export const summarizeAiUsageRows = (
   const models = new Set<string>();
 
   for (const row of rows) {
+    estimatedCostUsd += calculateAiUsageCost(row)?.totalUsd ?? 0;
     inputTokens += row.inputTokens;
     outputTokens += row.outputTokens;
     cachedInputTokens += row.cachedInputTokens;
@@ -107,6 +113,7 @@ export const summarizeAiUsageRows = (
 
   return {
     requestCount: rows.length,
+    estimatedCostUsd: roundUsd(estimatedCostUsd),
     inputTokens,
     outputTokens,
     cachedInputTokens,
@@ -139,6 +146,7 @@ export const bucketAiUsageRows = (
       bucket = {
         bucketStart,
         requestCount: 0,
+        estimatedCostUsd: 0,
         inputTokens: 0,
         outputTokens: 0,
         cachedInputTokens: 0,
@@ -150,6 +158,7 @@ export const bucketAiUsageRows = (
       accumulators.set(key, bucket);
     }
     bucket.requestCount += 1;
+    bucket.estimatedCostUsd += calculateAiUsageCost(row)?.totalUsd ?? 0;
     bucket.inputTokens += row.inputTokens;
     bucket.outputTokens += row.outputTokens;
     bucket.cachedInputTokens += row.cachedInputTokens;
@@ -162,9 +171,9 @@ export const bucketAiUsageRows = (
     }
   }
 
-  return Array.from(accumulators.values()).sort(
-    (a, b) => a.bucketStart.getTime() - b.bucketStart.getTime(),
-  );
+  return Array.from(accumulators.values())
+    .map((bucket) => ({ ...bucket, estimatedCostUsd: roundUsd(bucket.estimatedCostUsd) }))
+    .sort((a, b) => a.bucketStart.getTime() - b.bucketStart.getTime());
 };
 
 export const groupAiUsageRows = (
@@ -181,6 +190,7 @@ export const groupAiUsageRows = (
       accumulator = {
         key,
         requestCount: 0,
+        estimatedCostUsd: 0,
         inputTokens: 0,
         outputTokens: 0,
         cachedInputTokens: 0,
@@ -192,6 +202,7 @@ export const groupAiUsageRows = (
       accumulators.set(key, accumulator);
     }
     accumulator.requestCount += 1;
+    accumulator.estimatedCostUsd += calculateAiUsageCost(row)?.totalUsd ?? 0;
     accumulator.inputTokens += row.inputTokens;
     accumulator.outputTokens += row.outputTokens;
     accumulator.cachedInputTokens += row.cachedInputTokens;
@@ -204,12 +215,20 @@ export const groupAiUsageRows = (
     }
   }
 
-  const sorted = Array.from(accumulators.values()).sort((a, b) => {
-    if (b.totalTokens !== a.totalTokens) {
-      return b.totalTokens - a.totalTokens;
-    }
-    return b.requestCount - a.requestCount;
-  });
+  const sorted = Array.from(accumulators.values())
+    .map((row) => ({
+      ...row,
+      estimatedCostUsd: roundUsd(row.estimatedCostUsd),
+    }))
+    .sort((a, b) => {
+      if (b.estimatedCostUsd !== a.estimatedCostUsd) {
+        return b.estimatedCostUsd - a.estimatedCostUsd;
+      }
+      if (b.totalTokens !== a.totalTokens) {
+        return b.totalTokens - a.totalTokens;
+      }
+      return b.requestCount - a.requestCount;
+    });
 
   return limit !== undefined && limit > 0 ? sorted.slice(0, limit) : sorted;
 };
@@ -265,3 +284,5 @@ const percentileOrNull = (
   const rank = Math.min(sorted.length - 1, Math.floor(percentile * sorted.length));
   return sorted[rank] ?? null;
 };
+
+const roundUsd = (value: number): number => Number(value.toFixed(10));

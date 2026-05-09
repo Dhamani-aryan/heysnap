@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 import { Hono } from "hono";
 
+import { calculateAiUsageCost } from "../ai-usage/pricing.js";
 import type { AuthService } from "../auth/service.js";
 import type { CloudServerConfig } from "../config.js";
 import type {
@@ -589,30 +590,36 @@ const serializeAiUsageRequestAdmin = (
   usage: AiUsageRequestRecord,
   users: ReadonlyArray<{ readonly id: string; readonly email: string }>,
   computers: ReadonlyArray<{ readonly id: string; readonly name: string }>,
-) => ({
-  id: usage.id,
-  userId: usage.userId,
-  userEmail: users.find((user) => user.id === usage.userId)?.email ?? null,
-  computerId: usage.computerId,
-  computerName: computers.find((computer) => computer.id === usage.computerId)?.name ?? null,
-  machineIdentityId: usage.machineIdentityId,
-  provider: usage.provider,
-  model: usage.model,
-  method: usage.method,
-  upstreamPath: usage.upstreamPath,
-  status: usage.status,
-  httpStatus: usage.httpStatus,
-  inputTokens: usage.inputTokens,
-  outputTokens: usage.outputTokens,
-  cachedInputTokens: usage.cachedInputTokens,
-  reasoningOutputTokens: usage.reasoningOutputTokens,
-  totalTokens: usage.totalTokens,
-  startedAt: usage.startedAt.toISOString(),
-  completedAt: usage.completedAt?.toISOString() ?? null,
-  durationMs: usage.durationMs,
-  errorMessage: usage.errorMessage,
-  metadata: usage.metadata,
-});
+) => {
+  const costBreakdown = calculateAiUsageCost(usage);
+
+  return {
+    id: usage.id,
+    userId: usage.userId,
+    userEmail: users.find((user) => user.id === usage.userId)?.email ?? null,
+    computerId: usage.computerId,
+    computerName: computers.find((computer) => computer.id === usage.computerId)?.name ?? null,
+    machineIdentityId: usage.machineIdentityId,
+    provider: usage.provider,
+    model: usage.model,
+    method: usage.method,
+    upstreamPath: usage.upstreamPath,
+    status: usage.status,
+    httpStatus: usage.httpStatus,
+    estimatedCostUsd: costBreakdown?.totalUsd ?? null,
+    costBreakdown,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    reasoningOutputTokens: usage.reasoningOutputTokens,
+    totalTokens: usage.totalTokens,
+    startedAt: usage.startedAt.toISOString(),
+    completedAt: usage.completedAt?.toISOString() ?? null,
+    durationMs: usage.durationMs,
+    errorMessage: usage.errorMessage,
+    metadata: usage.metadata,
+  };
+};
 
 const serializeAiUsagePayload = (payload: AiUsagePayloadRecord) => ({
   id: payload.id,
@@ -628,6 +635,7 @@ const serializeAiUsagePayload = (payload: AiUsagePayloadRecord) => ({
 
 const serializeAiUsageSummary = (summary: AiUsageSummary) => ({
   requestCount: summary.requestCount,
+  estimatedCostUsd: summary.estimatedCostUsd,
   inputTokens: summary.inputTokens,
   outputTokens: summary.outputTokens,
   cachedInputTokens: summary.cachedInputTokens,
@@ -648,6 +656,7 @@ const serializeAiUsageSummary = (summary: AiUsageSummary) => ({
 const serializeAiUsageBucket = (bucket: AiUsageBucket) => ({
   bucketStart: bucket.bucketStart.toISOString(),
   requestCount: bucket.requestCount,
+  estimatedCostUsd: bucket.estimatedCostUsd,
   inputTokens: bucket.inputTokens,
   outputTokens: bucket.outputTokens,
   cachedInputTokens: bucket.cachedInputTokens,
@@ -666,6 +675,7 @@ const serializeAiUsageBreakdownRow = (
   key: row.key,
   label: resolveBreakdownLabel(row.key, groupBy, users, computers),
   requestCount: row.requestCount,
+  estimatedCostUsd: row.estimatedCostUsd,
   inputTokens: row.inputTokens,
   outputTokens: row.outputTokens,
   cachedInputTokens: row.cachedInputTokens,

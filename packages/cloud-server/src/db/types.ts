@@ -118,6 +118,7 @@ export interface AiUsagePayloadRecord {
 
 export interface AiUsageSummary {
   readonly requestCount: number;
+  readonly estimatedCostUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
@@ -140,6 +141,7 @@ export type AiUsageBucketGranularity = "hour" | "day";
 export interface AiUsageBucket {
   readonly bucketStart: Date;
   readonly requestCount: number;
+  readonly estimatedCostUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
@@ -154,6 +156,7 @@ export type AiUsageGroupBy = "model" | "status" | "user" | "computer";
 export interface AiUsageBreakdownRow {
   readonly key: string;
   readonly requestCount: number;
+  readonly estimatedCostUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
