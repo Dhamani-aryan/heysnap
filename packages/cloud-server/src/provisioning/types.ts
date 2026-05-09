@@ -18,3 +18,13 @@ export interface ComputerProvisioner {
   restartComputer(computer: ComputerRecord): Promise<Record<string, unknown>>;
   terminateComputer(computer: ComputerRecord): Promise<Record<string, unknown>>;
 }
+
+export interface CommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+export type CommandExecutor = (
+  command: string,
+  args: readonly string[],
+) => Promise<CommandResult>;

@@ -10,6 +10,10 @@ export interface CloudServerConfig {
   readonly awsEc2RootVolumeGb: number;
   readonly awsMachineAmiSsmParameter: string;
   readonly awsMachineInstanceProfileName: string | undefined;
+  readonly computerProvisioner?: "aws" | "docker";
+  readonly localDockerMachineImage?: string;
+  readonly localDockerNetwork?: string;
+  readonly localDockerCloudUrl?: string;
   readonly machineServerChannel: string;
   readonly aiGatewayAzureBaseUrl?: string;
   readonly aiGatewayAzureImagesBaseUrl?: string;
@@ -37,6 +41,10 @@ export const getCloudServerConfig = (
   awsMachineAmiSsmParameter: readOptionalEnv(env, "AWS_MACHINE_AMI_SSM_PARAMETER") ??
     DEFAULT_MACHINE_AMI_SSM_PARAMETER,
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
+  computerProvisioner: readComputerProvisioner(env.COMPUTER_PROVISIONER),
+  localDockerMachineImage: readOptionalEnv(env, "LOCAL_DOCKER_MACHINE_IMAGE"),
+  localDockerNetwork: readOptionalEnv(env, "LOCAL_DOCKER_NETWORK"),
+  localDockerCloudUrl: readOptionalEnv(env, "LOCAL_DOCKER_CLOUD_URL"),
   machineServerChannel: readOptionalEnv(env, "MACHINE_SERVER_CHANNEL") ?? "stable",
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
@@ -61,6 +69,10 @@ export const getDevelopmentCloudServerConfig = (
   awsEc2RootVolumeGb: parsePositiveInteger(env.AWS_EC2_ROOT_VOLUME_GB, 80),
   awsMachineAmiSsmParameter: env.AWS_MACHINE_AMI_SSM_PARAMETER?.trim() || DEFAULT_MACHINE_AMI_SSM_PARAMETER,
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
+  computerProvisioner: readComputerProvisioner(env.COMPUTER_PROVISIONER),
+  localDockerMachineImage: readOptionalEnv(env, "LOCAL_DOCKER_MACHINE_IMAGE"),
+  localDockerNetwork: readOptionalEnv(env, "LOCAL_DOCKER_NETWORK"),
+  localDockerCloudUrl: readOptionalEnv(env, "LOCAL_DOCKER_CLOUD_URL"),
   machineServerChannel: env.MACHINE_SERVER_CHANNEL?.trim() || "stable",
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
@@ -90,6 +102,20 @@ const readOptionalEnv = (env: NodeJS.ProcessEnv, name: string): string | undefin
   const value = env[name]?.trim();
 
   return value === undefined || value.length === 0 ? undefined : value;
+};
+
+const readComputerProvisioner = (rawValue: string | undefined): "aws" | "docker" | undefined => {
+  const value = rawValue?.trim().toLowerCase();
+
+  if (value === undefined || value.length === 0) {
+    return undefined;
+  }
+
+  if (value === "aws" || value === "docker") {
+    return value;
+  }
+
+  throw new Error(`Expected COMPUTER_PROVISIONER to be aws or docker, received ${rawValue}`);
 };
 
 const parsePositiveInteger = (rawValue: string | undefined, defaultValue: number): number => {
