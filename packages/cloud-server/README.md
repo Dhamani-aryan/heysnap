@@ -48,6 +48,8 @@ two terminals to iterate on the React admin SPA.
 - `WS /gateway/computers/:computerId/filesystem`
 - `WS /gateway/computers/:computerId/agent`
 - `POST /llm/openai/v1/responses`
+- `POST /llm/openai/v1/images/generations`
+- `POST /llm/openai/v1/images/edits`
 - `GET /admin/ai-usage`
 - `GET /admin/ai-usage/summary`
 - `GET /releases/desktop/latest`
@@ -79,6 +81,20 @@ as the `api-key` header. Cloud-server authenticates that token, replaces it with
 usage metadata against the owning user and computer. The Azure URL can be either
 a base path or the full Responses endpoint; if it already ends in `/responses`,
 Codex requests to `/llm/openai/v1/responses` are not double-appended.
+
+Image generation clients use the same gateway prefix and same machine token:
+
+- `POST /llm/openai/v1/images/generations`
+- `POST /llm/openai/v1/images/edits`
+
+Image requests forward to `AI_GATEWAY_AZURE_IMAGES_BASE_URL` with
+`Authorization: Bearer $AI_GATEWAY_AZURE_API_KEY`. Set that URL to the Azure
+GPT Image deployment base, for example
+`https://...cognitiveservices.azure.com/openai/deployments/gpt-image-2?api-version=2024-02-01`,
+or to one full image endpoint including its `api-version` query. The gateway strips
+the OpenAI-style `model` field before forwarding because the Azure deployment is
+already selected by the URL. For multipart edits, OpenAI-style repeated
+`image[]` fields are normalized to Azure's `image` field.
 
 Optional debug body capture is disabled by default. Enable it with
 `AI_GATEWAY_CAPTURE_BODIES=true`; captured headers are redacted and bodies are

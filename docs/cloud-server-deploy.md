@@ -18,6 +18,9 @@ AWS_EC2_ROOT_VOLUME_GB=80
 AWS_MACHINE_AMI_SSM_PARAMETER=/ank1015/machine-images/stable/ami-id
 AWS_MACHINE_INSTANCE_PROFILE_NAME=ank1015-machine-profile
 MACHINE_SERVER_VERSION=stable
+AI_GATEWAY_AZURE_BASE_URL=https://...
+AI_GATEWAY_AZURE_IMAGES_BASE_URL=https://.../openai/deployments/gpt-image-2?api-version=2024-02-01
+AI_GATEWAY_AZURE_API_KEY=...
 ```
 
 Build the Docker image from the repo root:
@@ -46,6 +49,9 @@ docker run --rm -p 4100:4100 \
   -e AWS_MACHINE_AMI_SSM_PARAMETER=/ank1015/machine-images/stable/ami-id \
   -e AWS_MACHINE_INSTANCE_PROFILE_NAME=ank1015-machine-profile \
   -e MACHINE_SERVER_VERSION=stable \
+  -e AI_GATEWAY_AZURE_BASE_URL=https://... \
+  -e AI_GATEWAY_AZURE_IMAGES_BASE_URL=https://.../openai/deployments/gpt-image-2?api-version=2024-02-01 \
+  -e AI_GATEWAY_AZURE_API_KEY=... \
   ank1015-cloud-server
 ```
 
