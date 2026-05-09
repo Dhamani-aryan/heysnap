@@ -56,7 +56,7 @@ apt-get install -y --no-install-recommends gh ngrok
 
 corepack enable
 corepack prepare pnpm@9.15.2 --activate
-npm install -g vercel@latest @openai/codex@latest
+npm install -g vercel@latest @openai/codex@latest heysnap-image-gen@0.1.1
 
 download https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 chmod +x /usr/local/bin/uv /usr/local/bin/uvx
