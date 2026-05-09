@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createLocalCloudEnv,
+} from "../../../scripts/local-dev/cloud.mjs";
+import {
   createLocalReleasePlan,
   createManifestPayload,
 } from "../../../scripts/local-dev/release-machine-server.mjs";
 
 describe("local machine-server release publisher", () => {
+  it("enables AI gateway body capture in the local cloud environment", () => {
+    const previous = process.env.AI_GATEWAY_CAPTURE_BODIES;
+    delete process.env.AI_GATEWAY_CAPTURE_BODIES;
+
+    try {
+      const env = createLocalCloudEnv();
+      expect(env.AI_GATEWAY_CAPTURE_BODIES).toBe("true");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AI_GATEWAY_CAPTURE_BODIES;
+      } else {
+        process.env.AI_GATEWAY_CAPTURE_BODIES = previous;
+      }
+    }
+  });
+
   it("builds a local-channel artifact plan and manifest payload", () => {
     const plan = createLocalReleasePlan({
       LOCAL_MACHINE_SERVER_VERSION: "0.0.0-local.test",
