@@ -75,6 +75,7 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("bootstrap-token");
     expect(userData).toContain("MACHINE_SERVER_CHANNEL=stable");
     expect(userData).toContain("exec /usr/local/bin/ank1015-machine-bootstrap");
+    expect(userData).toContain("PATH=/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(userData).toContain("ANK1015_MACHINE_TOKEN_FILE=/opt/ank1015/machine-token");
     expect(userData).toContain("ANK1015_ACTIVE_SKILLS_DIR=/home/agent/.codex/skills");
     expect(userData).not.toContain("MACHINE_SERVER_VERSION=");
