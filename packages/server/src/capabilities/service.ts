@@ -345,7 +345,7 @@ export class AgentCapabilitiesService {
           id: skill.id,
           installedVersion: existing?.installedVersion ?? null,
           installState: existing?.installState ?? "not_installed",
-          active: existing?.active ?? false,
+          active: existing?.active ?? skill.activeByDefault === true,
           lastError: existing?.lastError,
           updatedAt: existing?.updatedAt ?? now,
         }];
@@ -374,7 +374,7 @@ export class AgentCapabilitiesService {
 
       onProgress({ message: `Installing bundled skill ${skill.label}` });
       await this.writeSkillCatalog(skill);
-      const active = skillState?.active ?? skill.activeByDefault === true;
+      const active = skill.activeByDefault === true ? true : skillState?.active ?? false;
       this.setSkillState(skill.id, {
         installedVersion: skill.version,
         installState: "installed",
