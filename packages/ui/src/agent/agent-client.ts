@@ -1,46 +1,47 @@
 import type {
-  AgentClientMessage,
   AgentContent,
   AgentRunEvent,
-  AgentServerMessage,
   AgentThread,
   AgentThreadGroup,
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 5000;
+const RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_ATTEMPTS = 3;
+
+export interface AgentActiveRun {
+  readonly runId: string;
+  readonly threadId: string;
+  readonly status: "running";
+  readonly eventsUrl: string;
+  readonly replayAfterEventId?: number;
+}
+
+export interface GetAgentThreadResult {
+  readonly thread: AgentThread;
+  readonly activeRun?: AgentActiveRun;
+}
 
 export const retrieveAgentThreadGroups = async (
-  websocketUrl: string,
+  agentBaseUrl: string,
   input: { readonly rootPath?: string; readonly limit?: number } = {},
 ): Promise<AgentThreadGroup[]> => {
-  const requestId = createRequestId();
-  const response = await sendAgentRequest(websocketUrl, {
-    type: "retrieveThreads",
-    requestId,
-    rootPath: input.rootPath,
-    limit: input.limit,
-  }, requestId);
+  const url = buildAgentUrl(agentBaseUrl, "/threads");
 
-  if (response.type !== "threads") {
-    throw new Error("Agent server returned an unexpected history response.");
+  if (input.rootPath !== undefined) {
+    url.searchParams.set("rootPath", input.rootPath);
   }
 
+  if (input.limit !== undefined) {
+    url.searchParams.set("limit", String(input.limit));
+  }
+
+  const response = await fetchJson<{ readonly groups: AgentThreadGroup[] }>(url);
   return response.groups;
 };
 
-export const getAgentThread = async (websocketUrl: string, threadId: string): Promise<AgentThread> => {
-  const requestId = createRequestId();
-  const response = await sendAgentRequest(websocketUrl, {
-    type: "getThread",
-    requestId,
-    threadId,
-  }, requestId);
-
-  if (response.type !== "thread") {
-    throw new Error("Agent server returned an unexpected thread response.");
-  }
-
-  return response.thread;
+export const getAgentThread = async (agentBaseUrl: string, threadId: string): Promise<GetAgentThreadResult> => {
+  return fetchJson<GetAgentThreadResult>(buildAgentUrl(agentBaseUrl, `/threads/${encodeURIComponent(threadId)}`));
 };
 
 export interface StartAgentRunInput {
@@ -62,308 +63,340 @@ export interface AgentRunHandle {
 }
 
 export const startAgentRun = (
-  websocketUrl: string,
+  agentBaseUrl: string,
   input: StartAgentRunInput,
   callbacks: AgentRunCallbacks,
 ): AgentRunHandle => {
   const requestId = createRequestId();
-  const socket = new WebSocket(websocketUrl);
-  let runId: string | null = null;
-  let threadId: string | null = null;
-  let cancelRequestId: string | null = null;
-  let cancelWhenReady = false;
-  let isClosed = false;
-  let hasEnded = false;
+  const clientRunId = createRequestId();
+  const state = createRunStreamState(agentBaseUrl, callbacks, requestId);
 
-  const cleanup = (): void => {
-    socket.removeEventListener("open", handleOpen);
-    socket.removeEventListener("message", handleMessage);
-    socket.removeEventListener("error", handleSocketError);
-    socket.removeEventListener("close", handleClose);
-  };
+  void runStreamLoop(state, {
+    method: "POST",
+    url: buildAgentUrl(agentBaseUrl, "/runs").toString(),
+    body: JSON.stringify({ ...input, clientRunId }),
+  });
 
-  const closeSocket = (): void => {
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-  };
+  return createRunHandle(state);
+};
 
-  const finish = (message: Extract<AgentServerMessage, { readonly type: "run_end" }>): void => {
-    if (hasEnded) {
-      return;
-    }
+export const resumeAgentRun = (
+  agentBaseUrl: string,
+  activeRun: AgentActiveRun,
+  callbacks: AgentRunCallbacks,
+): AgentRunHandle => {
+  const requestId = createRequestId();
+  const state = createRunStreamState(agentBaseUrl, callbacks, requestId);
+  state.runId = activeRun.runId;
+  state.threadId = activeRun.threadId;
+  state.lastEventId = activeRun.replayAfterEventId ?? 0;
+  callbacks.onRunStart?.({ requestId, runId: activeRun.runId, threadId: activeRun.threadId });
 
-    hasEnded = true;
-    callbacks.onRunEnd?.({
-      requestId: message.requestId,
-      runId: message.runId,
-      threadId: message.threadId,
-    });
-    cleanup();
-    closeSocket();
-  };
+  const eventsUrl = resolveAgentUrl(agentBaseUrl, activeRun.eventsUrl);
 
-  const fail = (error: Error): void => {
-    if (hasEnded || isClosed) {
-      return;
-    }
-
-    hasEnded = true;
-    callbacks.onError?.(error);
-    cleanup();
-    closeSocket();
-  };
-
-  const sendCancel = (): void => {
-    if (runId === null || threadId === null) {
-      cancelWhenReady = true;
-      return;
-    }
-
-    if (cancelRequestId !== null || socket.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    cancelRequestId = createRequestId();
-    sendMessage(socket, {
-      type: "cancelRun",
-      requestId: cancelRequestId,
-      threadId,
-      runId,
-    });
-  };
-
-  function handleOpen(): void {
-    sendMessage(socket, {
-      type: "sendMessage",
-      requestId,
-      threadId: input.threadId,
-      path: input.path,
-      content: input.content,
-    });
+  if (state.lastEventId > 0) {
+    eventsUrl.searchParams.set("after", String(state.lastEventId));
   }
 
-  function handleMessage(event: MessageEvent): void {
-    void handleParsedMessage(event.data);
-  }
+  void runStreamLoop(state, {
+    method: "GET",
+    url: eventsUrl.toString(),
+  });
 
-  async function handleParsedMessage(data: unknown): Promise<void> {
-    let message: AgentServerMessage;
+  return createRunHandle(state);
+};
 
+interface RunStreamState {
+  readonly agentBaseUrl: string;
+  readonly callbacks: AgentRunCallbacks;
+  readonly requestId: string;
+  readonly abortController: AbortController;
+  runId: string | null;
+  threadId: string | null;
+  lastEventId: number;
+  cancelWhenReady: boolean;
+  cancelRequestSent: boolean;
+  closed: boolean;
+  ended: boolean;
+}
+
+interface RunStreamRequest {
+  readonly method: "GET" | "POST";
+  readonly url: string;
+  readonly body?: string;
+}
+
+type AgentSseMessage =
+  | { readonly id: number; readonly event: "run_start"; readonly data: { readonly runId: string; readonly threadId: string } }
+  | {
+      readonly id: number;
+      readonly event: "event";
+      readonly data: { readonly runId: string; readonly threadId: string; readonly event: AgentRunEvent };
+    }
+  | { readonly id: number; readonly event: "run_end"; readonly data: { readonly runId: string; readonly threadId: string } }
+  | { readonly id: number; readonly event: "error"; readonly data: { readonly code?: string; readonly message: string } };
+
+const createRunStreamState = (
+  agentBaseUrl: string,
+  callbacks: AgentRunCallbacks,
+  requestId: string,
+): RunStreamState => ({
+  agentBaseUrl,
+  callbacks,
+  requestId,
+  abortController: new AbortController(),
+  runId: null,
+  threadId: null,
+  lastEventId: 0,
+  cancelWhenReady: false,
+  cancelRequestSent: false,
+  closed: false,
+  ended: false,
+});
+
+const createRunHandle = (state: RunStreamState): AgentRunHandle => ({
+  cancel: () => {
+    state.cancelWhenReady = true;
+    void sendCancelIfReady(state);
+  },
+  close: () => {
+    state.closed = true;
+    state.abortController.abort();
+  },
+});
+
+const runStreamLoop = async (state: RunStreamState, initialRequest: RunStreamRequest): Promise<void> => {
+  let request = initialRequest;
+  let reconnectAttempts = 0;
+
+  while (!state.closed && !state.ended) {
     try {
-      message = await parseMessage(data);
+      await readRunStream(state, request);
+      return;
     } catch (error) {
-      fail(error instanceof Error ? error : new Error("Failed to parse agent run message."));
-      return;
-    }
-
-    if (message.type === "hello" || message.type === "pong") {
-      return;
-    }
-
-    if (message.type === "error") {
-      if (
-        message.requestId === undefined ||
-        message.requestId === requestId ||
-        message.requestId === cancelRequestId
-      ) {
-        fail(new Error(message.message));
-      }
-      return;
-    }
-
-    if (message.type === "run_start") {
-      if (message.requestId !== requestId) {
+      if (state.closed || state.ended || state.abortController.signal.aborted) {
         return;
       }
 
-      runId = message.runId;
-      threadId = message.threadId;
-      callbacks.onRunStart?.({
-        requestId: message.requestId,
-        runId: message.runId,
-        threadId: message.threadId,
-      });
+      reconnectAttempts += 1;
 
-      if (cancelWhenReady) {
-        sendCancel();
+      if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+        failRun(state, error instanceof Error ? error : new Error("Agent run stream failed."));
+        return;
       }
-      return;
-    }
 
-    if (message.type === "event") {
-      if (message.requestId === requestId) {
-        callbacks.onEvent?.(message.event);
-      }
-      return;
-    }
+      await sleep(RECONNECT_DELAY_MS);
 
-    if (message.type === "run_end") {
-      const isThisRun =
-        message.requestId === requestId ||
-        message.requestId === cancelRequestId ||
-        (runId !== null && threadId !== null && message.runId === runId && message.threadId === threadId);
-
-      if (isThisRun) {
-        finish(message);
+      if (state.runId !== null) {
+        const url = buildAgentUrl(state.agentBaseUrl, `/runs/${encodeURIComponent(state.runId)}/events`);
+        url.searchParams.set("after", String(state.lastEventId));
+        request = { method: "GET", url: url.toString() };
       }
     }
   }
-
-  function handleSocketError(): void {
-    fail(new Error("Agent run connection failed."));
-  }
-
-  function handleClose(): void {
-    if (!hasEnded && !isClosed) {
-      isClosed = true;
-      cleanup();
-      callbacks.onError?.(new Error("Agent run connection closed."));
-      return;
-    }
-
-    isClosed = true;
-  }
-
-  socket.addEventListener("open", handleOpen);
-  socket.addEventListener("message", handleMessage);
-  socket.addEventListener("error", handleSocketError);
-  socket.addEventListener("close", handleClose);
-
-  return {
-    cancel: sendCancel,
-    close: () => {
-      isClosed = true;
-      cleanup();
-      closeSocket();
-    },
-  };
 };
 
-const sendAgentRequest = async (
-  websocketUrl: string,
-  message: AgentClientMessage,
-  requestId: string,
-): Promise<Extract<AgentServerMessage, { readonly type: "threads" | "thread" | "error" }>> => {
-  const socket = new WebSocket(websocketUrl);
+const readRunStream = async (state: RunStreamState, request: RunStreamRequest): Promise<void> => {
+  const response = await fetch(request.url, {
+    method: request.method,
+    body: request.body,
+    headers: {
+      ...(request.body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(state.lastEventId > 0 ? { "last-event-id": String(state.lastEventId) } : {}),
+    },
+    signal: state.abortController.signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  if (response.body === null) {
+    throw new Error("Agent run did not return a stream.");
+  }
+
+  for await (const message of readSseMessages(response.body)) {
+    handleRunStreamMessage(state, message);
+
+    if (state.ended || state.closed) {
+      return;
+    }
+  }
+
+  if (!state.ended) {
+    throw new Error("Agent run stream closed before completion.");
+  }
+};
+
+const handleRunStreamMessage = (state: RunStreamState, message: AgentSseMessage): void => {
+  state.lastEventId = Math.max(state.lastEventId, message.id);
+
+  if (message.event === "run_start") {
+    state.runId = message.data.runId;
+    state.threadId = message.data.threadId;
+    state.callbacks.onRunStart?.({
+      requestId: state.requestId,
+      runId: message.data.runId,
+      threadId: message.data.threadId,
+    });
+    void sendCancelIfReady(state);
+    return;
+  }
+
+  if (message.event === "event") {
+    state.runId = message.data.runId;
+    state.threadId = message.data.threadId;
+    state.callbacks.onEvent?.(message.data.event);
+    return;
+  }
+
+  if (message.event === "run_end") {
+    state.ended = true;
+    state.callbacks.onRunEnd?.({
+      requestId: state.requestId,
+      runId: message.data.runId,
+      threadId: message.data.threadId,
+    });
+    return;
+  }
+
+  state.ended = true;
+  state.callbacks.onError?.(new Error(message.data.message));
+};
+
+const sendCancelIfReady = async (state: RunStreamState): Promise<void> => {
+  if (
+    !state.cancelWhenReady ||
+    state.cancelRequestSent ||
+    state.runId === null ||
+    state.threadId === null
+  ) {
+    return;
+  }
+
+  state.cancelRequestSent = true;
+  const url = buildAgentUrl(
+    state.agentBaseUrl,
+    `/threads/${encodeURIComponent(state.threadId)}/runs/${encodeURIComponent(state.runId)}/cancel`,
+  );
 
   try {
-    await waitForOpen(socket);
-    sendMessage(socket, message);
-    const response = await waitForMessage(socket, requestId);
+    await fetch(url, { method: "POST" });
+  } catch (error) {
+    state.callbacks.onError?.(error instanceof Error ? error : new Error("Failed to cancel agent run."));
+  }
+};
 
-    if (response.type === "error") {
-      throw new Error(response.message);
+const failRun = (state: RunStreamState, error: Error): void => {
+  if (state.ended || state.closed) {
+    return;
+  }
+
+  state.ended = true;
+  state.callbacks.onError?.(error);
+};
+
+const fetchJson = async <TResponse>(url: URL): Promise<TResponse> => {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response));
     }
 
-    return response;
+    return await response.json() as TResponse;
   } finally {
-    socket.close();
+    globalThis.clearTimeout(timeout);
   }
 };
 
-const waitForOpen = async (socket: WebSocket): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out connecting to agent history."));
-    }, REQUEST_TIMEOUT_MS);
+const readSseMessages = async function* (body: ReadableStream<Uint8Array>): AsyncIterable<AgentSseMessage> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
 
-    const handleOpen = (): void => {
-      cleanup();
-      resolve();
-    };
-    const handleError = (): void => {
-      cleanup();
-      reject(new Error("Failed to connect to agent history."));
-    };
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      socket.removeEventListener("open", handleOpen);
-      socket.removeEventListener("error", handleError);
-    };
+  for (;;) {
+    const { done, value } = await reader.read();
 
-    socket.addEventListener("open", handleOpen);
-    socket.addEventListener("error", handleError);
-  });
-
-const waitForMessage = async (
-  socket: WebSocket,
-  requestId: string,
-): Promise<Extract<AgentServerMessage, { readonly type: "threads" | "thread" | "error" }>> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out loading thread history."));
-    }, REQUEST_TIMEOUT_MS);
-
-    const handleMessage = (event: MessageEvent): void => {
-      void handleParsedMessage(event.data);
-    };
-
-    const handleParsedMessage = async (data: unknown): Promise<void> => {
-      let message: AgentServerMessage;
-
-      try {
-        message = await parseMessage(data);
-      } catch (error) {
-        cleanup();
-        reject(error instanceof Error ? error : new Error("Failed to parse agent history message."));
-        return;
-      }
-
-      if (message.type === "hello" || message.type === "pong") {
-        return;
-      }
-
-      if (message.requestId !== requestId) {
-        return;
-      }
-
-      if (message.type !== "threads" && message.type !== "thread" && message.type !== "error") {
-        return;
-      }
-
-      cleanup();
-      resolve(message);
-    };
-    const handleError = (): void => {
-      cleanup();
-      reject(new Error("Failed to load thread history."));
-    };
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      socket.removeEventListener("message", handleMessage);
-      socket.removeEventListener("error", handleError);
-    };
-
-    socket.addEventListener("message", handleMessage);
-    socket.addEventListener("error", handleError);
-  });
-
-const sendMessage = (socket: WebSocket, message: AgentClientMessage): void => {
-  socket.send(JSON.stringify(message));
-};
-
-const parseMessage = async (data: unknown): Promise<AgentServerMessage> => {
-  const text = await messageDataToText(data);
-  return JSON.parse(text) as AgentServerMessage;
-};
-
-const messageDataToText = async (data: unknown): Promise<string> => {
-  if (typeof data !== "string") {
-    if (data instanceof ArrayBuffer) {
-      return new TextDecoder().decode(data);
+    if (done) {
+      break;
     }
 
-    if (typeof Blob !== "undefined" && data instanceof Blob) {
-      return data.text();
+    buffer += decoder.decode(value, { stream: true });
+    let boundaryIndex = buffer.indexOf("\n\n");
+
+    while (boundaryIndex >= 0) {
+      const rawEvent = buffer.slice(0, boundaryIndex);
+      buffer = buffer.slice(boundaryIndex + 2);
+      const message = parseSseMessage(rawEvent);
+
+      if (message !== null) {
+        yield message;
+      }
+
+      boundaryIndex = buffer.indexOf("\n\n");
+    }
+  }
+};
+
+const parseSseMessage = (rawEvent: string): AgentSseMessage | null => {
+  let id = 0;
+  let event = "";
+  const dataLines: string[] = [];
+
+  for (const line of rawEvent.split("\n")) {
+    if (line.length === 0 || line.startsWith(":")) {
+      continue;
     }
 
-    throw new Error("Agent history message must be text.");
+    const separatorIndex = line.indexOf(":");
+    const field = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
+    const value = separatorIndex >= 0 ? line.slice(separatorIndex + 1).trimStart() : "";
+
+    if (field === "id") {
+      id = Number.parseInt(value, 10);
+    } else if (field === "event") {
+      event = value;
+    } else if (field === "data") {
+      dataLines.push(value);
+    }
   }
 
-  return data;
+  if (!Number.isInteger(id) || id <= 0 || dataLines.length === 0 || !isKnownSseEvent(event)) {
+    return null;
+  }
+
+  return {
+    id,
+    event,
+    data: JSON.parse(dataLines.join("\n")) as AgentSseMessage["data"],
+  } as AgentSseMessage;
+};
+
+const isKnownSseEvent = (event: string): event is AgentSseMessage["event"] =>
+  event === "run_start" || event === "event" || event === "run_end" || event === "error";
+
+const readErrorMessage = async (response: Response): Promise<string> => {
+  try {
+    const body = await response.json() as { readonly message?: string; readonly error?: { readonly message?: string } };
+    return body.message ?? body.error?.message ?? response.statusText;
+  } catch {
+    return response.statusText;
+  }
+};
+
+const buildAgentUrl = (agentBaseUrl: string, path: string): URL => resolveAgentUrl(agentBaseUrl, `/agent${path}`);
+
+const resolveAgentUrl = (agentBaseUrl: string, pathOrUrl: string): URL => {
+  const url = new URL(agentBaseUrl);
+  const relative = pathOrUrl.startsWith("/agent/")
+    ? pathOrUrl.slice("/agent/".length)
+    : pathOrUrl.replace(/^\/+/u, "");
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/${relative}`;
+  return url;
 };
 
 const createRequestId = (): string => {
@@ -373,3 +406,8 @@ const createRequestId = (): string => {
 
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
+
+const sleep = async (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    globalThis.setTimeout(resolve, milliseconds);
+  });
