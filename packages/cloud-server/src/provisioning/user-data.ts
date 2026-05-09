@@ -67,6 +67,20 @@ chmod 0600 /opt/ank1015/bootstrap-token
 cat >/home/agent/.codex/config.toml <<'CODEX'
 model_provider = "azure"
 model = "${codexDefaultModel}"
+include_permissions_instructions = false
+include_apps_instructions = false
+
+[features]
+# Disable plugin system and plugin cache/sync behavior.
+plugins = false
+remote_plugin = false
+plugin_hooks = false
+apps = false
+tool_suggest = false
+in_app_browser = false
+browser_use = false
+browser_use_external = false
+computer_use = false
 
 [model_providers.azure]
 name = "Azure"
@@ -77,6 +91,12 @@ supports_websockets = false
 
 [model_providers.azure.env_http_headers]
 "api-key" = "ANK1015_CODEX_GATEWAY_TOKEN"
+
+[skills]
+include_instructions = true
+
+[skills.bundled]
+enabled = false
 CODEX
 chown agent:agent /home/agent/.codex/config.toml
 chmod 0600 /home/agent/.codex/config.toml
