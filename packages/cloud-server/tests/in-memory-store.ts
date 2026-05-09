@@ -170,6 +170,7 @@ export class InMemoryCloudStore implements CloudStore {
     readonly status: ComputerStatus;
     readonly providerMetadata: unknown;
     readonly capabilities: unknown;
+    readonly machineHealth?: unknown;
   }): Promise<ComputerRecord> {
     const now = new Date();
     const computer = {
@@ -180,6 +181,7 @@ export class InMemoryCloudStore implements CloudStore {
       status: input.status,
       providerMetadata: input.providerMetadata,
       capabilities: input.capabilities,
+      machineHealth: input.machineHealth ?? {},
       machineServerVersion: null,
       lastHeartbeatAt: null,
       createdAt: now,
@@ -204,6 +206,7 @@ export class InMemoryCloudStore implements CloudStore {
     readonly status?: ComputerStatus;
     readonly providerMetadata?: unknown;
     readonly capabilities?: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion?: string | null;
     readonly lastHeartbeatAt?: Date | null;
   }): Promise<ComputerRecord | null> {
@@ -219,6 +222,7 @@ export class InMemoryCloudStore implements CloudStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.providerMetadata !== undefined ? { providerMetadata: input.providerMetadata } : {}),
       ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
+      ...(input.machineHealth !== undefined ? { machineHealth: input.machineHealth } : {}),
       ...(input.machineServerVersion !== undefined ? { machineServerVersion: input.machineServerVersion } : {}),
       ...(input.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: input.lastHeartbeatAt } : {}),
       updatedAt: new Date(),
@@ -236,6 +240,7 @@ export class InMemoryCloudStore implements CloudStore {
     readonly status?: ComputerStatus;
     readonly providerMetadata?: unknown;
     readonly capabilities?: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion?: string | null;
     readonly lastHeartbeatAt?: Date | null;
   }): Promise<ComputerRecord | null> {
@@ -250,6 +255,7 @@ export class InMemoryCloudStore implements CloudStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.providerMetadata !== undefined ? { providerMetadata: input.providerMetadata } : {}),
       ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
+      ...(input.machineHealth !== undefined ? { machineHealth: input.machineHealth } : {}),
       ...(input.machineServerVersion !== undefined ? { machineServerVersion: input.machineServerVersion } : {}),
       ...(input.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: input.lastHeartbeatAt } : {}),
       updatedAt: new Date(),

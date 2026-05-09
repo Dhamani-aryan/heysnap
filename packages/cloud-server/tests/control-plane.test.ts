@@ -20,8 +20,7 @@ const config: CloudServerConfig = {
   awsEc2RootVolumeGb: 80,
   awsMachineInstanceProfileName: "ank1015-machine-profile",
   awsMachineAmiSsmParameter: "/ank1015/machine-images/test/ami-id",
-  machineServerImage: "example.com/ank1015-machine-server:test",
-  machineServerVersion: "test-version",
+  machineServerChannel: "stable",
   allowedOrigins: ["https://app.example.com", "http://localhost:3000"],
   adminToken: "test-admin-token",
 };
@@ -832,6 +831,7 @@ describe("cloud server machine registration", () => {
         computerId: computer.id,
         bootstrapToken,
         machineServerVersion: "0.1.0",
+        bootstrapVersion: "0.1.0",
         capabilities: ["filesystem", "agent"],
       }),
       headers: { "content-type": "application/json" },
@@ -840,11 +840,19 @@ describe("cloud server machine registration", () => {
     expect(registration.status).toBe(201);
     const registered = await registration.json() as {
       readonly machine: { readonly token: string };
-      readonly computer: { readonly status: string; readonly machineServerVersion: string };
+      readonly computer: {
+        readonly status: string;
+        readonly machineServerVersion: string;
+        readonly machineHealth: unknown;
+      };
     };
     expect(registered.computer).toMatchObject({
       status: "online",
       machineServerVersion: "0.1.0",
+      machineHealth: {
+        machineServerVersion: "0.1.0",
+        bootstrapVersion: "0.1.0",
+      },
     });
 
     const reusedBootstrap = await app.request("/machines/register", {
@@ -860,6 +868,11 @@ describe("cloud server machine registration", () => {
         status: "idle",
         capabilities: ["filesystem", "agent", "terminal"],
         machineServerVersion: "0.1.1",
+        bootstrapVersion: "0.1.0",
+        safeToRestart: true,
+        activeSessions: 0,
+        updateState: "checking",
+        lastUpdateError: null,
       }),
       headers: {
         authorization: `Bearer ${registered.machine.token}`,
@@ -873,6 +886,14 @@ describe("cloud server machine registration", () => {
         status: "idle",
         capabilities: ["filesystem", "agent", "terminal"],
         machineServerVersion: "0.1.1",
+        machineHealth: {
+          machineServerVersion: "0.1.1",
+          bootstrapVersion: "0.1.0",
+          safeToRestart: true,
+          activeSessions: 0,
+          updateState: "checking",
+          lastUpdateError: null,
+        },
         lastHeartbeatAt: expect.any(String),
       },
     });

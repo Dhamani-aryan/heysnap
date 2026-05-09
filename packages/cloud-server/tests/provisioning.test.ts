@@ -15,8 +15,7 @@ describe("AWS EC2 provisioning", () => {
       cloudServerPublicUrl: "https://cloud.example.com",
       computer,
       bootstrapToken: "bootstrap-token",
-      machineServerVersion: "test-version",
-      codexDefaultModel: "gpt-5.5",
+      machineServerChannel: "stable",
     });
     const request = buildRunInstancesRequest({
       computer,
@@ -67,51 +66,34 @@ describe("AWS EC2 provisioning", () => {
       cloudServerPublicUrl: "https://cloud.example.com",
       computer,
       bootstrapToken: "bootstrap-token",
-      machineServerVersion: "test-version",
-      codexDefaultModel: "gpt-5.5",
+      machineServerChannel: "stable",
     });
 
     expect(userData).toContain("CLOUD_SERVER_PUBLIC_URL=https://cloud.example.com");
     expect(userData).toContain(`ANK1015_COMPUTER_ID=${computer.id}`);
     expect(userData).toContain("cat >/opt/ank1015/bootstrap-token");
     expect(userData).toContain("bootstrap-token");
-    expect(userData).toContain("MACHINE_SERVER_VERSION=test-version");
     expect(userData).toContain("MACHINE_SERVER_CHANNEL=stable");
-    expect(userData).toContain("http://127.0.0.1:$PORT/status");
-    expect(userData).toContain("install_update_if_idle");
-    expect(userData).toContain("install-machine-server-release.sh update");
-    expect(userData).toContain("downloadUrl");
-    expect(userData).toContain("metadata.sha256");
-    expect(userData).toContain("ExecStart=/usr/bin/node /opt/ank1015/machine-server/current/dist/index.js");
-    expect(userData).toContain("User=agent");
-    expect(userData).toContain("set -a\nsource /opt/ank1015/machine.env\nset +a");
-    expect(userData).toContain("cat >/home/agent/.codex/config.toml");
-    expect(userData).toContain('model = "gpt-5.5"');
-    expect(userData).toContain('approval_policy = "never"');
-    expect(userData).toContain('sandbox_mode = "danger-full-access"');
-    expect(userData).toContain("include_permissions_instructions = false");
-    expect(userData).toContain("include_apps_instructions = false");
-    expect(userData).toContain("[features]");
-    expect(userData).toContain("# Disable plugin system and plugin cache/sync behavior.");
-    expect(userData).toContain("plugins = false");
-    expect(userData).toContain("remote_plugin = false");
-    expect(userData).toContain("plugin_hooks = false");
-    expect(userData).toContain("apps = false");
-    expect(userData).toContain("tool_suggest = false");
-    expect(userData).toContain("in_app_browser = false");
-    expect(userData).toContain("browser_use = false");
-    expect(userData).toContain("browser_use_external = false");
-    expect(userData).toContain("computer_use = false");
-    expect(userData).toContain("[skills]");
-    expect(userData).toContain("include_instructions = true");
-    expect(userData).toContain("[skills.bundled]");
-    expect(userData).toContain("enabled = false");
-    expect(userData).toContain('base_url = "https://cloud.example.com/llm/openai/v1"');
-    expect(userData).toContain('"api-key" = "ANK1015_CODEX_GATEWAY_TOKEN"');
+    expect(userData).toContain("exec /usr/local/bin/ank1015-machine-bootstrap");
+    expect(userData).toContain("ANK1015_MACHINE_TOKEN_FILE=/opt/ank1015/machine-token");
+    expect(userData).toContain("ANK1015_ACTIVE_SKILLS_DIR=/home/agent/.codex/skills");
+    expect(userData).not.toContain("MACHINE_SERVER_VERSION=");
+    expect(userData).not.toContain("http://127.0.0.1:$PORT/status");
+    expect(userData).not.toContain("install_update_if_idle");
+    expect(userData).not.toContain("install-machine-server-release.sh update");
+    expect(userData).not.toContain("downloadUrl");
+    expect(userData).not.toContain("metadata.sha256");
+    expect(userData).not.toContain("ExecStart=/usr/bin/node /opt/ank1015/machine-server/current/dist/index.js");
+    expect(userData).not.toContain("User=agent");
+    expect(userData).not.toContain("set -a\nsource /opt/ank1015/machine.env\nset +a");
+    expect(userData).not.toContain("cat >/home/agent/.codex/config.toml");
+    expect(userData).not.toContain('model_provider = "azure"');
+    expect(userData).not.toContain('base_url = "https://cloud.example.com/llm/openai/v1"');
+    expect(userData).not.toContain('"api-key" = "ANK1015_CODEX_GATEWAY_TOKEN"');
     expect(userData).not.toContain("AZURE_OPENAI_API_KEY");
     expect(userData).not.toContain("docker run --rm");
-    expect(userData).toContain("ank1015-machine-heartbeat.service");
-    expect(userData).toContain("/machines/register");
+    expect(userData).not.toContain("ank1015-machine-heartbeat.service");
+    expect(userData).not.toContain("/machines/register");
     expect(userData).not.toContain("bootstrap-placeholder");
   });
 });
@@ -128,7 +110,7 @@ const createConfig = (): CloudServerConfig => ({
   awsEc2RootVolumeGb: 80,
   awsMachineAmiSsmParameter: "/ank1015/machine-images/test/ami-id",
   awsMachineInstanceProfileName: "ank1015-machine-profile",
-  machineServerVersion: "test-version",
+  machineServerChannel: "stable",
   allowedOrigins: ["https://app.example.com"],
   adminToken: "test-admin-token",
 });
@@ -141,6 +123,7 @@ const createComputer = (): ComputerRecord => ({
   status: "creating",
   providerMetadata: {},
   capabilities: [],
+  machineHealth: {},
   machineServerVersion: null,
   lastHeartbeatAt: null,
   createdAt: new Date("2026-01-01T00:00:00.000Z"),
