@@ -2,6 +2,7 @@
 set -euo pipefail
 
 machine_root="${ANK1015_MACHINE_ROOT:-/opt/ank1015}"
+agent_home="${ANK1015_AGENT_HOME:-/home/agent}"
 env_file="${ANK1015_MACHINE_ENV_FILE:-$machine_root/machine.env}"
 token_file="${ANK1015_BOOTSTRAP_TOKEN_FILE:-$machine_root/bootstrap-token}"
 
@@ -18,7 +19,7 @@ require_env ANK1015_COMPUTER_ID
 require_env ANK1015_BOOTSTRAP_TOKEN
 
 install -d -m 0750 "$machine_root"
-install -d -m 0755 /workspace /home/agent
+install -d -m 0755 /workspace "$agent_home"
 
 cat >"$env_file" <<ENV
 CLOUD_SERVER_PUBLIC_URL=$CLOUD_SERVER_PUBLIC_URL
@@ -30,7 +31,7 @@ ANK1015_MACHINE_ENV_FILE=$env_file
 PORT=${PORT:-4000}
 HOST=${HOST:-127.0.0.1}
 NODE_ENV=${NODE_ENV:-production}
-HOME=${HOME:-/home/agent}
+HOME=$agent_home
 ANK1015_FILESYSTEM_ROOT=${ANK1015_FILESYSTEM_ROOT:-/workspace}
 ANK1015_BOOTSTRAP_TOKEN_FILE=$token_file
 ANK1015_MACHINE_TOKEN_FILE=${ANK1015_MACHINE_TOKEN_FILE:-$machine_root/machine-token}
@@ -38,7 +39,7 @@ ANK1015_CAPABILITIES_ROOT=${ANK1015_CAPABILITIES_ROOT:-$machine_root/agent-capab
 ANK1015_AGENT_TOOLS_ROOT=${ANK1015_AGENT_TOOLS_ROOT:-$machine_root/agent-tools}
 ANK1015_AGENT_TOOLS_BIN_DIR=${ANK1015_AGENT_TOOLS_BIN_DIR:-$machine_root/agent-tools/bin}
 ANK1015_AGENT_SKILLS_CATALOG_DIR=${ANK1015_AGENT_SKILLS_CATALOG_DIR:-$machine_root/agent-skills/catalog}
-ANK1015_ACTIVE_SKILLS_DIR=${ANK1015_ACTIVE_SKILLS_DIR:-/home/agent/.codex/skills}
+ANK1015_ACTIVE_SKILLS_DIR=${ANK1015_ACTIVE_SKILLS_DIR:-$agent_home/.codex/skills}
 PATH=${PATH:-/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
 ENV
 
