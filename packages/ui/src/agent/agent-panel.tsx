@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import { getAgentThread, startAgentRun, type AgentRunHandle } from "./agent-client";
+import { getAgentThread, resumeAgentRun, startAgentRun, type AgentRunHandle } from "./agent-client";
 import {
   createAgentChatStore,
   type ActiveRunState,
@@ -21,7 +21,7 @@ import type {
 } from "./types";
 
 export interface AgentPanelProps {
-  readonly websocketUrl: string;
+  readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly workspaceRoot?: string;
@@ -30,7 +30,7 @@ export interface AgentPanelProps {
 }
 
 export const AgentPanel = ({
-  websocketUrl,
+  agentBaseUrl,
   selectedThreadId,
   currentPath,
   workspaceRoot,
@@ -110,7 +110,7 @@ export const AgentPanel = ({
       setLoadError(null);
       store.getState().addOptimisticUserMessage(optimisticUserMessage, optimisticRun);
 
-      activeRunHandleRef.current = startAgentRun(websocketUrl, {
+      activeRunHandleRef.current = startAgentRun(agentBaseUrl, {
         threadId: selectedThreadId ?? undefined,
         path: currentPath,
         content,
@@ -148,7 +148,7 @@ export const AgentPanel = ({
 
       return true;
     },
-    [applyRuntimeEvent, currentPath, flushBufferedEvents, onSelectThread, selectedThreadId, store, websocketUrl],
+    [agentBaseUrl, applyRuntimeEvent, currentPath, flushBufferedEvents, onSelectThread, selectedThreadId, store],
   );
 
   useEffect(() => {
@@ -171,10 +171,30 @@ export const AgentPanel = ({
     setRunError(null);
     setIsLoading(true);
 
-    void getAgentThread(websocketUrl, selectedThreadId)
-      .then((thread) => {
+    void getAgentThread(agentBaseUrl, selectedThreadId)
+      .then((result) => {
         if (isCurrent) {
-          store.getState().loadThread(thread);
+          store.getState().loadThread(result.thread);
+
+          if (result.activeRun !== undefined) {
+            activeRunHandleRef.current = resumeAgentRun(agentBaseUrl, result.activeRun, {
+              onRunStart: ({ runId, threadId }) => {
+                store.getState().markRunStarted({ runId, threadId });
+              },
+              onEvent: applyRuntimeEvent,
+              onRunEnd: () => {
+                flushBufferedEvents();
+                store.getState().finishRun();
+                activeRunHandleRef.current = null;
+              },
+              onError: (error) => {
+                flushBufferedEvents();
+                setRunError(error.message);
+                store.getState().failRun(error.message);
+                activeRunHandleRef.current = null;
+              },
+            });
+          }
         }
       })
       .catch((error) => {
@@ -191,7 +211,7 @@ export const AgentPanel = ({
     return () => {
       isCurrent = false;
     };
-  }, [flushBufferedEvents, selectedThreadId, store, websocketUrl]);
+  }, [agentBaseUrl, applyRuntimeEvent, flushBufferedEvents, selectedThreadId, store]);
 
   useEffect(() => {
     return () => {

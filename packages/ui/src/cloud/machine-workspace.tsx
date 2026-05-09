@@ -18,14 +18,14 @@ const getImageSrc = (asset: ImageAsset): string => {
 };
 
 export interface MachineWorkspaceProps {
-  readonly agentWebsocketUrl: string;
+  readonly agentBaseUrl: string;
   readonly capabilitiesWebsocketUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
 }
 
 export function MachineWorkspace({
-  agentWebsocketUrl,
+  agentBaseUrl,
   capabilitiesWebsocketUrl,
   computer,
   filesystemWebsocketUrl,
@@ -76,7 +76,7 @@ export function MachineWorkspace({
       >
         <FilesystemExplorer
           websocketUrl={filesystemWebsocketUrl}
-          agentWebsocketUrl={agentWebsocketUrl}
+          agentBaseUrl={agentBaseUrl}
           capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
           onFilesystemOpen={handleFilesystemOpen}
         />

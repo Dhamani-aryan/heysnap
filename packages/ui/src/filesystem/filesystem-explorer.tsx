@@ -134,14 +134,14 @@ const getInitialLeftPaneRatio = (): number => {
 
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
-  readonly agentWebsocketUrl?: string;
+  readonly agentBaseUrl?: string;
   readonly capabilitiesWebsocketUrl?: string;
   readonly onFilesystemOpen?: () => void;
 }
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
-  agentWebsocketUrl = "ws://localhost:4000/agent",
+  agentBaseUrl = "http://localhost:4000/agent",
   capabilitiesWebsocketUrl,
   onFilesystemOpen,
 }: FilesystemExplorerProps): React.ReactElement {
@@ -633,7 +633,7 @@ export function FilesystemExplorer({
         onForward={onForward}
         title={listing?.name ?? "Desktop"}
         isFetching={isFetching}
-        agentWebsocketUrl={agentWebsocketUrl}
+        agentBaseUrl={agentBaseUrl}
         capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
         isConnectorsOpen={workspaceView === "connectors"}
         selectedThreadId={selectedThread?.id ?? null}
@@ -653,7 +653,7 @@ export function FilesystemExplorer({
         <DesktopSplitPane
           leftPaneRatio={leftPaneRatio}
           onLeftPaneRatioChange={handleLeftPaneRatioChange}
-          agentWebsocketUrl={agentWebsocketUrl}
+          agentBaseUrl={agentBaseUrl}
           selectedThreadId={selectedThread?.id ?? null}
           currentPath={currentPath}
           onOpenFilePath={openFilePath}
@@ -758,7 +758,7 @@ const FinderToolbar = ({
   onForward,
   title,
   isFetching,
-  agentWebsocketUrl,
+  agentBaseUrl,
   capabilitiesWebsocketUrl,
   isConnectorsOpen,
   selectedThreadId,
@@ -777,7 +777,7 @@ const FinderToolbar = ({
   readonly onForward: () => void;
   readonly title: string;
   readonly isFetching: boolean;
-  readonly agentWebsocketUrl: string;
+  readonly agentBaseUrl: string;
   readonly capabilitiesWebsocketUrl?: string;
   readonly isConnectorsOpen: boolean;
   readonly selectedThreadId: string | null;
@@ -835,7 +835,7 @@ const FinderToolbar = ({
         <HugeiconsIcon icon={Add01Icon} size={18} color="currentColor" strokeWidth={1.8} />
       </button>
       <ThreadHistoryButton
-        websocketUrl={agentWebsocketUrl}
+        agentBaseUrl={agentBaseUrl}
         selectedThreadId={selectedThreadId}
         onSelectThread={onSelectThread}
       />
@@ -1662,7 +1662,7 @@ const DesktopSplitPane = ({
   children,
   leftPaneRatio,
   onLeftPaneRatioChange,
-  agentWebsocketUrl,
+  agentBaseUrl,
   selectedThreadId,
   currentPath,
   onOpenFilePath,
@@ -1671,7 +1671,7 @@ const DesktopSplitPane = ({
   readonly children: React.ReactNode;
   readonly leftPaneRatio: number;
   readonly onLeftPaneRatioChange: (ratio: number) => void;
-  readonly agentWebsocketUrl: string;
+  readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly onOpenFilePath: (path: string) => void;
@@ -1739,7 +1739,7 @@ const DesktopSplitPane = ({
 
       <aside className="split-preview" aria-label="Preview panel">
         <AgentPanel
-          websocketUrl={agentWebsocketUrl}
+          agentBaseUrl={agentBaseUrl}
           selectedThreadId={selectedThreadId}
           currentPath={currentPath}
           onOpenFilePath={onOpenFilePath}
