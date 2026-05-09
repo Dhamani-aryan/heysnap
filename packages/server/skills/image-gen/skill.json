@@ -1,7 +1,7 @@
 {
   "id": "image-gen",
   "label": "Image Gen",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Generate and edit raster images with the image-gen CLI.",
   "activeByDefault": true
 }

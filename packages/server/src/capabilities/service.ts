@@ -373,15 +373,24 @@ export class AgentCapabilitiesService {
       }
 
       onProgress({ message: `Installing bundled skill ${skill.label}` });
-      await this.writeSkillCatalog(skill);
       const active = skill.activeByDefault === true ? true : skillState?.active ?? false;
-      this.setSkillState(skill.id, {
-        installedVersion: skill.version,
-        installState: "installed",
-        active,
-        lastError: undefined,
-      });
-      await this.setSkillActiveOnDisk(skill, active);
+      try {
+        await this.writeSkillCatalog(skill);
+        this.setSkillState(skill.id, {
+          installedVersion: skill.version,
+          installState: "installed",
+          active,
+          lastError: undefined,
+        });
+        await this.setSkillActiveOnDisk(skill, active);
+      } catch (error) {
+        if (await this.runHelperIfAvailable("install-skill", skill.id, undefined, onProgress)) {
+          this.state = await this.loadState();
+          continue;
+        }
+
+        throw error;
+      }
     }
   }
 
