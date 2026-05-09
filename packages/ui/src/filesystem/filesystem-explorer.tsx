@@ -2,10 +2,12 @@
 
 import {
   Add01Icon,
+  ArrowLeft02Icon,
   Download05Icon,
   FileUploadIcon,
   FolderAddIcon,
   FolderUploadIcon,
+  Moon02Icon,
   PlugSocketIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -17,7 +19,7 @@ import type { AgentThreadSummary } from "../agent/types";
 import { CapabilitiesPanel } from "../cloud/capabilities-panel";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
-import { FilesystemClient } from "./filesystem-client";
+import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
 import { ThemeToggle } from "./theme-toggle";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
@@ -150,12 +152,16 @@ export interface FilesystemExplorerProps {
   readonly capabilitiesWebsocketUrl?: string;
   readonly selectedThreadId?: string | null;
   readonly initialPath?: string;
+  readonly machineName?: string;
+  readonly canSleepMachine?: boolean;
   readonly onFilesystemOpen?: () => void;
   readonly onPathChange?: (path: string) => void;
   readonly onInitialPathInvalid?: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onNewThread?: () => void;
   readonly onThreadResolved?: (threadId: string) => void;
+  readonly onBackToMachines?: () => void;
+  readonly onSleepMachine?: () => Promise<void>;
 }
 
 export function FilesystemExplorer({
@@ -164,12 +170,16 @@ export function FilesystemExplorer({
   capabilitiesWebsocketUrl,
   selectedThreadId = null,
   initialPath,
+  machineName = "Machine",
+  canSleepMachine = true,
   onFilesystemOpen,
   onPathChange,
   onInitialPathInvalid,
   onSelectThread,
   onNewThread,
   onThreadResolved,
+  onBackToMachines,
+  onSleepMachine,
 }: FilesystemExplorerProps): React.ReactElement {
   const clientRef = useRef<FilesystemClient | null>(null);
   const uploadFilesInputRef = useRef<HTMLInputElement | null>(null);
@@ -187,6 +197,7 @@ export function FilesystemExplorer({
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>("connecting");
   const currentPath = listing?.path ?? "";
   const activeFileTab = activeFilePath === null
     ? null
@@ -242,8 +253,10 @@ export function FilesystemExplorer({
         });
       },
       onOpen: () => {
+        setConnectionStatus("alive");
         onFilesystemOpenRef.current?.();
       },
+      onConnectionStatus: setConnectionStatus,
     });
 
     setHistory([]);
@@ -256,6 +269,7 @@ export function FilesystemExplorer({
     setSelectionAnchorPath(null);
     setOpenFileTabs([]);
     setActiveFilePath(null);
+    setConnectionStatus("connecting");
     clientRef.current = client;
     client.connect();
 
@@ -775,6 +789,13 @@ export function FilesystemExplorer({
               websocketUrl={websocketUrl}
             />
           </div>
+          <MachineStatusControl
+            canSleepMachine={canSleepMachine}
+            machineName={machineName}
+            status={connectionStatus}
+            onBack={onBackToMachines}
+            onSleep={onSleepMachine}
+          />
         </DesktopSplitPane>
       )}
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
@@ -822,6 +843,151 @@ const UploadProgressDialog = ({
       </div>
     </div>
   );
+};
+
+const MachineStatusControl = ({
+  canSleepMachine,
+  machineName,
+  status,
+  onBack,
+  onSleep,
+}: {
+  readonly canSleepMachine: boolean;
+  readonly machineName: string;
+  readonly status: FilesystemConnectionStatus;
+  readonly onBack?: () => void;
+  readonly onSleep?: () => Promise<void>;
+}): React.ReactElement => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isSleeping, setIsSleeping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const statusLabel = getFilesystemConnectionLabel(status);
+  const isSleepDisabled = !canSleepMachine || onSleep === undefined || isSleeping;
+  const isBackDisabled = onBack === undefined || isSleeping;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const closeMenu = (event: MouseEvent): void => {
+      const target = event.target;
+
+      if (target instanceof Node && containerRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
+
+  const sleepMachine = (): void => {
+    if (isSleepDisabled || onSleep === undefined) {
+      return;
+    }
+
+    setIsSleeping(true);
+    setError(null);
+
+    void onSleep()
+      .catch((reason) => {
+        setError(reason instanceof Error ? reason.message : "Failed to sleep machine.");
+      })
+      .finally(() => {
+        setIsSleeping(false);
+      });
+  };
+
+  return (
+    <div ref={containerRef} className="machine-status-control">
+      {isOpen ? (
+        <div className="machine-status-popover" role="dialog" aria-label="Machine actions">
+          <div className="machine-status-popover-header">
+            <span title={machineName}>{machineName}</span>
+          </div>
+          <button
+            type="button"
+            className="machine-status-action"
+            disabled={isSleepDisabled}
+            title={canSleepMachine ? "Sleep machine" : "Local machines cannot be slept from here"}
+            onClick={sleepMachine}
+          >
+            {isSleeping ? (
+              <span className="machine-status-action-spinner" aria-hidden="true" />
+            ) : (
+              <HugeiconsIcon icon={Moon02Icon} size={17} color="currentColor" strokeWidth={1.8} />
+            )}
+            <span>Sleep</span>
+          </button>
+          <button
+            type="button"
+            className="machine-status-action"
+            disabled={isBackDisabled}
+            onClick={() => {
+              onBack?.();
+              setIsOpen(false);
+            }}
+          >
+            <HugeiconsIcon icon={ArrowLeft02Icon} size={17} color="currentColor" strokeWidth={1.8} />
+            <span>Back</span>
+          </button>
+          {error === null ? null : <div className="machine-status-error">{error}</div>}
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        className={isOpen ? "machine-status-button active" : "machine-status-button"}
+        aria-label={`${machineName}, ${statusLabel}`}
+        title={`${machineName} · ${statusLabel}`}
+        aria-expanded={isOpen}
+        onClick={() => {
+          setError(null);
+          setIsOpen((current) => !current);
+        }}
+      >
+        <ConnectionStatusIndicator status={status} />
+        <span>{machineName}</span>
+      </button>
+    </div>
+  );
+};
+
+const ConnectionStatusIndicator = ({
+  status,
+}: {
+  readonly status: FilesystemConnectionStatus;
+}): React.ReactElement => {
+  if (status === "connecting") {
+    return <span className="machine-status-spinner" aria-hidden="true" />;
+  }
+
+  return <span className="machine-status-dot" data-status={status} aria-hidden="true" />;
+};
+
+const getFilesystemConnectionLabel = (status: FilesystemConnectionStatus): string => {
+  switch (status) {
+    case "alive":
+      return "Connected";
+    case "connecting":
+      return "Connecting";
+    case "closed":
+      return "Disconnected";
+  }
 };
 
 const FinderToolbar = ({

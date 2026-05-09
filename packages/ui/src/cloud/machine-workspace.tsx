@@ -27,6 +27,8 @@ export interface MachineWorkspaceProps {
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onNewThread?: () => void;
   readonly onThreadResolved?: (threadId: string) => void;
+  readonly onBackToMachines?: () => void;
+  readonly onSleepMachine?: () => Promise<void>;
   readonly suppressConnectionLoader?: boolean;
 }
 
@@ -39,6 +41,8 @@ export function MachineWorkspace({
   onSelectThread,
   onNewThread,
   onThreadResolved,
+  onBackToMachines,
+  onSleepMachine,
   suppressConnectionLoader = false,
 }: MachineWorkspaceProps): React.ReactElement {
   const [isFilesystemOpen, setIsFilesystemOpen] = useState(suppressConnectionLoader);
@@ -115,12 +119,16 @@ export function MachineWorkspace({
           capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
           selectedThreadId={selectedThreadId}
           initialPath={initialFilesystemPathRef.current}
+          machineName={computer.name}
+          canSleepMachine={computer.kind !== "local"}
           onFilesystemOpen={handleFilesystemOpen}
           onPathChange={handlePathChange}
           onInitialPathInvalid={handleInitialPathInvalid}
           onSelectThread={onSelectThread}
           onNewThread={onNewThread}
           onThreadResolved={onThreadResolved}
+          onBackToMachines={onBackToMachines}
+          onSleepMachine={onSleepMachine}
         />
       </motion.div>
       <AnimatePresence>

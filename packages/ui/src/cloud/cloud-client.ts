@@ -136,6 +136,16 @@ export class CloudClient {
     );
   }
 
+  stopComputer(token: string, computerId: string): Promise<ComputerResponse> {
+    return this.request<ComputerResponse>(
+      `/computers/${encodeURIComponent(computerId)}/stop`,
+      {
+        method: "POST",
+        headers: this.authHeaders(token),
+      },
+    );
+  }
+
   createComputerAccessSession(token: string, computerId: string): Promise<ComputerAccessSessionResponse> {
     return this.request<ComputerAccessSessionResponse>(
       `/computers/${encodeURIComponent(computerId)}/access-session`,

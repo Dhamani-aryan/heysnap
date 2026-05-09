@@ -767,6 +767,42 @@ export function CloudApp({
     }
   };
 
+  const sleepSelectedMachine = useCallback(async (): Promise<void> => {
+    if (token === null || selectedComputerId === null) {
+      clearSession();
+      return;
+    }
+
+    const computerId = selectedComputerId;
+
+    try {
+      const response = await client.stopComputer(token, computerId);
+      upsertComputer(response.computer);
+      setSelectedComputerId(null);
+      setSelectedThreadId(null);
+      setAccessSession(null);
+      setWorkspaceError(null);
+      setWorkspaceMachineStartup(null);
+      updateWorkspaceRoute({ computerId: null, threadId: null });
+      void refreshMachines();
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        clearSession();
+        return;
+      }
+
+      throw error;
+    }
+  }, [
+    clearSession,
+    client,
+    refreshMachines,
+    selectedComputerId,
+    token,
+    updateWorkspaceRoute,
+    upsertComputer,
+  ]);
+
   const openMachine = (computer: CloudComputer): void => {
     setIsRemoteMachineCreateVisible(false);
     setSelectedComputerId(computer.id);
@@ -904,6 +940,8 @@ export function CloudApp({
           onSelectThread={selectThread}
           onNewThread={newThread}
           onThreadResolved={resolveThread}
+          onBackToMachines={closeMachine}
+          onSleepMachine={sleepSelectedMachine}
           suppressConnectionLoader={selectedThreadId !== null}
         />
       );
@@ -951,6 +989,8 @@ export function CloudApp({
           onSelectThread={selectThread}
           onNewThread={newThread}
           onThreadResolved={resolveThread}
+          onBackToMachines={closeMachine}
+          onSleepMachine={sleepSelectedMachine}
           suppressConnectionLoader={selectedThreadId !== null}
         />
       );
