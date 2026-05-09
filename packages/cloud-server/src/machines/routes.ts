@@ -24,6 +24,7 @@ export const createMachineRoutes = (
     const computerId = stringField(body, "computerId", { required: true }) ?? "";
     const bootstrapToken = stringField(body, "bootstrapToken", { required: true }) ?? "";
     const machineServerVersion = stringField(body, "machineServerVersion", { maxLength: 120 }) ?? null;
+    const bootstrapVersion = stringField(body, "bootstrapVersion", { maxLength: 120 }) ?? null;
     const capabilities = readCapabilities(body["capabilities"]);
     const bootstrapTokenHash = hashToken(bootstrapToken, config.sessionSecret);
     const identity = await store.getMachineIdentityByBootstrapTokenHash(bootstrapTokenHash);
@@ -48,6 +49,11 @@ export const createMachineRoutes = (
       computerId,
       status: "online",
       capabilities,
+      machineHealth: buildMachineHealth(body, {
+        machineServerVersion,
+        bootstrapVersion,
+        reportedAt: now,
+      }),
       machineServerVersion,
       lastHeartbeatAt: now,
     });
@@ -72,12 +78,18 @@ export const createMachineRoutes = (
     const status = readMachineStatus(body["status"]);
     const capabilities = readCapabilities(body["capabilities"]);
     const machineServerVersion = stringField(body, "machineServerVersion", { maxLength: 120 }) ?? undefined;
+    const bootstrapVersion = stringField(body, "bootstrapVersion", { maxLength: 120 }) ?? null;
     const now = new Date();
     await store.touchMachineIdentity({ identityId: machine.id, lastUsedAt: now });
     const computer = await store.updateComputerById({
       computerId: machine.computerId,
       status,
       capabilities,
+      machineHealth: buildMachineHealth(body, {
+        machineServerVersion: machineServerVersion ?? null,
+        bootstrapVersion,
+        reportedAt: now,
+      }),
       machineServerVersion,
       lastHeartbeatAt: now,
     });
@@ -134,6 +146,56 @@ const readMachineStatus = (value: unknown): Extract<ComputerStatus, "online" | "
   }
 
   return "online";
+};
+
+const VALID_UPDATE_STATES = new Set(["idle", "checking", "downloading", "installed", "deferred", "failed"]);
+
+const buildMachineHealth = (
+  body: Record<string, unknown>,
+  fallback: {
+    readonly machineServerVersion: string | null;
+    readonly bootstrapVersion: string | null;
+    readonly reportedAt: Date;
+  },
+): Record<string, unknown> => {
+  const machineServerVersion = stringField(body, "machineServerVersion", { maxLength: 120 }) ??
+    fallback.machineServerVersion;
+  const bootstrapVersion = stringField(body, "bootstrapVersion", { maxLength: 120 }) ??
+    fallback.bootstrapVersion;
+  const updateState = typeof body["updateState"] === "string" && VALID_UPDATE_STATES.has(body["updateState"])
+    ? body["updateState"]
+    : undefined;
+  const lastUpdateError = typeof body["lastUpdateError"] === "string"
+    ? body["lastUpdateError"]
+    : body["lastUpdateError"] === null ? null : undefined;
+  const safeToRestart = typeof body["safeToRestart"] === "boolean" ? body["safeToRestart"] : undefined;
+  const activeSessions = readActiveSessions(body["activeSessions"]);
+
+  return {
+    reportedAt: fallback.reportedAt.toISOString(),
+    ...(machineServerVersion !== null ? { machineServerVersion } : {}),
+    ...(bootstrapVersion !== null ? { bootstrapVersion } : {}),
+    ...(safeToRestart !== undefined ? { safeToRestart } : {}),
+    ...(activeSessions !== undefined ? { activeSessions } : {}),
+    ...(updateState !== undefined ? { updateState } : {}),
+    ...(lastUpdateError !== undefined ? { lastUpdateError } : {}),
+  };
+};
+
+const readActiveSessions = (value: unknown): Record<string, unknown> | number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+
+  return readObject(value);
+};
+
+const readObject = (value: unknown): Record<string, unknown> | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
 };
 
 const buildMachineServerUpdate = async (
