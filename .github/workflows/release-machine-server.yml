@@ -61,6 +61,7 @@ jobs:
           mkdir -p "$ARTIFACT_DIR"
           cp packages/server/package.json "$ARTIFACT_DIR/package.json"
           cp -R packages/server/dist "$ARTIFACT_DIR/dist"
+          cp -R packages/server/skills "$ARTIFACT_DIR/skills"
 
           npm install --omit=dev --ignore-scripts --prefix "$ARTIFACT_DIR"
 

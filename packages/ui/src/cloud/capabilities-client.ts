@@ -119,6 +119,10 @@ export class CapabilitiesClient {
     this.send({ type: "refreshToolStatus", requestId: this.nextRequestId(), toolId });
   }
 
+  installSkill(skillId: string): void {
+    this.send({ type: "installSkill", requestId: this.nextRequestId(), skillId });
+  }
+
   setSkillActive(skillId: string, active: boolean): void {
     this.send({ type: "setSkillActive", requestId: this.nextRequestId(), skillId, active });
   }

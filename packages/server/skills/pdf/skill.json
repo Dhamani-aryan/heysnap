@@ -1,0 +1,7 @@
+{
+  "id": "pdf",
+  "label": "PDF",
+  "version": "1.0.0",
+  "description": "Read, create, and review PDF files with rendering and layout checks.",
+  "activeByDefault": false
+}

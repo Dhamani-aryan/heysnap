@@ -14,6 +14,7 @@ export interface CloudServerConfig {
   readonly machineServerVersion: string;
   readonly codexDefaultModel?: string;
   readonly aiGatewayAzureBaseUrl?: string;
+  readonly aiGatewayAzureImagesBaseUrl?: string;
   readonly aiGatewayAzureApiKey?: string;
   readonly aiGatewayCaptureBodies?: boolean;
   readonly aiGatewayCaptureBodyMaxBytes?: number;
@@ -42,6 +43,7 @@ export const getCloudServerConfig = (
   machineServerVersion: readOptionalEnv(env, "MACHINE_SERVER_VERSION") ?? "latest",
   codexDefaultModel: readOptionalEnv(env, "CODEX_DEFAULT_MODEL") ?? "gpt-5.5",
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
+  aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
   aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
@@ -67,6 +69,7 @@ export const getDevelopmentCloudServerConfig = (
   machineServerVersion: env.MACHINE_SERVER_VERSION?.trim() || "development",
   codexDefaultModel: env.CODEX_DEFAULT_MODEL?.trim() || "gpt-5.5",
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
+  aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
   aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),

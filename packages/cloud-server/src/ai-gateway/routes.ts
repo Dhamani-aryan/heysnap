@@ -7,6 +7,7 @@ import { badGateway, notFound, serviceUnavailable } from "../shared/errors.js";
 
 const GATEWAY_PREFIX = "/llm/openai/v1";
 const PROVIDER = "azure";
+const IMAGE_MODEL = "gpt-image-2";
 const DEFAULT_CAPTURE_BODY_MAX_BYTES = 262_144;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -34,11 +35,18 @@ export const createAiGatewayRoutes = (
   const app = new Hono();
 
   app.all("/openai/v1/*", async (context) => {
-    const azureBaseUrl = config.aiGatewayAzureBaseUrl;
+    const requestUrl = new URL(context.req.url);
+    const routeKind = readGatewayRouteKind(requestUrl);
+    const azureBaseUrl = routeKind === "images"
+      ? config.aiGatewayAzureImagesBaseUrl
+      : config.aiGatewayAzureBaseUrl;
     const azureApiKey = config.aiGatewayAzureApiKey;
 
     if (azureBaseUrl === undefined || azureApiKey === undefined) {
-      throw serviceUnavailable("AI_GATEWAY_NOT_CONFIGURED", "AI gateway is not configured");
+      throw serviceUnavailable(
+        "AI_GATEWAY_NOT_CONFIGURED",
+        routeKind === "images" ? "AI image gateway is not configured" : "AI gateway is not configured",
+      );
     }
 
     const startedAt = new Date();
@@ -51,31 +59,37 @@ export const createAiGatewayRoutes = (
 
     await store.touchMachineIdentity({ identityId: machine.id, lastUsedAt: startedAt });
 
-    const requestUrl = new URL(context.req.url);
     const upstreamPath = buildUpstreamPath(requestUrl);
     const upstreamUrl = buildUpstreamUrl(azureBaseUrl, requestUrl);
     const captureBodies = config.aiGatewayCaptureBodies === true;
     const captureMaxBytes = config.aiGatewayCaptureBodyMaxBytes ?? DEFAULT_CAPTURE_BODY_MAX_BYTES;
-    const requestBody = await readProxyRequestBody(context.req.raw, captureBodies, captureMaxBytes);
+    const requestBody = routeKind === "images"
+      ? await readImageProxyRequestBody(context.req.raw, captureBodies, captureMaxBytes)
+      : await readProxyRequestBody(context.req.raw, captureBodies, captureMaxBytes);
+    const usageModel = routeKind === "images" ? IMAGE_MODEL : extractModelFromJsonText(requestBody.text);
+    const gatewayMetadata = {
+      gatewayPath: requestUrl.pathname,
+      gatewayRouteKind: routeKind,
+    };
     const usage = await store.createAiUsageRequest({
       userId: computer.ownerUserId,
       computerId: computer.id,
       machineIdentityId: machine.id,
       provider: PROVIDER,
-      model: extractModelFromJsonText(requestBody.text),
+      model: usageModel,
       method: context.req.method,
       upstreamPath,
       status: "started",
-      metadata: {
-        gatewayPath: requestUrl.pathname,
-      },
+      metadata: gatewayMetadata,
       startedAt,
     });
 
     try {
       const upstreamResponse = await fetch(upstreamUrl, {
         method: context.req.method,
-        headers: buildUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body),
+        headers: routeKind === "images"
+          ? buildImageUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body)
+          : buildResponsesUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body),
         body: requestBody.body,
         ...(["GET", "HEAD"].includes(context.req.method) ? {} : { duplex: "half" as const }),
       });
@@ -90,6 +104,8 @@ export const createAiGatewayRoutes = (
         requestCapture: requestBody.capture,
         requestHeaders: redactHeaders(context.req.raw.headers),
         responseHeaders: redactHeaders(upstreamResponse.headers),
+        model: usageModel,
+        metadata: gatewayMetadata,
       });
       const observedBody = upstreamResponse.body === null
         ? null
@@ -113,6 +129,13 @@ export const createAiGatewayRoutes = (
   });
 
   return app;
+};
+
+type GatewayRouteKind = "responses" | "images";
+
+const readGatewayRouteKind = (requestUrl: URL): GatewayRouteKind => {
+  const suffix = buildUpstreamPath(new URL(`${requestUrl.origin}${requestUrl.pathname}`));
+  return suffix.startsWith("/images/") ? "images" : "responses";
 };
 
 const buildUpstreamPath = (requestUrl: URL): string => {
@@ -168,7 +191,80 @@ const readProxyRequestBody = async (
   };
 };
 
-const buildUpstreamRequestHeaders = (
+const readImageProxyRequestBody = async (
+  request: Request,
+  captureBodies: boolean,
+  maxBytes: number,
+): Promise<{
+  readonly body: RequestInit["body"] | null | undefined;
+  readonly text: string | null;
+  readonly capture: BodyCapture | null;
+}> => {
+  if (["GET", "HEAD"].includes(request.method)) {
+    return { body: undefined, text: null, capture: null };
+  }
+
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const sourceForm = await request.formData();
+    const normalizedForm = new FormData();
+
+    for (const [key, value] of sourceForm.entries()) {
+      if (key === "model") {
+        continue;
+      }
+
+      normalizedForm.append(key === "image[]" ? "image" : key, value);
+    }
+
+    return {
+      body: normalizedForm,
+      text: null,
+      capture: captureBodies
+        ? { text: "[multipart form-data omitted]", truncated: false }
+        : null,
+    };
+  }
+
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  const capture = captureBodies ? captureBytes(bytes, maxBytes) : null;
+  const text = new TextDecoder().decode(bytes);
+
+  if (contentType.includes("application/json")) {
+    const normalizedText = stripModelFromJsonObject(text);
+
+    return {
+      body: normalizedText,
+      text: normalizedText,
+      capture,
+    };
+  }
+
+  return {
+    body: bytes,
+    text: capture?.text ?? null,
+    capture,
+  };
+};
+
+const stripModelFromJsonObject = (text: string): string => {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return text;
+    }
+
+    const normalized = { ...(parsed as Record<string, unknown>) };
+    delete normalized["model"];
+    return JSON.stringify(normalized);
+  } catch {
+    return text;
+  }
+};
+
+const buildResponsesUpstreamRequestHeaders = (
   source: Headers,
   azureApiKey: string,
   body: RequestInit["body"] | null | undefined,
@@ -188,6 +284,36 @@ const buildUpstreamRequestHeaders = (
   }
 
   headers.set("api-key", azureApiKey);
+
+  if (body === undefined || body === null) {
+    headers.delete("content-length");
+  }
+
+  return headers;
+};
+
+const buildImageUpstreamRequestHeaders = (
+  source: Headers,
+  azureApiKey: string,
+  body: RequestInit["body"] | null | undefined,
+): Headers => {
+  const headers = new Headers(source);
+
+  for (const name of Array.from(headers.keys())) {
+    const lowerName = name.toLowerCase();
+
+    if (
+      HOP_BY_HOP_HEADERS.has(lowerName) ||
+      SECRET_HEADER_NAMES.has(lowerName) ||
+      lowerName === "host" ||
+      lowerName === "content-length" ||
+      (lowerName === "content-type" && body instanceof FormData)
+    ) {
+      headers.delete(name);
+    }
+  }
+
+  headers.set("authorization", `Bearer ${azureApiKey}`);
 
   if (body === undefined || body === null) {
     headers.delete("content-length");
@@ -247,6 +373,8 @@ interface AiGatewayResponseObserverOptions {
   readonly requestCapture: BodyCapture | null;
   readonly requestHeaders: Record<string, string>;
   readonly responseHeaders: Record<string, string>;
+  readonly model: string | null;
+  readonly metadata: Record<string, unknown>;
 }
 
 class AiGatewayResponseObserver {
@@ -300,7 +428,7 @@ class AiGatewayResponseObserver {
       id: this.options.usageId,
       status: this.options.httpStatus >= 400 ? "failed" : "succeeded",
       httpStatus: this.options.httpStatus,
-      model: observed.model,
+      model: observed.model ?? this.options.model,
       inputTokens: observed.inputTokens,
       outputTokens: observed.outputTokens,
       cachedInputTokens: observed.cachedInputTokens,
@@ -309,6 +437,7 @@ class AiGatewayResponseObserver {
       completedAt,
       durationMs: completedAt.getTime() - this.options.startedAt.getTime(),
       metadata: {
+        ...this.options.metadata,
         usageParseError: observed.parseError,
       },
     });

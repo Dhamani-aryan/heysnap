@@ -1,0 +1,7 @@
+{
+  "id": "xlsx",
+  "label": "XLSX",
+  "version": "1.0.0",
+  "description": "Create, edit, inspect, and recalculate spreadsheet files.",
+  "activeByDefault": false
+}

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CapabilitiesClient,
+  type AgentSkillSnapshot,
   type AgentToolSnapshot,
   type CapabilitiesSnapshot,
   type CapabilityServerMessage,
@@ -38,6 +39,7 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
   const [capabilities, setCapabilities] = useState<CapabilitiesSnapshot | null>(null);
   const [search, setSearch] = useState("");
   const [connectionDialog, setConnectionDialog] = useState<ConnectionDialogState | null>(null);
+  const [pendingSkillIds, setPendingSkillIds] = useState<ReadonlySet<string>>(() => new Set());
   const updateConnectionDialog = useCallback<ConnectionDialogUpdater>((updater) => {
     setConnectionDialog((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
@@ -60,6 +62,18 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
       tool.label.toLowerCase().includes(query) || tool.command.toLowerCase().includes(query)
     );
   }, [connectors, search]);
+  const skills = capabilities?.skills ?? [];
+  const visibleSkills = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    if (query.length === 0) {
+      return skills;
+    }
+
+    return skills.filter((skill) =>
+      skill.label.toLowerCase().includes(query) || skill.description.toLowerCase().includes(query)
+    );
+  }, [search, skills]);
 
   useEffect(() => {
     if (websocketUrl === undefined) {
@@ -71,6 +85,7 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
     const unsubscribe = client.subscribe((message) => {
       handleMessage(message, setCapabilities);
       handleConnectionMessage(message, connectionDialogRef.current, updateConnectionDialog);
+      setPendingSkillIds((current) => clearPendingSkills(current, message));
     });
     client.connect();
 
@@ -123,6 +138,14 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
 
     clientRef.current?.connectTool(tool.id);
   }, [updateConnectionDialog]);
+  const setSkillActive = useCallback((skill: AgentSkillSnapshot, active: boolean): void => {
+    setPendingSkillIds((current) => new Set(current).add(skill.id));
+    clientRef.current?.setSkillActive(skill.id, active);
+  }, []);
+  const installSkill = useCallback((skill: AgentSkillSnapshot): void => {
+    setPendingSkillIds((current) => new Set(current).add(skill.id));
+    clientRef.current?.installSkill(skill.id);
+  }, []);
 
   return (
     <main className="connectors-page">
@@ -135,7 +158,7 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
           <HugeiconsIcon icon={Search01Icon} size={16} color="currentColor" strokeWidth={1.8} />
           <input
             type="search"
-            placeholder="Search connectors"
+            placeholder="Search connectors and skills"
             value={search}
             onChange={(event) => setSearch(event.currentTarget.value)}
           />
@@ -156,6 +179,29 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
             <p className="connectors-empty">No connectors found.</p>
           ) : visibleConnectors.map((tool) => (
             <ConnectorRow key={tool.id} tool={tool} client={clientRef.current} onConnect={connectTool} />
+          ))}
+        </div>
+
+        <div className="connectors-page-heading connectors-skills-heading">
+          <h1>Skills</h1>
+          <p>Enable task-specific guidance Codex can use while working on this machine.</p>
+        </div>
+
+        <div className="connectors-section-label">Available</div>
+        <div className="connectors-grid">
+          {websocketUrl === undefined ? (
+            <p className="connectors-empty">Skills are not available for this machine.</p>
+          ) : visibleSkills.length === 0 ? (
+            <p className="connectors-empty">No skills found.</p>
+          ) : visibleSkills.map((skill) => (
+            <SkillRow
+              key={skill.id}
+              skill={skill}
+              client={clientRef.current}
+              isPending={pendingSkillIds.has(skill.id)}
+              onInstall={installSkill}
+              onSetActive={setSkillActive}
+            />
           ))}
         </div>
       </section>
@@ -231,6 +277,55 @@ function ConnectorRow({
         {isInstalled && isConnected && tool.canDisconnect ? (
           <button type="button" onClick={() => client?.disconnectTool(tool.id)}>Disconnect</button>
         ) : null}
+      </div>
+    </article>
+  );
+}
+
+function SkillRow({
+  skill,
+  client,
+  isPending,
+  onInstall,
+  onSetActive,
+}: {
+  readonly skill: AgentSkillSnapshot;
+  readonly client: CapabilitiesClient | null;
+  readonly isPending: boolean;
+  readonly onInstall: (skill: AgentSkillSnapshot) => void;
+  readonly onSetActive: (skill: AgentSkillSnapshot, active: boolean) => void;
+}): React.ReactElement {
+  const isInstalled = skill.installState === "installed";
+  const nextActive = !skill.active;
+
+  return (
+    <article className="connector-list-item skill-list-item">
+      <div className="connector-logo-wrap skill-logo-wrap">
+        <span>{skill.label.slice(0, 1)}</span>
+      </div>
+      <div className="connector-copy">
+        <div>
+          <strong>{skill.label}</strong>
+        </div>
+        <span>{renderSkillStatus(skill)}</span>
+      </div>
+      <div className="connector-actions skill-actions">
+        {!isInstalled ? (
+          <button type="button" disabled={client === null || isPending} onClick={() => onInstall(skill)}>
+            {isPending ? "Installing..." : "Install"}
+          </button>
+        ) : (
+          <button
+            className={`skill-toggle${skill.active ? " is-active" : ""}`}
+            type="button"
+            aria-pressed={skill.active}
+            disabled={client === null || isPending}
+            onClick={() => onSetActive(skill, nextActive)}
+          >
+            <span aria-hidden="true" />
+            {isPending ? "Updating..." : skill.active ? "Active" : "Inactive"}
+          </button>
+        )}
       </div>
     </article>
   );
@@ -404,6 +499,18 @@ const renderConnectorStatus = (tool: AgentToolSnapshot): string => {
   }
 };
 
+const renderSkillStatus = (skill: AgentSkillSnapshot): string => {
+  if (skill.installState === "failed") {
+    return "Install failed";
+  }
+
+  if (skill.installState !== "installed") {
+    return "Not installed";
+  }
+
+  return skill.active ? "Active" : "Inactive";
+};
+
 const handleMessage = (
   message: CapabilityServerMessage,
   setCapabilities: React.Dispatch<React.SetStateAction<CapabilitiesSnapshot | null>>,
@@ -426,10 +533,36 @@ const handleMessage = (
       });
       break;
     case "skillStatus":
+      setCapabilities((current) => current === null ? current : {
+        ...current,
+        skills: current.skills.map((skill) => skill.id === message.skill.id ? message.skill : skill),
+      });
+      break;
     case "hello":
     case "pong":
       break;
   }
+};
+
+const clearPendingSkills = (
+  current: ReadonlySet<string>,
+  message: CapabilityServerMessage,
+): ReadonlySet<string> => {
+  if (current.size === 0) {
+    return current;
+  }
+
+  if (message.type === "operationCompleted" || message.type === "operationFailed" || message.type === "error") {
+    return new Set();
+  }
+
+  if (message.type !== "skillStatus") {
+    return current;
+  }
+
+  const next = new Set(current);
+  next.delete(message.skill.id);
+  return next;
 };
 
 const handleConnectionMessage = (

@@ -1,9 +1,14 @@
-import type { CapabilitiesCatalog } from "./types.js";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { AgentSkillDefinition, CapabilitiesCatalog } from "./types.js";
 
 const CODEX_VERSION = process.env.ANK1015_CODEX_VERSION?.trim() || "0.128.0";
+const BUNDLED_SKILLS_DIR = resolveBundledSkillsDir();
 
 export const defaultCapabilitiesCatalog: CapabilitiesCatalog = {
-  version: "2026.05.08.3",
+  version: "2026.05.09.2",
   codexToolId: "codex",
   tools: [
     {
@@ -60,5 +65,60 @@ export const defaultCapabilitiesCatalog: CapabilitiesCatalog = {
       disconnect: { command: "supabase", args: ["logout", "--yes"] },
     },
   ],
-  skills: [],
+  skills: loadBundledSkills(),
 };
+
+interface BundledSkillMetadata {
+  readonly id: string;
+  readonly label: string;
+  readonly version: string;
+  readonly description: string;
+  readonly activeByDefault?: boolean;
+}
+
+function resolveBundledSkillsDir(): string | null {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const configured = process.env.ANK1015_BUNDLED_SKILLS_DIR?.trim();
+  const candidates = [
+    configured,
+    resolve(moduleDir, "..", "..", "skills"),
+    resolve(process.cwd(), "skills"),
+    resolve(process.cwd(), "packages", "server", "skills"),
+    resolve(process.cwd(), "..", "..", "packages", "server", "skills"),
+  ].filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0);
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function loadBundledSkills(): readonly AgentSkillDefinition[] {
+  if (BUNDLED_SKILLS_DIR === null) {
+    return [];
+  }
+
+  return readdirSync(BUNDLED_SKILLS_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const sourcePath = resolve(BUNDLED_SKILLS_DIR, entry.name);
+      const metadataPath = resolve(sourcePath, "skill.json");
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Partial<BundledSkillMetadata>;
+
+      if (
+        typeof metadata.id !== "string" ||
+        typeof metadata.label !== "string" ||
+        typeof metadata.version !== "string" ||
+        typeof metadata.description !== "string"
+      ) {
+        throw new Error(`Invalid bundled skill metadata: ${metadataPath}`);
+      }
+
+      return {
+        id: metadata.id,
+        label: metadata.label,
+        version: metadata.version,
+        description: metadata.description,
+        activeByDefault: metadata.activeByDefault === true,
+        sourcePath,
+      };
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
