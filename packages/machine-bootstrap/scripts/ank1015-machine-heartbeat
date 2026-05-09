@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_PATH="${ANK1015_MACHINE_COMMON_SH:-}"
+if [ -z "$COMMON_PATH" ]; then
+  if [ -f "$SCRIPT_DIR/../lib/ank1015-machine-common.sh" ]; then
+    COMMON_PATH="$SCRIPT_DIR/../lib/ank1015-machine-common.sh"
+  else
+    COMMON_PATH="/usr/local/lib/ank1015-machine-bootstrap/ank1015-machine-common.sh"
+  fi
+fi
+# shellcheck disable=SC1090
+. "$COMMON_PATH"
+
+ank1015_machine_common_version_or_continue "${1:-}"
+ank1015_machine_load_env
+
+REGISTRATION_JSON="${ANK1015_MACHINE_REGISTRATION_JSON:-$(ank1015_machine_root)/registration.json}"
+HEARTBEAT_JSON="${ANK1015_MACHINE_HEARTBEAT_JSON:-$(ank1015_machine_root)/heartbeat.json}"
+BOOTSTRAP_TOKEN_FILE="${ANK1015_BOOTSTRAP_TOKEN_FILE:-$(ank1015_machine_root)/bootstrap-token}"
+
+machine_status() {
+  curl -fsS "$(ank1015_machine_status_url)" || true
+}
+
+register_machine() {
+  local bootstrap_token version body
+  bootstrap_token="$(cat "$BOOTSTRAP_TOKEN_FILE")"
+  version="${MACHINE_SERVER_VERSION:-}"
+  body="$(jq -n \
+    --arg computerId "$ANK1015_COMPUTER_ID" \
+    --arg bootstrapToken "$bootstrap_token" \
+    --arg machineServerVersion "$version" \
+    --arg bootstrapVersion "$ANK1015_MACHINE_BOOTSTRAP_VERSION" \
+    '{
+      computerId: $computerId,
+      bootstrapToken: $bootstrapToken,
+      bootstrapVersion: $bootstrapVersion,
+      capabilities: ["filesystem", "agent", "capabilities", "shell"]
+    } + (if $machineServerVersion == "" then {} else { machineServerVersion: $machineServerVersion } end)')"
+
+  curl -fsS -X POST "${CLOUD_SERVER_PUBLIC_URL%/}/machines/register" \
+    -H 'content-type: application/json' \
+    -d "$body" \
+    -o "$REGISTRATION_JSON"
+  jq -r '.machine.token' "$REGISTRATION_JSON" >"$ANK1015_MACHINE_TOKEN_FILE"
+  chown root:ank1015 "$ANK1015_MACHINE_TOKEN_FILE" 2>/dev/null || true
+  chmod 0640 "$ANK1015_MACHINE_TOKEN_FILE"
+}
+
+send_heartbeat() {
+  local machine_token status_json machine_server_version safe_to_restart machine_status update_state last_update_error body
+  machine_token="$(cat "$ANK1015_MACHINE_TOKEN_FILE")"
+  status_json="$(machine_status)"
+  machine_server_version="${MACHINE_SERVER_VERSION:-}"
+  safe_to_restart="true"
+
+  if [ -n "$status_json" ]; then
+    machine_server_version="$(printf '%s' "$status_json" | jq -r '.version // env.MACHINE_SERVER_VERSION // ""')"
+    safe_to_restart="$(printf '%s' "$status_json" | jq -r '.safeToRestart // true')"
+  fi
+
+  machine_status="idle"
+  if [ "$safe_to_restart" != "true" ]; then
+    machine_status="online"
+  fi
+
+  update_state="$(ank1015_machine_read_update_state)"
+  last_update_error="$(ank1015_machine_read_update_error)"
+  body="$(printf '%s' "$status_json" | jq -n \
+    --arg status "$machine_status" \
+    --arg machineServerVersion "$machine_server_version" \
+    --arg bootstrapVersion "$ANK1015_MACHINE_BOOTSTRAP_VERSION" \
+    --arg updateState "$update_state" \
+    --arg lastUpdateError "$last_update_error" \
+    --argjson safeToRestart "$safe_to_restart" \
+    --argjson statusJson "${status_json:-null}" \
+    '{
+      status: $status,
+      machineServerVersion: $machineServerVersion,
+      bootstrapVersion: $bootstrapVersion,
+      safeToRestart: $safeToRestart,
+      activeSessions: ($statusJson.activeSessions // {}),
+      updateState: $updateState,
+      lastUpdateError: (if $lastUpdateError == "" then null else $lastUpdateError end),
+      capabilities: ["filesystem", "agent", "capabilities", "shell"]
+    }')"
+
+  curl -fsS -X POST "${CLOUD_SERVER_PUBLIC_URL%/}/machines/heartbeat" \
+    -H "authorization: Bearer $machine_token" \
+    -H 'content-type: application/json' \
+    -d "$body" \
+    -o "$HEARTBEAT_JSON" || rm -f "$ANK1015_MACHINE_TOKEN_FILE"
+}
+
+run_loop() {
+  while true; do
+    if [ ! -s "$ANK1015_MACHINE_TOKEN_FILE" ]; then
+      register_machine || true
+    fi
+
+    if [ -s "$ANK1015_MACHINE_TOKEN_FILE" ]; then
+      send_heartbeat
+      ank1015-machine-release update || true
+    fi
+
+    if [ "${ANK1015_HEARTBEAT_ONCE:-0}" = "1" ]; then
+      break
+    fi
+
+    sleep "${ANK1015_HEARTBEAT_INTERVAL_SECONDS:-30}"
+  done
+}
+
+run_loop
