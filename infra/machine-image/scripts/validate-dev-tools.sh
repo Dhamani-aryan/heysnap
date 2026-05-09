@@ -43,6 +43,9 @@ pandoc --version
 jq --version
 yq --version
 rg --version
+ank1015-machine-bootstrap --version
+ank1015-machine-release --version
+ank1015-machine-heartbeat --version
 
 systemctl enable --now docker
 docker version
@@ -53,3 +56,4 @@ test -d /opt/ank1015/venvs/default
 test -d /opt/ank1015/agent-tools/bin
 test -d /opt/ank1015/agent-capabilities
 test -d /opt/ank1015/agent-skills/catalog
+test -f /usr/local/lib/ank1015-machine-bootstrap/ank1015-machine-common.sh

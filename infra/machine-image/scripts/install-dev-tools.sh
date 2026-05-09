@@ -148,6 +148,15 @@ install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-skills
 install -d -m 0775 -o root -g ank1015 /opt/ank1015/agent-skills/catalog
 install -d -m 0755 -o root -g root /opt/ank1015/machine-server/releases
 
+if [ -d /tmp/ank1015-machine-bootstrap ]; then
+  install -d -m 0755 /usr/local/lib/ank1015-machine-bootstrap
+  install -m 0755 /tmp/ank1015-machine-bootstrap/scripts/ank1015-machine-bootstrap /usr/local/bin/ank1015-machine-bootstrap
+  install -m 0755 /tmp/ank1015-machine-bootstrap/scripts/ank1015-machine-release /usr/local/bin/ank1015-machine-release
+  install -m 0755 /tmp/ank1015-machine-bootstrap/scripts/ank1015-machine-heartbeat /usr/local/bin/ank1015-machine-heartbeat
+  install -m 0644 /tmp/ank1015-machine-bootstrap/lib/ank1015-machine-common.sh \
+    /usr/local/lib/ank1015-machine-bootstrap/ank1015-machine-common.sh
+fi
+
 cat >/etc/profile.d/ank1015-dev-env.sh <<'SCRIPT'
 export PATH="/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export ANK1015_FILESYSTEM_ROOT="${ANK1015_FILESYSTEM_ROOT:-/workspace}"

@@ -2,7 +2,9 @@
 
 This folder builds the host-based EC2 developer image used by cloud machines.
 The image is a normal Ubuntu 24.04 machine with the global tools Codex should
-see from bash.
+see from bash. It also installs `@ank1015-app/machine-bootstrap` commands into
+`/usr/local/bin`; the cloud server passes only identity/config through
+user-data and the bootstrap command owns VM host setup.
 
 ## Build
 
