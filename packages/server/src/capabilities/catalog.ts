@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { AgentSkillDefinition, CapabilitiesCatalog } from "./types.js";
 
 const CODEX_VERSION = process.env.ANK1015_CODEX_VERSION?.trim() || "0.128.0";
+const IMAGE_GEN_VERSION = "0.1.1";
 const BUNDLED_SKILLS_DIR = resolveBundledSkillsDir();
 
 export const defaultCapabilitiesCatalog: CapabilitiesCatalog = {
@@ -63,6 +64,19 @@ export const defaultCapabilitiesCatalog: CapabilitiesCatalog = {
       status: { command: "supabase", args: ["projects", "list"] },
       connect: { command: "supabase", args: ["login", "--no-browser"], interactive: "tty" },
       disconnect: { command: "supabase", args: ["logout", "--yes"] },
+    },
+    {
+      id: "image-gen",
+      label: "Image Gen CLI",
+      command: "image-gen",
+      desiredVersion: IMAGE_GEN_VERSION,
+      required: true,
+      installStrategy: {
+        type: "npm",
+        packageName: "heysnap-image-gen",
+        binaryName: "image-gen",
+      },
+      versionCommand: { command: "image-gen", args: ["--version"] },
     },
   ],
   skills: loadBundledSkills(),

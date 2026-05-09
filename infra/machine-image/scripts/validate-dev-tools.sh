@@ -32,6 +32,7 @@ gh --version
 vercel --version
 supabase --version
 codex --version
+image-gen --version
 
 ffmpeg -version
 libreoffice --headless --version

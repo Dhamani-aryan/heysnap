@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, cp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
@@ -457,8 +457,7 @@ export class AgentCapabilitiesService {
         await this.runCommand({ command: "npm", args: ["install", "--prefix", installDir, packageSpec] }, onProgress);
         const source = join(installDir, "node_modules", ".bin", tool.installStrategy.binaryName);
         const target = join(this.paths.toolsBinDir, tool.command);
-        await rm(target, { force: true });
-        await symlink(source, target);
+        await linkExecutable(source, target);
         return;
       }
     }
@@ -734,6 +733,35 @@ const removeWithRetry = async (path: string): Promise<void> => {
       ) {
         throw error;
       }
+      await delay(20);
+    }
+  }
+};
+
+const linkExecutable = async (source: string, target: string): Promise<void> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await rm(target, { force: true });
+
+    try {
+      await symlink(source, target);
+      return;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") {
+        throw error;
+      }
+
+      try {
+        if (await readlink(target) === source) {
+          return;
+        }
+      } catch {
+        // The competing process may already be replacing the link; retry below.
+      }
+
+      if (attempt === 2) {
+        throw error;
+      }
+
       await delay(20);
     }
   }
