@@ -128,14 +128,15 @@ What it does:
 - Uploads the tarball to S3.
 - Publishes the cloud release manifest through:
   `POST /admin/releases/machine-server`
-- For `stable` releases, updates the cloud-server host's
-  `MACHINE_SERVER_VERSION` default and recreates the cloud-server container.
 
 Runtime update behavior:
 
-- VM heartbeat loop receives update info from `POST /machines/heartbeat`.
-- The VM supervisor checks the running machine server's `/status`.
-- If `safeToRestart` is true, the supervisor downloads the release tarball,
+- VM bootstrap installs the latest machine-server manifest for its configured
+  release channel, `stable` by default.
+- VM heartbeat and release checks receive update info from the cloud-server
+  release manifest endpoints.
+- `ank1015-machine-release` checks the running machine server's `/status`.
+- If `safeToRestart` is true, the machine bootstrap downloads the release tarball,
   verifies `metadata.sha256`, switches `/opt/ank1015/machine-server/current`,
   and restarts `ank1015-machine-server.service`.
 - If sessions are active, the update is deferred to a later heartbeat.
@@ -150,8 +151,6 @@ Required GitHub variables/secrets:
 - `MACHINE_SERVER_ARTIFACT_BUCKET`
 - `MACHINE_SERVER_ARTIFACT_BASE_URL`
 - `AWS_MACHINE_SERVER_RELEASE_ROLE_ARN`
-- `AWS_CLOUD_SERVER_DEPLOY_ROLE_ARN`
-- `CLOUD_SERVER_INSTANCE_ID`
 - `CLOUD_SERVER_ADMIN_TOKEN`
 
 ## Machine Image Build
@@ -173,6 +172,7 @@ What it does:
 
 - Builds the Ubuntu 24.04 host AMI with Packer from `infra/machine-image`.
 - Installs the global developer tools, Python environment, Docker, and Codex.
+- Installs `@ank1015-app/machine-bootstrap` commands into `/usr/local/bin`.
 - Runs the AMI validation script.
 - Publishes the resulting AMI id to `AWS_MACHINE_AMI_SSM_PARAMETER`.
 
