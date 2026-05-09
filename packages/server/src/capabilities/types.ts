@@ -43,7 +43,7 @@ export interface AgentSkillDefinition {
   readonly version: string;
   readonly description: string;
   readonly activeByDefault?: boolean;
-  readonly files: Record<string, string>;
+  readonly sourcePath: string;
 }
 
 export interface CapabilitiesCatalog {
@@ -104,7 +104,7 @@ export interface AgentToolSnapshot extends AgentToolDefinition {
   readonly canRefreshStatus: boolean;
 }
 
-export interface AgentSkillSnapshot extends Omit<AgentSkillDefinition, "files"> {
+export interface AgentSkillSnapshot extends Omit<AgentSkillDefinition, "sourcePath"> {
   readonly installedVersion: string | null;
   readonly installState: SkillInstallState;
   readonly active: boolean;
