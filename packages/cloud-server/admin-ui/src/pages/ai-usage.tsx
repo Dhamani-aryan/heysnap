@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   Cpu,
+  DollarSign,
   Gauge,
   RefreshCw,
   Sparkles,
@@ -48,6 +49,7 @@ import { useAdminQuery } from "@/hooks/use-admin-query";
 import {
   AI_USAGE_WINDOWS,
   computeWindowFrom,
+  formatCurrency,
   formatDurationMs,
   formatPercent,
   formatTokens,
@@ -61,7 +63,7 @@ const STATUS_OPTIONS: ReadonlyArray<{ readonly value: "all" | AiUsageStatus; rea
   { value: "all", label: "All statuses" },
   { value: "succeeded", label: "Succeeded" },
   { value: "failed", label: "Failed" },
-  { value: "started", label: "In flight" },
+  { value: "started", label: "In progress" },
   { value: "aborted", label: "Aborted" },
 ];
 
@@ -144,8 +146,8 @@ export const AiUsagePage = () => {
       (modelBreakdown.data?.groups ?? []).map((row) => ({
         key: row.key,
         label: row.label,
-        value: row.totalTokens,
-        secondary: `${row.requestCount.toLocaleString()} requests · ${row.successCount}/${row.requestCount} ok`,
+        value: row.estimatedCostUsd,
+        secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
       })),
     [modelBreakdown.data?.groups],
   );
@@ -156,8 +158,8 @@ export const AiUsagePage = () => {
         key: row.key,
         label: row.label,
         to: `/users/${row.key}`,
-        value: row.totalTokens,
-        secondary: `${row.requestCount.toLocaleString()} requests`,
+        value: row.estimatedCostUsd,
+        secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
       })),
     [userBreakdown.data?.groups],
   );
@@ -207,21 +209,20 @@ export const AiUsagePage = () => {
                 <StatCard
                   label="Requests"
                   value={summary.data.summary.requestCount.toLocaleString()}
-                  hint={`${summary.data.summary.successCount} ok · ${summary.data.summary.failedCount} failed`}
+                  hint={`${summary.data.summary.successCount} ok · ${summary.data.summary.failedCount} failed · ${summary.data.summary.startedCount} in progress`}
                   icon={<Activity className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="Estimated cost"
+                  value={formatCurrency(summary.data.summary.estimatedCostUsd)}
+                  hint={`${formatTokens(summary.data.summary.totalTokens)} tokens`}
+                  icon={<DollarSign className="h-5 w-5" />}
                 />
                 <StatCard
                   label="Tokens"
                   value={formatTokens(summary.data.summary.totalTokens)}
                   hint={`${formatTokens(summary.data.summary.inputTokens)} in · ${formatTokens(summary.data.summary.outputTokens)} out · ${formatTokens(summary.data.summary.cachedInputTokens)} cached`}
                   icon={<Sparkles className="h-5 w-5" />}
-                />
-                <StatCard
-                  label="Failure rate"
-                  value={formatPercent(summary.data.summary.failedCount, summary.data.summary.requestCount)}
-                  hint={`${summary.data.summary.failedCount.toLocaleString()} failed · ${summary.data.summary.abortedCount.toLocaleString()} aborted`}
-                  tone={summary.data.summary.failedCount > 0 ? "destructive" : "default"}
-                  icon={<AlertTriangle className="h-5 w-5" />}
                 />
                 <StatCard
                   label="Avg duration"
@@ -233,9 +234,9 @@ export const AiUsagePage = () => {
             )}
           </section>
 
-          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {summary.loading || summary.data === undefined ? (
-              Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-20" />)
+              Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-20" />)
             ) : (
               <>
                 <StatCard
@@ -252,6 +253,13 @@ export const AiUsagePage = () => {
                   label="Models used"
                   value={summary.data.summary.distinctModels.toLocaleString()}
                   icon={<Cpu className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="Failure rate"
+                  value={formatPercent(summary.data.summary.failedCount, summary.data.summary.requestCount)}
+                  hint={`${summary.data.summary.failedCount.toLocaleString()} failed · ${summary.data.summary.abortedCount.toLocaleString()} aborted`}
+                  tone={summary.data.summary.failedCount > 0 ? "destructive" : "default"}
+                  icon={<AlertTriangle className="h-5 w-5" />}
                 />
               </>
             )}
@@ -296,7 +304,7 @@ export const AiUsagePage = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Top models</CardTitle>
-                <CardDescription>By total tokens in the selected window.</CardDescription>
+                <CardDescription>By estimated cost in the selected window.</CardDescription>
               </CardHeader>
               <CardContent>
                 {modelBreakdown.loading ? (
@@ -304,7 +312,7 @@ export const AiUsagePage = () => {
                 ) : (
                   <TopBarList
                     items={topModelItems}
-                    valueFormatter={formatTokens}
+                    valueFormatter={formatCurrency}
                     emptyLabel="No model data yet"
                   />
                 )}
@@ -314,7 +322,7 @@ export const AiUsagePage = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Top users</CardTitle>
-                <CardDescription>Token consumers in the selected window.</CardDescription>
+                <CardDescription>Highest estimated spend in the selected window.</CardDescription>
               </CardHeader>
               <CardContent>
                 {userBreakdown.loading ? (
@@ -322,7 +330,7 @@ export const AiUsagePage = () => {
                 ) : (
                   <TopBarList
                     items={topUserItems}
-                    valueFormatter={formatTokens}
+                    valueFormatter={formatCurrency}
                     emptyLabel="No user activity"
                     renderLink={(item, content) =>
                       item.to !== undefined ? (
@@ -392,6 +400,7 @@ export const AiUsagePage = () => {
                     <TableHead>Model</TableHead>
                     <TableHead>Path</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
                     <TableHead className="text-right">Tokens</TableHead>
                     <TableHead className="w-20 text-right">Duration</TableHead>
                   </TableRow>
@@ -399,13 +408,13 @@ export const AiUsagePage = () => {
                 <TableBody>
                   {list.loading ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={8}>
                         <Skeleton className="h-5" />
                       </TableCell>
                     </TableRow>
                   ) : filteredUsage.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
                         No requests
                       </TableCell>
                     </TableRow>
@@ -437,6 +446,9 @@ export const AiUsagePage = () => {
                         </TableCell>
                         <TableCell>
                           <AiUsageStatusBadge status={row.status} httpStatus={row.httpStatus} />
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatCurrency(row.estimatedCostUsd)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">
                           <div>{formatTokens(row.totalTokens)}</div>

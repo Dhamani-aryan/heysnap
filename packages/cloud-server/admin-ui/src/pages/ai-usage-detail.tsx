@@ -12,9 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminQuery } from "@/hooks/use-admin-query";
-import { formatDurationMs, formatTokens } from "@/lib/ai-usage";
+import { formatCurrency, formatDurationMs, formatTokens } from "@/lib/ai-usage";
 import { adminApi } from "@/lib/api";
-import type { AdminAiUsagePayload } from "@/lib/types";
+import type { AdminAiUsageCostBreakdown, AdminAiUsagePayload } from "@/lib/types";
 
 export const AiUsageDetailPage = () => {
   const params = useParams<{ readonly usageId: string }>();
@@ -41,6 +41,7 @@ export const AiUsageDetailPage = () => {
 
   const usage = detail.data?.usage;
   const payload = usage?.payload ?? null;
+  const upstreamUsage = readMetadataRecord(usage?.metadata, "upstreamUsage");
 
   return (
     <>
@@ -79,7 +80,7 @@ export const AiUsageDetailPage = () => {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle>Request</CardTitle>
@@ -144,7 +145,23 @@ export const AiUsageDetailPage = () => {
             <DetailRow label="Reasoning" value={usage === undefined ? null : <span className="font-mono">{formatTokens(usage.reasoningOutputTokens)}</span>} />
           </CardContent>
         </Card>
+
+        <CostCard cost={usage?.costBreakdown ?? null} loading={usage === undefined} />
       </div>
+
+      {upstreamUsage !== null && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Upstream usage</CardTitle>
+            <CardDescription>Raw usage object returned by Azure.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+              {JSON.stringify(upstreamUsage, null, 2)}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -182,6 +199,61 @@ const DetailRow = ({ label, value }: { readonly label: string; readonly value: R
     <div className="text-right text-sm">{value ?? <Skeleton className="h-4 w-24" />}</div>
   </div>
 );
+
+const CostCard = ({
+  cost,
+  loading,
+}: {
+  readonly cost: AdminAiUsageCostBreakdown | null;
+  readonly loading: boolean;
+}) => (
+  <Card>
+    <CardHeader>
+      <CardTitle>Cost</CardTitle>
+      <CardDescription>Estimated from stored token usage.</CardDescription>
+    </CardHeader>
+    <CardContent className="space-y-3 text-sm">
+      <DetailRow
+        label="Total"
+        value={loading ? null : <span className="font-mono text-base">{formatCurrency(cost?.totalUsd)}</span>}
+      />
+      {cost !== null && (
+        <>
+          <DetailRow label="Rate mode" value={<span className="font-mono text-xs">{cost.rateMode}</span>} />
+          <div className="space-y-2 border-t pt-3">
+            {cost.lineItems.map((item) => (
+              <div key={item.key} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
+                <div>
+                  <div>{item.label}</div>
+                  <div className="text-muted-foreground">
+                    {formatTokens(item.tokens)} @ {formatCurrency(item.rateUsdPerMillion)} / 1M
+                  </div>
+                </div>
+                <div className="font-mono">{formatCurrency(item.costUsd)}</div>
+              </div>
+            ))}
+          </div>
+          {cost.notes.length > 0 && (
+            <div className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
+              {cost.notes.map((note) => <div key={note}>{note}</div>)}
+            </div>
+          )}
+        </>
+      )}
+    </CardContent>
+  </Card>
+);
+
+const readMetadataRecord = (metadata: unknown, key: string): Record<string, unknown> | null => {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+};
 
 const PayloadSection = ({ payload }: { readonly payload: AdminAiUsagePayload }) => (
   <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, RefreshCw, Sparkles, Timer } from "lucide-react";
+import { Activity, DollarSign, RefreshCw, Sparkles, Timer } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 
@@ -30,8 +30,8 @@ import { useAdminQuery } from "@/hooks/use-admin-query";
 import {
   AI_USAGE_WINDOWS,
   computeWindowFrom,
+  formatCurrency,
   formatDurationMs,
-  formatPercent,
   formatTokens,
   getAiUsageWindow,
   type AiUsageWindowKey,
@@ -91,16 +91,16 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
   const modelItems: TopBarItem[] = modelGroups.map((row) => ({
     key: row.key,
     label: row.label,
-    value: row.totalTokens,
-    secondary: `${row.requestCount.toLocaleString()} requests`,
+    value: row.estimatedCostUsd,
+    secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
   }));
 
   const secondaryItems: TopBarItem[] = secondaryGroups.map((row) => ({
     key: row.key,
     label: row.label,
     to: scope.kind === "user" ? `/computers/${row.key}` : `/users/${row.key}`,
-    value: row.totalTokens,
-    secondary: `${row.requestCount.toLocaleString()} requests`,
+    value: row.estimatedCostUsd,
+    secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
   }));
 
   const secondaryTitle = scope.kind === "user" ? "Top machines" : "Top users";
@@ -133,20 +133,20 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
             <StatCard
               label="Requests"
               value={summary.requestCount.toLocaleString()}
-              hint={`${summary.successCount} ok · ${summary.failedCount} failed`}
+              hint={`${summary.successCount} ok · ${summary.failedCount} failed · ${summary.startedCount} in progress`}
               icon={<Activity className="h-5 w-5" />}
+            />
+            <StatCard
+              label="Estimated cost"
+              value={formatCurrency(summary.estimatedCostUsd)}
+              hint={`${formatTokens(summary.totalTokens)} tokens`}
+              icon={<DollarSign className="h-5 w-5" />}
             />
             <StatCard
               label="Tokens"
               value={formatTokens(summary.totalTokens)}
               hint={`${formatTokens(summary.inputTokens)} in · ${formatTokens(summary.outputTokens)} out`}
               icon={<Sparkles className="h-5 w-5" />}
-            />
-            <StatCard
-              label="Failure rate"
-              value={formatPercent(summary.failedCount, summary.requestCount)}
-              tone={summary.failedCount > 0 ? "destructive" : "default"}
-              icon={<AlertTriangle className="h-5 w-5" />}
             />
             <StatCard
               label="Avg duration"
@@ -176,7 +176,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
         <Card>
           <CardHeader>
             <CardTitle>Top models</CardTitle>
-            <CardDescription>By total tokens.</CardDescription>
+            <CardDescription>By estimated cost.</CardDescription>
           </CardHeader>
           <CardContent>
             {overview.loading ? (
@@ -184,7 +184,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
             ) : (
               <TopBarList
                 items={modelItems}
-                valueFormatter={formatTokens}
+                valueFormatter={formatCurrency}
                 emptyLabel="No model data"
               />
             )}
@@ -193,7 +193,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
         <Card>
           <CardHeader>
             <CardTitle>{secondaryTitle}</CardTitle>
-            <CardDescription>By total tokens.</CardDescription>
+            <CardDescription>By estimated cost.</CardDescription>
           </CardHeader>
           <CardContent>
             {overview.loading ? (
@@ -201,7 +201,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
             ) : (
               <TopBarList
                 items={secondaryItems}
-                valueFormatter={formatTokens}
+                valueFormatter={formatCurrency}
                 emptyLabel="No data"
                 renderLink={(item, content) =>
                   item.to !== undefined ? (
@@ -235,6 +235,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
                   <TableHead>User</TableHead>
                 )}
                 <TableHead>Status</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
                 <TableHead className="w-20 text-right">Duration</TableHead>
               </TableRow>
@@ -242,13 +243,13 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
             <TableBody>
               {list.loading ? (
                 <TableRow>
-                  <TableCell colSpan={6}>
+                  <TableCell colSpan={7}>
                     <Skeleton className="h-5" />
                   </TableCell>
                 </TableRow>
               ) : (list.data?.usage ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
                     No AI requests in this window
                   </TableCell>
                 </TableRow>
@@ -276,6 +277,9 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
                     )}
                     <TableCell>
                       <AiUsageStatusBadge status={row.status} httpStatus={row.httpStatus} />
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {formatCurrency(row.estimatedCostUsd)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
                       <div>{formatTokens(row.totalTokens)}</div>
