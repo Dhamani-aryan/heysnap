@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
+import type { AgentThreadSummary } from "../agent/types";
 import {
   CloudClient,
   type CloudComputer,
@@ -26,8 +27,13 @@ export interface CloudAppProps {
   readonly cloudServerUrl?: string;
   readonly includeLocalMachine?: boolean;
   readonly initialComputerId?: string;
+  readonly initialThreadId?: string;
   readonly localMachineBridge?: LocalMachineBridge;
   readonly machineRouteBasePath?: string;
+  readonly onWorkspaceRouteChange?: (
+    route: { readonly computerId: string | null; readonly threadId: string | null },
+    options?: { readonly replace?: boolean },
+  ) => void;
   readonly storageKey?: string;
 }
 
@@ -70,14 +76,17 @@ export function CloudApp({
   cloudServerUrl = DEFAULT_CLOUD_SERVER_URL,
   includeLocalMachine = false,
   initialComputerId,
+  initialThreadId,
   localMachineBridge,
   machineRouteBasePath,
+  onWorkspaceRouteChange,
   storageKey = DEFAULT_STORAGE_KEY,
 }: CloudAppProps): React.ReactElement {
   const client = useMemo(() => new CloudClient(cloudServerUrl), [cloudServerUrl]);
   const machinesOnboardingStorageKey = `${storageKey}${MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX}`;
   const shouldManageLocalMachine = includeLocalMachine && localMachineBridge !== undefined;
   const lastLocalSyncKeyRef = useRef<string | null>(null);
+  const routeComputerIdRef = useRef<string | null>(initialComputerId ?? null);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<CloudUser | null>(null);
   const [hasSeenMachinesOnboarding, setHasSeenMachinesOnboarding] = useState(() =>
@@ -86,6 +95,9 @@ export function CloudApp({
   const [computers, setComputers] = useState<CloudComputer[]>([]);
   const [hasLoadedMachines, setHasLoadedMachines] = useState(false);
   const [selectedComputerId, setSelectedComputerId] = useState<string | null>(initialComputerId ?? null);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
+    initialComputerId === undefined ? null : initialThreadId ?? null,
+  );
   const [accessSession, setAccessSession] = useState<ComputerAccessSessionResponse | null>(null);
   const [accessSessionRefreshTick, setAccessSessionRefreshTick] = useState(0);
   const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
@@ -136,6 +148,26 @@ export function CloudApp({
     computers.length === 0 &&
     machinesError === null;
 
+  const updateWorkspaceRoute = useCallback((
+    route: { readonly computerId: string | null; readonly threadId: string | null },
+    options: { readonly replace?: boolean } = {},
+  ): void => {
+    if (onWorkspaceRouteChange !== undefined) {
+      onWorkspaceRouteChange(route, options);
+      return;
+    }
+
+    if (machineRouteBasePath === undefined) {
+      return;
+    }
+
+    const nextPath = route.computerId === null
+      ? machineRouteBasePath
+      : joinRoute(machineRouteBasePath, route.computerId, route.threadId);
+    const method = options.replace === true ? "replaceState" : "pushState";
+    window.history[method](null, "", nextPath);
+  }, [machineRouteBasePath, onWorkspaceRouteChange]);
+
   const clearSession = useCallback(() => {
     removeStoredToken(storageKey);
     removeStoredBoolean(machinesOnboardingStorageKey);
@@ -146,6 +178,7 @@ export function CloudApp({
     setComputers([]);
     setHasLoadedMachines(false);
     setSelectedComputerId(null);
+    setSelectedThreadId(null);
     setAccessSession(null);
     setIsRemoteMachineCreateVisible(false);
     setLocalMachineStatus(null);
@@ -344,10 +377,19 @@ export function CloudApp({
   }, [authState, refreshMachines]);
 
   useEffect(() => {
-    setSelectedComputerId(initialComputerId ?? null);
-    setAccessSession(null);
-    setWorkspaceError(null);
-  }, [initialComputerId]);
+    const nextComputerId = initialComputerId ?? null;
+    const nextThreadId = initialComputerId === undefined ? null : initialThreadId ?? null;
+    const didComputerChange = routeComputerIdRef.current !== nextComputerId;
+
+    setSelectedComputerId(nextComputerId);
+    setSelectedThreadId(nextThreadId);
+
+    if (didComputerChange) {
+      routeComputerIdRef.current = nextComputerId;
+      setAccessSession(null);
+      setWorkspaceError(null);
+    }
+  }, [initialComputerId, initialThreadId]);
 
   useEffect(() => {
     if (accessSession === null) {
@@ -536,24 +578,46 @@ export function CloudApp({
   const openMachine = (computer: CloudComputer): void => {
     setIsRemoteMachineCreateVisible(false);
     setSelectedComputerId(computer.id);
+    setSelectedThreadId(null);
     setAccessSession(null);
     setWorkspaceError(null);
-
-    if (machineRouteBasePath !== undefined) {
-      const nextPath = joinRoute(machineRouteBasePath, computer.id);
-      window.history.pushState(null, "", nextPath);
-    }
+    updateWorkspaceRoute({ computerId: computer.id, threadId: null });
   };
 
   const closeMachine = (): void => {
     setSelectedComputerId(null);
+    setSelectedThreadId(null);
     setAccessSession(null);
     setWorkspaceError(null);
-
-    if (machineRouteBasePath !== undefined) {
-      window.history.pushState(null, "", machineRouteBasePath);
-    }
+    updateWorkspaceRoute({ computerId: null, threadId: null });
   };
+
+  const selectThread = useCallback((thread: AgentThreadSummary): void => {
+    if (selectedComputerId === null) {
+      return;
+    }
+
+    setSelectedThreadId(thread.id);
+    updateWorkspaceRoute({ computerId: selectedComputerId, threadId: thread.id });
+  }, [selectedComputerId, updateWorkspaceRoute]);
+
+  const newThread = useCallback((): void => {
+    if (selectedComputerId === null) {
+      return;
+    }
+
+    setSelectedThreadId(null);
+    updateWorkspaceRoute({ computerId: selectedComputerId, threadId: null });
+  }, [selectedComputerId, updateWorkspaceRoute]);
+
+  const resolveThread = useCallback((threadId: string): void => {
+    if (selectedComputerId === null || selectedThreadId === threadId) {
+      return;
+    }
+
+    setSelectedThreadId(threadId);
+    updateWorkspaceRoute({ computerId: selectedComputerId, threadId }, { replace: true });
+  }, [selectedComputerId, selectedThreadId, updateWorkspaceRoute]);
 
   const startRemoteMachineCreate = (): void => {
     setMachinesError(null);
@@ -625,6 +689,11 @@ export function CloudApp({
           capabilitiesWebsocketUrl={localWorkspaceUrls.capabilitiesWebSocketUrl}
           computer={selectedComputer}
           filesystemWebsocketUrl={localWorkspaceUrls.filesystemWebSocketUrl}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={selectThread}
+          onNewThread={newThread}
+          onThreadResolved={resolveThread}
+          suppressConnectionLoader={selectedThreadId !== null}
         />
       );
     } else if (selectedComputer === null || accessSession === null) {
@@ -659,6 +728,11 @@ export function CloudApp({
             path: accessSession.routes.filesystemWebSocketUrl,
             token: accessSession.accessSession.token,
           })}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={selectThread}
+          onNewThread={newThread}
+          onThreadResolved={resolveThread}
+          suppressConnectionLoader={selectedThreadId !== null}
         />
       );
     }
@@ -839,7 +913,8 @@ const readProviderMetadataString = (metadata: unknown, key: string): string | nu
   return typeof value === "string" && value.length > 0 ? value : null;
 };
 
-const joinRoute = (basePath: string, computerId: string): string => {
+const joinRoute = (basePath: string, computerId: string, threadId: string | null = null): string => {
   const normalizedBasePath = basePath === "/" ? "" : basePath.replace(/\/+$/, "");
-  return `${normalizedBasePath}/${encodeURIComponent(computerId)}`;
+  const machinePath = `${normalizedBasePath}/${encodeURIComponent(computerId)}`;
+  return threadId === null ? machinePath : `${machinePath}/${encodeURIComponent(threadId)}`;
 };
