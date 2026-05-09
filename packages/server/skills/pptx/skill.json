@@ -1,0 +1,7 @@
+{
+  "id": "pptx",
+  "label": "PPTX",
+  "version": "1.0.0",
+  "description": "Create, edit, inspect, and validate presentation files.",
+  "activeByDefault": false
+}
