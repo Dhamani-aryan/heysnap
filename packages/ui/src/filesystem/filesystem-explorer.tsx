@@ -132,18 +132,44 @@ const getInitialLeftPaneRatio = (): number => {
   return Number.isFinite(stored) ? clampPaneRatio(stored) : DEFAULT_LEFT_PANE_RATIO;
 };
 
+const normalizeInitialFilesystemPath = (path: string | undefined): string | undefined => {
+  if (path === undefined) {
+    return undefined;
+  }
+
+  const normalizedPath = path.trim();
+  return normalizedPath.length === 0 ? "" : normalizedPath;
+};
+
+const isInvalidInitialFilesystemPathError = (message: string): boolean =>
+  /path (?:is not a directory|not found)/iu.test(message);
+
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentBaseUrl?: string;
   readonly capabilitiesWebsocketUrl?: string;
+  readonly selectedThreadId?: string | null;
+  readonly initialPath?: string;
   readonly onFilesystemOpen?: () => void;
+  readonly onPathChange?: (path: string) => void;
+  readonly onInitialPathInvalid?: (path: string) => void;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+  readonly onNewThread?: () => void;
+  readonly onThreadResolved?: (threadId: string) => void;
 }
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentBaseUrl = "http://localhost:4000/agent",
   capabilitiesWebsocketUrl,
+  selectedThreadId = null,
+  initialPath,
   onFilesystemOpen,
+  onPathChange,
+  onInitialPathInvalid,
+  onSelectThread,
+  onNewThread,
+  onThreadResolved,
 }: FilesystemExplorerProps): React.ReactElement {
   const clientRef = useRef<FilesystemClient | null>(null);
   const uploadFilesInputRef = useRef<HTMLInputElement | null>(null);
@@ -157,7 +183,6 @@ export function FilesystemExplorer({
   const [isFetching, setIsFetching] = useState(true);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
-  const [selectedThread, setSelectedThread] = useState<AgentThreadSummary | null>(null);
   const [workspaceView, setWorkspaceView] = useState<"files" | "connectors">("files");
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
@@ -170,20 +195,67 @@ export function FilesystemExplorer({
     () => openFileTabs.map((tab) => tab.path).sort((left, right) => left.localeCompare(right)).join("\0"),
     [openFileTabs],
   );
+  const onFilesystemOpenRef = useRef(onFilesystemOpen);
+  const onPathChangeRef = useRef(onPathChange);
+  const onInitialPathInvalidRef = useRef(onInitialPathInvalid);
 
   useEffect(() => {
+    onFilesystemOpenRef.current = onFilesystemOpen;
+    onPathChangeRef.current = onPathChange;
+    onInitialPathInvalidRef.current = onInitialPathInvalid;
+  }, [onFilesystemOpen, onInitialPathInvalid, onPathChange]);
+
+  useEffect(() => {
+    const initialPathForConnection = normalizeInitialFilesystemPath(initialPath);
+    let hasReceivedListing = false;
+    let didRetryInitialPath = false;
     const client = new FilesystemClient(websocketUrl, {
+      initialPath: initialPathForConnection,
       onListing: (nextListing) => {
+        hasReceivedListing = true;
         setListing(nextListing);
+        onPathChangeRef.current?.(nextListing.path);
       },
       onFileUpdates: ({ entries }) => {
         setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
       },
       onLoading: setIsFetching,
-      onError: setListingError,
-      onOpen: onFilesystemOpen,
+      onError: (message) => {
+        setListingError(message);
+
+        if (
+          message === null ||
+          hasReceivedListing ||
+          didRetryInitialPath ||
+          initialPathForConnection === undefined ||
+          initialPathForConnection.length === 0 ||
+          !isInvalidInitialFilesystemPathError(message)
+        ) {
+          return;
+        }
+
+        didRetryInitialPath = true;
+        onInitialPathInvalidRef.current?.(initialPathForConnection);
+        void clientRef.current?.subscribe("").catch((error) => {
+          setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+          setIsFetching(false);
+        });
+      },
+      onOpen: () => {
+        onFilesystemOpenRef.current?.();
+      },
     });
 
+    setHistory([]);
+    setHistoryIndex(-1);
+    setSelectedPaths([]);
+    setListing(null);
+    setListingError(null);
+    setIsFetching(true);
+    setRenamingPath(null);
+    setSelectionAnchorPath(null);
+    setOpenFileTabs([]);
+    setActiveFilePath(null);
     clientRef.current = client;
     client.connect();
 
@@ -191,7 +263,7 @@ export function FilesystemExplorer({
       client.close();
       clientRef.current = null;
     };
-  }, [onFilesystemOpen, websocketUrl]);
+  }, [initialPath, websocketUrl]);
 
   useEffect(() => {
     const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
@@ -636,9 +708,9 @@ export function FilesystemExplorer({
         agentBaseUrl={agentBaseUrl}
         capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
         isConnectorsOpen={workspaceView === "connectors"}
-        selectedThreadId={selectedThread?.id ?? null}
-        onSelectThread={setSelectedThread}
-        onNewThread={() => setSelectedThread(null)}
+        selectedThreadId={selectedThreadId}
+        onSelectThread={onSelectThread}
+        onNewThread={onNewThread}
         onToggleConnectors={() => setWorkspaceView((current) => current === "connectors" ? "files" : "connectors")}
         openFileTabs={openFileTabs}
         activeFilePath={activeFileTab?.path ?? null}
@@ -654,10 +726,11 @@ export function FilesystemExplorer({
           leftPaneRatio={leftPaneRatio}
           onLeftPaneRatioChange={handleLeftPaneRatioChange}
           agentBaseUrl={agentBaseUrl}
-          selectedThreadId={selectedThread?.id ?? null}
+          selectedThreadId={selectedThreadId}
           currentPath={currentPath}
           onOpenFilePath={openFilePath}
-          onSelectThread={setSelectedThread}
+          onSelectThread={onSelectThread}
+          onThreadResolved={onThreadResolved}
         >
           <div className="left-pane-surface-stack">
             <div
@@ -781,8 +854,8 @@ const FinderToolbar = ({
   readonly capabilitiesWebsocketUrl?: string;
   readonly isConnectorsOpen: boolean;
   readonly selectedThreadId: string | null;
-  readonly onSelectThread: (thread: AgentThreadSummary) => void;
-  readonly onNewThread: () => void;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+  readonly onNewThread?: () => void;
   readonly onToggleConnectors: () => void;
   readonly openFileTabs: OpenFileTab[];
   readonly activeFilePath: string | null;
@@ -1667,6 +1740,7 @@ const DesktopSplitPane = ({
   currentPath,
   onOpenFilePath,
   onSelectThread,
+  onThreadResolved,
 }: {
   readonly children: React.ReactNode;
   readonly leftPaneRatio: number;
@@ -1675,7 +1749,8 @@ const DesktopSplitPane = ({
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly onOpenFilePath: (path: string) => void;
-  readonly onSelectThread: (thread: AgentThreadSummary) => void;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+  readonly onThreadResolved?: (threadId: string) => void;
 }): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -1744,6 +1819,7 @@ const DesktopSplitPane = ({
           currentPath={currentPath}
           onOpenFilePath={onOpenFilePath}
           onSelectThread={onSelectThread}
+          onThreadResolved={onThreadResolved}
         />
       </aside>
     </div>

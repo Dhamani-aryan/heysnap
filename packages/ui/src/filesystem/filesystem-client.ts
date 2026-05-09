@@ -20,6 +20,7 @@ type OpenWaiter = {
 };
 
 export interface FilesystemClientOptions {
+  readonly initialPath?: string;
   readonly onListing: (listing: FilesystemListing) => void;
   readonly onLoading: (loading: boolean) => void;
   readonly onError: (message: string | null) => void;
@@ -50,7 +51,9 @@ export class FilesystemClient {
   constructor(
     private readonly url: string,
     private readonly options: FilesystemClientOptions,
-  ) {}
+  ) {
+    this.subscribedPath = options.initialPath;
+  }
 
   connect(): void {
     this.disconnect();
