@@ -1200,23 +1200,19 @@ button:disabled {
 }
 
 .machine-status-control {
-  position: relative;
+  pointer-events: none;
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
   z-index: 8;
   display: flex;
-  width: 100%;
-  flex-shrink: 0;
   align-items: center;
-  padding: 8px 12px 10px;
-  background: #ffffff;
-}
-
-:root.dark .machine-status-control {
-  background: #202021;
 }
 
 .machine-status-button {
+  pointer-events: auto;
   display: inline-flex;
-  max-width: min(240px, 100%);
+  max-width: min(240px, calc(100vw - 24px));
   height: 30px;
   align-items: center;
   gap: 8px;
@@ -1305,12 +1301,13 @@ button:disabled {
 }
 
 .machine-status-popover {
+  pointer-events: auto;
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 12px;
+  left: 0;
   z-index: 1200;
   display: flex;
-  width: min(260px, calc(100% - 24px));
+  width: min(260px, calc(100vw - 24px));
   flex-direction: column;
   gap: 2px;
   overflow: hidden;

@@ -871,7 +871,7 @@ const MachineStatusControl = ({
       return;
     }
 
-    const closeMenu = (event: MouseEvent): void => {
+    const closeMenu = (event: PointerEvent): void => {
       const target = event.target;
 
       if (target instanceof Node && containerRef.current?.contains(target)) {
@@ -886,11 +886,11 @@ const MachineStatusControl = ({
       }
     };
 
-    window.addEventListener("mousedown", closeMenu);
+    document.addEventListener("pointerdown", closeMenu, true);
     window.addEventListener("keydown", closeOnEscape);
 
     return () => {
-      window.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("pointerdown", closeMenu, true);
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [isOpen]);
