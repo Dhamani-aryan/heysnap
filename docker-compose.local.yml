@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ank1015_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - ank1015-local-postgres:/var/lib/postgresql/data
+    networks:
+      - ank1015-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ank1015_app"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  artifacts:
+    image: python:3.12-alpine
+    working_dir: /artifacts
+    command: ["python", "-m", "http.server", "4101", "--bind", "0.0.0.0"]
+    ports:
+      - "4101:4101"
+    volumes:
+      - ./.local/artifacts:/artifacts:ro
+    networks:
+      - ank1015-local
+
+networks:
+  ank1015-local:
+    name: ank1015-local
+
+volumes:
+  ank1015-local-postgres:
+    name: ank1015-local-postgres

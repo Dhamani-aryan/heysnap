@@ -9,7 +9,8 @@ open remote machine workspaces through the cloud gateway.
 ## Responsibilities
 
 - Browser entrypoint for cloud users at `app.heysnap.xyz`.
-- Uses `NEXT_PUBLIC_CLOUD_SERVER_URL`, defaulting to `https://api.heysnap.xyz`.
+- Uses `NEXT_PUBLIC_CLOUD_SERVER_URL`; runtime defaults to `https://api.heysnap.xyz`,
+  while `dev` points at `http://localhost:4100`.
 - Uses bearer session tokens stored in browser `localStorage`.
 - Does not talk directly to VM machine servers.
 - Opens remote workspaces with gateway WebSocket URLs returned by the cloud server.
@@ -18,6 +19,7 @@ open remote machine workspaces through the cloud gateway.
 
 ```sh
 pnpm --filter @ank1015-app/web dev
+pnpm --filter @ank1015-app/web dev:hosted
 pnpm --filter @ank1015-app/web build
 pnpm --filter @ank1015-app/web typecheck
 ```

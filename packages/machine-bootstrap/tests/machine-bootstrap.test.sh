@@ -8,7 +8,8 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 bash -n "$ROOT_DIR"/scripts/ank1015-machine-bootstrap \
   "$ROOT_DIR"/scripts/ank1015-machine-release \
   "$ROOT_DIR"/scripts/ank1015-machine-heartbeat \
-  "$ROOT_DIR"/lib/ank1015-machine-common.sh
+  "$ROOT_DIR"/lib/ank1015-machine-common.sh \
+  "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
 
 require() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -129,6 +130,16 @@ export ANK1015_MACHINE_ROOT="$MACHINE_ROOT"
 export ANK1015_MACHINE_ENV_FILE="$ENV_FILE"
 export ANK1015_MACHINE_COMMON_SH="$ROOT_DIR/lib/ank1015-machine-common.sh"
 export ANK1015_SUDOERS_DIR="$TEMP_DIR/sudoers"
+
+dry_run_output="$(ANK1015_BOOTSTRAP_DRY_RUN=1 "$ROOT_DIR/scripts/ank1015-machine-bootstrap")"
+test "$dry_run_output" = "supervisor=systemd"
+
+cat >>"$ENV_FILE" <<'ENV'
+ANK1015_MACHINE_SUPERVISOR=process
+ENV
+dry_run_output="$(ANK1015_BOOTSTRAP_DRY_RUN=1 "$ROOT_DIR/scripts/ank1015-machine-bootstrap")"
+test "$dry_run_output" = "supervisor=process"
+sed -i.bak '/^ANK1015_MACHINE_SUPERVISOR=/d' "$ENV_FILE"
 
 "$ROOT_DIR/scripts/ank1015-machine-release" latest
 test -f "$MACHINE_ROOT/machine-server/current/dist/index.js"

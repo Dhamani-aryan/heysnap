@@ -28,6 +28,7 @@ ank1015_machine_load_env() {
   : "${PORT:=4000}"
   : "${HOST:=127.0.0.1}"
   : "${MACHINE_SERVER_CHANNEL:=stable}"
+  : "${ANK1015_MACHINE_SUPERVISOR:=systemd}"
   : "${NODE_ENV:=production}"
   : "${HOME:=/home/agent}"
   : "${ANK1015_FILESYSTEM_ROOT:=/workspace}"

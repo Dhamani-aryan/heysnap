@@ -13,6 +13,7 @@ Start here when you need to understand or operate the HeySnap repo.
 - `cloud-server-db.md`: local Postgres and Drizzle commands.
 - `cloud-server-deploy.md`: hosted cloud-server environment and deployment.
 - `cloud-server-vms.md`: EC2 provisioning, machine registration, and gateway tunnels.
+- `local-docker-machines.md`: local cloud-server plus Docker-provisioned machines.
 - `admin-operations.md`: admin dashboard, admin APIs, and common operations.
 
 ## Releases And Updates
