@@ -3,6 +3,7 @@ import { basename, resolve } from "node:path";
 
 import { attachAgentWebSocketServer } from "./agent/websocket.js";
 import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
+import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
 import { AgentCapabilitiesService } from "./capabilities/service.js";
 import { attachCapabilitiesWebSocketServer } from "./capabilities/websocket.js";
 import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
@@ -62,6 +63,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const host = options.host ?? "127.0.0.1";
   const requestedPort = options.port ?? 4000;
   const version = options.version?.trim() || process.env.MACHINE_SERVER_VERSION?.trim() || "development";
+  await ensureCodexUserConfig();
   const capabilities = new AgentCapabilitiesService();
   await capabilities.initialize();
   const server = createServer((request, response) => {
