@@ -557,7 +557,7 @@ describe("cloud server computer access sessions", () => {
     });
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
-      agentWebSocketUrl: `/gateway/computers/${computer.id}/agent`,
+      agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
       capabilitiesWebSocketUrl: `/gateway/computers/${computer.id}/capabilities`,
     });
 
@@ -652,6 +652,58 @@ describe("cloud server computer access sessions", () => {
     expect(response.headers.get("content-disposition")).toBe("inline; filename=\"Budget.pdf\"");
     expect(await response.text()).toBe("%PDF preview");
     expect(requestedPaths).toEqual(["/filesystem/preview?path=Budget.xlsx&format=pdf"]);
+  });
+
+  it("proxies agent REST and SSE through authenticated gateway access sessions", async () => {
+    const requested: Array<{ readonly path: string; readonly method?: string; readonly body?: string }> = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyStreamingHttpRequest: async (_computerId, input) => {
+        requested.push({
+          path: input.path,
+          method: input.method,
+          body: input.body?.toString("utf8"),
+        });
+        return {
+          statusCode: 200,
+          headers: { "content-type": "text/event-stream" },
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: run_end\n"));
+              controller.enqueue(new TextEncoder().encode("data: {\"runId\":\"run-1\"}\n\n"));
+              controller.close();
+            },
+          }),
+          cancel() {},
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "agent-proxy-user@example.com");
+    const computer = await createComputer(app, auth.token, "Agent VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/agent/runs?accessToken=${accessBody.accessSession.token}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ path: "Projects", content: [{ type: "text", content: "Go" }] }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(await response.text()).toBe("event: run_end\ndata: {\"runId\":\"run-1\"}\n\n");
+    expect(requested).toEqual([{
+      path: "/agent/runs",
+      method: "POST",
+      body: JSON.stringify({ path: "Projects", content: [{ type: "text", content: "Go" }] }),
+    }]);
   });
 
   it("rejects filesystem downloads without gateway access tokens", async () => {
@@ -1018,7 +1070,7 @@ interface AccessSessionResponse {
   };
   readonly routes: {
     readonly filesystemWebSocketUrl: string;
-    readonly agentWebSocketUrl: string;
+    readonly agentBaseUrl: string;
   };
 }
 

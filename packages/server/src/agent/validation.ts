@@ -40,8 +40,6 @@ export const isAgentClientMessage = (value: unknown): value is AgentClientMessag
       );
     case "cancelRun":
       return typeof value["threadId"] === "string" && typeof value["runId"] === "string";
-    case "ping":
-      return true;
     default:
       return false;
   }

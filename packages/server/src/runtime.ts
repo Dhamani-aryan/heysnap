@@ -1,9 +1,9 @@
 import { createServer, type Server } from "node:http";
 import { basename, resolve } from "node:path";
 
-import { attachAgentWebSocketServer } from "./agent/websocket.js";
 import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
 import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
+import { createAgentHttpService } from "./agent/http.js";
 import { AgentCapabilitiesService } from "./capabilities/service.js";
 import { attachCapabilitiesWebSocketServer } from "./capabilities/websocket.js";
 import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
@@ -32,7 +32,7 @@ export interface StartServerOptions {
 export interface LocalServerUrls {
   readonly healthUrl: string;
   readonly filesystemWebSocketUrl: string;
-  readonly agentWebSocketUrl: string;
+  readonly agentBaseUrl: string;
   readonly capabilitiesWebSocketUrl: string;
 }
 
@@ -66,8 +66,18 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   await ensureCodexUserConfig();
   const capabilities = new AgentCapabilitiesService();
   await capabilities.initialize();
+  const agentHarness = new CodexAgentHarness({
+    filesystemRoot: filesystemRoot.absolutePath,
+    codexBin: options.codexBin ?? process.env.CODEX_BIN ?? capabilities.getCodexBin(),
+  });
+  const agentHttpService = createAgentHttpService({ harness: agentHarness });
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+    if (requestUrl.pathname.startsWith("/agent")) {
+      void agentHttpService.handleRequest(request, response);
+      return;
+    }
 
     if (requestUrl.pathname === "/filesystem/download") {
       if (request.method === "OPTIONS") {
@@ -114,12 +124,6 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const filesystemSocketServer = attachFilesystemWebSocketServer(server, {
     root: filesystemRoot,
   });
-  const agentSocketServer = attachAgentWebSocketServer(server, {
-    harness: new CodexAgentHarness({
-      filesystemRoot: filesystemRoot.absolutePath,
-      codexBin: options.codexBin ?? process.env.CODEX_BIN ?? capabilities.getCodexBin(),
-    }),
-  });
   const capabilitiesSocketServer = attachCapabilitiesWebSocketServer(server, {
     service: capabilities,
   });
@@ -132,7 +136,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const localWebSocketBaseUrl = `ws://127.0.0.1:${String(port)}`;
   const getStatus = (): MachineServerStatus => {
     const filesystem = filesystemSocketServer.clients.size;
-    const agent = agentSocketServer.clients.size;
+    const agent = agentHttpService.runManager.getActiveRunCount();
     const capabilitySessions = capabilitiesSocketServer.clients.size;
     const total = filesystem + agent + capabilitySessions;
 
@@ -157,14 +161,13 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     urls: {
       healthUrl: `${localBaseUrl}/health`,
       filesystemWebSocketUrl: `${localWebSocketBaseUrl}/filesystem`,
-      agentWebSocketUrl: `${localWebSocketBaseUrl}/agent`,
+      agentBaseUrl: `${localBaseUrl}/agent`,
       capabilitiesWebSocketUrl: `${localWebSocketBaseUrl}/capabilities`,
     },
     getStatus,
     async stop() {
       await Promise.all([
         closeWebSocketServer(filesystemSocketServer),
-        closeWebSocketServer(agentSocketServer),
         closeWebSocketServer(capabilitiesSocketServer),
       ]);
       await closeServer(server);

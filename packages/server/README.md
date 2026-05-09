@@ -12,7 +12,7 @@ does not need to know whether a selected machine is local or remote.
 - HTTP `/status` endpoint with version, active session counts, and
   `safeToRestart`.
 - WebSocket `/filesystem` for filesystem listing and mutations.
-- WebSocket `/agent` for agent threads and runs.
+- HTTP `/agent/*` for agent threads and resumable SSE runs.
 - Outbound cloud gateway tunnel when running on cloud VMs.
 - Host artifact used by VM update pipelines.
 

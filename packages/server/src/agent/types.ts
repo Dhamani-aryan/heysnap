@@ -363,8 +363,7 @@ export type AgentClientMessage =
       readonly path: string;
       readonly content: AgentContent;
     }
-  | { readonly type: "cancelRun"; readonly requestId: string; readonly threadId: string; readonly runId: string }
-  | { readonly type: "ping"; readonly requestId: string };
+  | { readonly type: "cancelRun"; readonly requestId: string; readonly threadId: string; readonly runId: string };
 
 export type AgentServerMessage =
   | { readonly type: "hello"; readonly serverTime: string }
@@ -379,5 +378,4 @@ export type AgentServerMessage =
       readonly event: AgentRunEvent;
     }
   | { readonly type: "run_end"; readonly requestId: string; readonly runId: string; readonly threadId: string }
-  | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string }
-  | { readonly type: "pong"; readonly requestId: string; readonly serverTime: string };
+  | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string };

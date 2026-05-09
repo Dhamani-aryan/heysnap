@@ -8,13 +8,13 @@ import { retrieveAgentThreadGroups } from "./agent-client";
 import type { AgentThreadGroup, AgentThreadSummary } from "./types";
 
 export interface ThreadHistoryButtonProps {
-  readonly websocketUrl?: string;
+  readonly agentBaseUrl?: string;
   readonly selectedThreadId?: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }
 
 export const ThreadHistoryButton = ({
-  websocketUrl = "ws://localhost:4000/agent",
+  agentBaseUrl = "http://localhost:4000/agent",
   selectedThreadId = null,
   onSelectThread,
 }: ThreadHistoryButtonProps): React.ReactElement => {
@@ -63,7 +63,7 @@ export const ThreadHistoryButton = ({
     setIsLoading(true);
     setError(null);
 
-    void retrieveAgentThreadGroups(websocketUrl)
+    void retrieveAgentThreadGroups(agentBaseUrl)
       .then((nextGroups) => {
         if (isCurrent) {
           setGroups(nextGroups);
@@ -83,7 +83,7 @@ export const ThreadHistoryButton = ({
     return () => {
       isCurrent = false;
     };
-  }, [isOpen, websocketUrl]);
+  }, [agentBaseUrl, isOpen]);
 
   return (
     <div ref={containerRef} className="thread-history">

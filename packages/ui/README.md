@@ -11,7 +11,7 @@ machine workspace layout, filesystem browser, and agent chat/thread views.
 - Cloud API client using bearer tokens.
 - Login screen and machine inventory screens.
 - Machine workspace with filesystem on the left and agent on the right.
-- Filesystem and agent WebSocket client UI.
+- Filesystem WebSocket and agent REST/SSE client UI.
 - Shared CSS exports for cloud and filesystem surfaces.
 
 ## Consumers
