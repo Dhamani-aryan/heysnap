@@ -67,6 +67,8 @@ chmod 0600 /opt/ank1015/bootstrap-token
 cat >/home/agent/.codex/config.toml <<'CODEX'
 model_provider = "azure"
 model = "${codexDefaultModel}"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 include_permissions_instructions = false
 include_apps_instructions = false
 

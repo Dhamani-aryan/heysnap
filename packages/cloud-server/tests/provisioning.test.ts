@@ -87,6 +87,8 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("set -a\nsource /opt/ank1015/machine.env\nset +a");
     expect(userData).toContain("cat >/home/agent/.codex/config.toml");
     expect(userData).toContain('model = "gpt-5.5"');
+    expect(userData).toContain('approval_policy = "never"');
+    expect(userData).toContain('sandbox_mode = "danger-full-access"');
     expect(userData).toContain("include_permissions_instructions = false");
     expect(userData).toContain("include_apps_instructions = false");
     expect(userData).toContain("[features]");
