@@ -1,0 +1,57 @@
+name: Backend checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/backend-checks.yml"
+      - "infra/**"
+      - "packages/cloud-server/**"
+      - "packages/machine-bootstrap/**"
+      - "packages/server/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/backend-checks.yml"
+      - "infra/**"
+      - "packages/cloud-server/**"
+      - "packages/machine-bootstrap/**"
+      - "packages/server/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Backend package checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck cloud server
+        run: pnpm --filter @ank1015-app/cloud-server typecheck
+
+      - name: Test cloud server
+        run: pnpm --filter @ank1015-app/cloud-server test
+
+      - name: Typecheck machine server
+        run: pnpm --filter @ank1015-app/server typecheck
+
+      - name: Test machine server
+        run: pnpm --filter @ank1015-app/server test
+
+      - name: Test machine bootstrap
+        run: pnpm --filter @ank1015-app/machine-bootstrap test
