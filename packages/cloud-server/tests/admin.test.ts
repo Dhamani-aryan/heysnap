@@ -423,6 +423,71 @@ describe("admin AI usage analytics", () => {
     expect(body.summary.p95DurationMs).not.toBeNull();
   });
 
+  it("serializes estimated AI usage cost fields", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "ai-cost@example.com");
+    const computer = await createComputer(app, owner.token, "Cost VM");
+    const [identity] = await store.listMachineIdentitiesForComputer(computer.id);
+
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
+      model: "gpt-5.5",
+      status: "succeeded",
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedInputTokens: 10,
+      reasoningOutputTokens: 5,
+      durationMs: 100,
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+      metadata: {
+        upstreamUsage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          total_tokens: 120,
+          input_tokens_details: { cached_tokens: 10 },
+          output_tokens_details: { reasoning_tokens: 5 },
+        },
+      },
+    });
+
+    const listResponse = await app.request("/admin/ai-usage", { headers: adminHeaders() });
+    const listBody = await listResponse.json() as {
+      readonly usage: ReadonlyArray<{
+        readonly estimatedCostUsd: number | null;
+        readonly costBreakdown: {
+          readonly totalUsd: number;
+          readonly lineItems: ReadonlyArray<{ readonly key: string; readonly tokens: number }>;
+        } | null;
+      }>;
+    };
+    expect(listBody.usage[0]!.estimatedCostUsd).toBe(0.001055);
+    expect(listBody.usage[0]!.costBreakdown).toMatchObject({
+      totalUsd: 0.001055,
+      lineItems: [
+        { key: "input", tokens: 90 },
+        { key: "cached-input", tokens: 10 },
+        { key: "output", tokens: 20 },
+      ],
+    });
+
+    const summaryResponse = await app.request("/admin/ai-usage/summary", { headers: adminHeaders() });
+    const summaryBody = await summaryResponse.json() as {
+      readonly summary: { readonly estimatedCostUsd: number };
+    };
+    expect(summaryBody.summary.estimatedCostUsd).toBe(0.001055);
+
+    const breakdownResponse = await app.request(
+      "/admin/ai-usage/breakdown?groupBy=model",
+      { headers: adminHeaders() },
+    );
+    const breakdownBody = await breakdownResponse.json() as {
+      readonly groups: ReadonlyArray<{ readonly estimatedCostUsd: number }>;
+    };
+    expect(breakdownBody.groups[0]!.estimatedCostUsd).toBe(0.001055);
+  });
+
   it("returns daily token buckets", async () => {
     const { app, store } = createTestApp();
     const owner = await registerUser(app, "ai-buckets@example.com");
@@ -737,8 +802,12 @@ const seedAiUsage = async (
     readonly status: "started" | "succeeded" | "failed" | "aborted";
     readonly inputTokens: number;
     readonly outputTokens: number;
+    readonly cachedInputTokens?: number;
+    readonly reasoningOutputTokens?: number;
     readonly durationMs: number | null;
     readonly startedAt: Date;
+    readonly metadata?: unknown;
+    readonly upstreamPath?: string;
   },
 ): Promise<void> => {
   const usage = await store.createAiUsageRequest({
@@ -748,11 +817,12 @@ const seedAiUsage = async (
     provider: "azure",
     model: input.model,
     method: "POST",
-    upstreamPath: "/openai/v1/chat/completions",
+    upstreamPath: input.upstreamPath ?? "/openai/v1/chat/completions",
     status: input.status === "succeeded" || input.status === "failed" || input.status === "aborted"
       ? "started"
       : input.status,
     startedAt: input.startedAt,
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
   });
   if (input.status === "started") {
     return;
@@ -766,6 +836,8 @@ const seedAiUsage = async (
     httpStatus: input.status === "succeeded" ? 200 : 500,
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
+    ...(input.cachedInputTokens !== undefined ? { cachedInputTokens: input.cachedInputTokens } : {}),
+    ...(input.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: input.reasoningOutputTokens } : {}),
     totalTokens: input.inputTokens + input.outputTokens,
     completedAt,
     durationMs: input.durationMs,

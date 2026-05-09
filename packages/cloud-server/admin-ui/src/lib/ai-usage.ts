@@ -37,6 +37,24 @@ export const formatTokens = (value: number): string => {
   return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 1 : 0)}M`;
 };
 
+export const formatCurrency = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  if (value === 0) {
+    return "$0.00";
+  }
+  if (Math.abs(value) < 0.01) {
+    return `$${value.toFixed(6)}`;
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
 export const formatDurationMs = (value: number | null): string => {
   if (value === null) {
     return "—";

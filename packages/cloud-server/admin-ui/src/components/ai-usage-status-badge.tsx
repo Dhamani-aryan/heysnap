@@ -16,7 +16,7 @@ const VARIANT: Record<string, "success" | "warning" | "destructive" | "muted"> =
 
 const LABEL: Record<string, string> = {
   succeeded: "Succeeded",
-  started: "In flight",
+  started: "In progress",
   failed: "Failed",
   aborted: "Aborted",
 };

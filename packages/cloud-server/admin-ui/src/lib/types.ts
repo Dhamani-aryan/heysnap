@@ -130,6 +130,8 @@ export interface AdminAiUsageRequest {
   readonly upstreamPath: string;
   readonly status: AiUsageStatus | string;
   readonly httpStatus: number | null;
+  readonly estimatedCostUsd: number | null;
+  readonly costBreakdown: AdminAiUsageCostBreakdown | null;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
@@ -142,8 +144,26 @@ export interface AdminAiUsageRequest {
   readonly metadata: unknown;
 }
 
+export interface AdminAiUsageCostLineItem {
+  readonly key: string;
+  readonly label: string;
+  readonly tokens: number;
+  readonly rateUsdPerMillion: number;
+  readonly costUsd: number;
+}
+
+export interface AdminAiUsageCostBreakdown {
+  readonly currency: "USD" | string;
+  readonly model: string;
+  readonly totalUsd: number;
+  readonly rateMode: string;
+  readonly lineItems: readonly AdminAiUsageCostLineItem[];
+  readonly notes: readonly string[];
+}
+
 export interface AdminAiUsageSummary {
   readonly requestCount: number;
+  readonly estimatedCostUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
@@ -164,6 +184,7 @@ export interface AdminAiUsageSummary {
 export interface AdminAiUsageBucket {
   readonly bucketStart: string;
   readonly requestCount: number;
+  readonly estimatedCostUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
@@ -177,6 +198,7 @@ export interface AdminAiUsageBreakdownRow {
   readonly key: string;
   readonly label: string;
   readonly requestCount: number;
+  readonly estimatedCostUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens: number;

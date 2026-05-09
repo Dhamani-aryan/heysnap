@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Cloud, Cpu, Laptop, RefreshCw, Server, Sparkles, Users as UsersIcon } from "lucide-react";
+import { Activity, AlertTriangle, Cloud, Cpu, DollarSign, Laptop, RefreshCw, Server, Sparkles, Users as UsersIcon } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 
@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAdminQuery } from "@/hooks/use-admin-query";
-import { formatTokens } from "@/lib/ai-usage";
+import { formatCurrency, formatTokens } from "@/lib/ai-usage";
 import { adminApi } from "@/lib/api";
 
 export const OverviewPage = () => {
@@ -45,8 +45,8 @@ export const OverviewPage = () => {
       (aiTopModels.data?.groups ?? []).map((row) => ({
         key: row.key,
         label: row.label,
-        value: row.totalTokens,
-        secondary: `${row.requestCount.toLocaleString()} requests`,
+        value: row.estimatedCostUsd,
+        secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
       })),
     [aiTopModels.data?.groups],
   );
@@ -120,16 +120,16 @@ export const OverviewPage = () => {
                   icon={<Sparkles className="h-5 w-5" />}
                 />
                 <StatCard
-                  label="AI tokens (24h)"
-                  value={formatTokens(aiSummary.data.summary.totalTokens)}
-                  hint={`${formatTokens(aiSummary.data.summary.inputTokens)} in · ${formatTokens(aiSummary.data.summary.outputTokens)} out`}
-                  icon={<Sparkles className="h-5 w-5" />}
+                  label="AI cost (24h)"
+                  value={formatCurrency(aiSummary.data.summary.estimatedCostUsd)}
+                  hint={`${formatTokens(aiSummary.data.summary.totalTokens)} tokens`}
+                  icon={<DollarSign className="h-5 w-5" />}
                 />
                 <Card className="sm:col-span-2 lg:col-span-2">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <div>
                       <CardTitle className="text-sm">Top models (24h)</CardTitle>
-                      <CardDescription>Token consumption by model.</CardDescription>
+                      <CardDescription>Estimated spend by model.</CardDescription>
                     </div>
                     <Button asChild variant="ghost" size="sm">
                       <Link to="/ai-usage">View AI usage</Link>
@@ -141,7 +141,7 @@ export const OverviewPage = () => {
                     ) : (
                       <TopBarList
                         items={aiTopModelItems}
-                        valueFormatter={formatTokens}
+                        valueFormatter={formatCurrency}
                         emptyLabel="No AI usage yet"
                       />
                     )}
