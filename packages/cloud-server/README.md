@@ -10,6 +10,7 @@ This is a Hono server backed by Postgres through Drizzle. It is deployed at
 - User auth with admin-created users and opaque bearer sessions.
 - Computer inventory for cloud and local machines.
 - EC2 provisioning and lifecycle operations for cloud machines.
+- Optional Docker machine provisioning for local development.
 - Machine registration, heartbeat, and release update checks.
 - AI gateway proxy for EC2 Codex requests with per-user and per-machine usage logs.
 - Outbound machine tunnel registry and gateway WebSocket proxying.
@@ -33,6 +34,9 @@ pnpm --filter @ank1015-app/cloud-server test:db
 `dev:admin-ui` runs Vite on port 5174 and proxies `/admin`, `/auth`, and
 `/health` to the cloud server on port 4100. Run `dev` and `dev:admin-ui` in
 two terminals to iterate on the React admin SPA.
+
+For the full local Docker machine workflow, use the root commands documented in
+`docs/local-docker-machines.md`.
 
 ## Important URLs
 
