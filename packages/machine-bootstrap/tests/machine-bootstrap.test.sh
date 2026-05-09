@@ -11,6 +11,11 @@ bash -n "$ROOT_DIR"/scripts/ank1015-machine-bootstrap \
   "$ROOT_DIR"/lib/ank1015-machine-common.sh \
   "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
 
+grep -Fq 'agent_home="${ANK1015_AGENT_HOME:-/home/agent}"' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
+grep -Fq 'HOME=$agent_home' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
+grep -Fq 'ANK1015_ACTIVE_SKILLS_DIR=${ANK1015_ACTIVE_SKILLS_DIR:-$agent_home/.codex/skills}' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
+! grep -Fq 'HOME=${HOME:-/home/agent}' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
+
 require() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required test command: $1" >&2
