@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
@@ -466,12 +466,29 @@ export class AgentCapabilitiesService {
 
   private async writeSkillCatalog(skill: AgentSkillDefinition): Promise<void> {
     const skillDir = join(this.paths.skillsCatalogDir, skill.id);
-    await mkdir(skillDir, { recursive: true });
-    await Promise.all(Object.entries(skill.files).map(async ([relativePath, content]) => {
-      const target = join(skillDir, relativePath);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content);
-    }));
+    const tempSkillDir = join(this.paths.skillsCatalogDir, `.${skill.id}.${randomUUID()}.tmp`);
+    await mkdir(dirname(skillDir), { recursive: true });
+    await removeWithRetry(tempSkillDir);
+    await cp(skill.sourcePath, tempSkillDir, {
+      recursive: true,
+      filter: (source) => source !== join(skill.sourcePath, "skill.json"),
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await removeWithRetry(skillDir);
+      try {
+        await rename(tempSkillDir, skillDir);
+        return;
+      } catch (error) {
+        if (
+          attempt === 2 ||
+          !isNodeError(error) ||
+          (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
+        ) {
+          throw error;
+        }
+        await delay(10);
+      }
+    }
   }
 
   private async setSkillActiveOnDisk(skill: AgentSkillDefinition, active: boolean): Promise<void> {
@@ -618,7 +635,7 @@ export class AgentCapabilitiesService {
   private snapshotSkill(skillId: string): AgentSkillSnapshot {
     const skill = this.requireSkill(skillId);
     const state = (this.state as CapabilityState).skills[skill.id];
-    const { files: _files, ...definition } = skill;
+    const { sourcePath: _sourcePath, ...definition } = skill;
     return {
       ...definition,
       installedVersion: state.installedVersion,
@@ -700,6 +717,27 @@ const fileIsExecutable = async (path: string): Promise<boolean> => {
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const removeWithRetry = async (path: string): Promise<void> => {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (
+        attempt === 4 ||
+        !isNodeError(error) ||
+        (error.code !== "ENOTEMPTY" && error.code !== "EBUSY" && error.code !== "EEXIST")
+      ) {
+        throw error;
+      }
+      await delay(20);
+    }
+  }
+};
 
 const canFallbackToUserPaths = (error: unknown, env: NodeJS.ProcessEnv): boolean => {
   if (!isNodeError(error) || (error.code !== "EACCES" && error.code !== "EPERM")) {
