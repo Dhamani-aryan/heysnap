@@ -27,6 +27,7 @@ export interface AgentPanelProps {
   readonly workspaceRoot?: string;
   readonly onOpenFilePath?: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+  readonly onThreadResolved?: (threadId: string) => void;
 }
 
 export const AgentPanel = ({
@@ -36,6 +37,7 @@ export const AgentPanel = ({
   workspaceRoot,
   onOpenFilePath,
   onSelectThread,
+  onThreadResolved,
 }: AgentPanelProps): React.ReactElement => {
   const store = useAgentChatStoreRef();
   const activeRunHandleRef = useRef<AgentRunHandle | null>(null);
@@ -117,10 +119,12 @@ export const AgentPanel = ({
       }, {
         onRunStart: ({ runId, threadId }) => {
           store.getState().markRunStarted({ runId, threadId });
+          onThreadResolved?.(threadId);
         },
         onEvent: (event) => {
           if (event.type === "thread.created" || event.type === "thread.updated") {
             latestThreadSummary = event.thread;
+            onThreadResolved?.(event.thread.id);
           }
 
           if (event.type === "runtime.error") {
@@ -148,7 +152,16 @@ export const AgentPanel = ({
 
       return true;
     },
-    [agentBaseUrl, applyRuntimeEvent, currentPath, flushBufferedEvents, onSelectThread, selectedThreadId, store],
+    [
+      agentBaseUrl,
+      applyRuntimeEvent,
+      currentPath,
+      flushBufferedEvents,
+      onSelectThread,
+      onThreadResolved,
+      selectedThreadId,
+      store,
+    ],
   );
 
   useEffect(() => {
@@ -159,6 +172,11 @@ export const AgentPanel = ({
         setRunError(null);
         setIsLoading(false);
       }
+      return;
+    }
+
+    const currentActiveRun = store.getState().activeRun;
+    if (activeRunHandleRef.current !== null && currentActiveRun?.threadId === selectedThreadId) {
       return;
     }
 
@@ -180,6 +198,7 @@ export const AgentPanel = ({
             activeRunHandleRef.current = resumeAgentRun(agentBaseUrl, result.activeRun, {
               onRunStart: ({ runId, threadId }) => {
                 store.getState().markRunStarted({ runId, threadId });
+                onThreadResolved?.(threadId);
               },
               onEvent: applyRuntimeEvent,
               onRunEnd: () => {
@@ -211,7 +230,7 @@ export const AgentPanel = ({
     return () => {
       isCurrent = false;
     };
-  }, [agentBaseUrl, applyRuntimeEvent, flushBufferedEvents, selectedThreadId, store]);
+  }, [agentBaseUrl, applyRuntimeEvent, flushBufferedEvents, onThreadResolved, selectedThreadId, store]);
 
   useEffect(() => {
     return () => {
