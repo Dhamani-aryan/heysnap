@@ -116,7 +116,6 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     harness: new CodexAgentHarness({
       filesystemRoot: filesystemRoot.absolutePath,
       codexBin: options.codexBin ?? process.env.CODEX_BIN ?? capabilities.getCodexBin(),
-      capabilitiesInstruction: () => capabilities.buildInstructionBlock(),
     }),
   });
   const capabilitiesSocketServer = attachCapabilitiesWebSocketServer(server, {
