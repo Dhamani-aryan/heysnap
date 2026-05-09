@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "cross-env NEXT_PUBLIC_CLOUD_SERVER_URL=http://localhost:4100 next dev",
+    "dev:hosted": "cross-env NEXT_PUBLIC_CLOUD_SERVER_URL=https://api.heysnap.xyz next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
@@ -16,6 +17,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2"
   }

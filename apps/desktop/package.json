@@ -6,7 +6,8 @@
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "cross-env VITE_CLOUD_SERVER_URL=http://localhost:4100 CLOUD_SERVER_URL=http://localhost:4100 electron-vite dev",
+    "dev:hosted": "cross-env VITE_CLOUD_SERVER_URL=https://api.heysnap.xyz CLOUD_SERVER_URL=https://api.heysnap.xyz electron-vite dev",
     "build": "electron-vite build",
     "dist": "pnpm build && electron-builder --publish never",
     "dist:mac": "pnpm build && electron-builder --mac --publish never",
@@ -28,6 +29,7 @@
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",

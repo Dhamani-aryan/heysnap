@@ -9,7 +9,7 @@ in-process for local desktop work, so users do not need Docker installed.
 ## Responsibilities
 
 - Desktop shell for macOS and Windows.
-- Logs in to `https://api.heysnap.xyz` and shows cloud machines.
+- Logs in to the configured cloud server and shows cloud machines.
 - Registers the local machine as a cloud inventory record.
 - Starts/stops the embedded local machine server.
 - Opens local workspaces through direct `ws://127.0.0.1:<port>` URLs.
@@ -26,6 +26,7 @@ pnpm --filter @ank1015-app/desktop dev
 
 ```sh
 pnpm --filter @ank1015-app/desktop dev
+pnpm --filter @ank1015-app/desktop dev:hosted
 pnpm --filter @ank1015-app/desktop build
 pnpm --filter @ank1015-app/desktop typecheck
 pnpm --filter @ank1015-app/desktop dist:mac:arm64
