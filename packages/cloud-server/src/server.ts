@@ -20,7 +20,7 @@ import type { ComputerProvisioner } from "./provisioning/types.js";
 import { createReleaseRoutes } from "./releases/routes.js";
 import { HttpError } from "./shared/errors.js";
 import type { AppVariables } from "./shared/context.js";
-import type { GatewayHttpResponse, TunnelStatusRegistry } from "./gateway/tunnel.js";
+import type { GatewayHttpResponse, GatewayHttpStreamResponse, TunnelStatusRegistry } from "./gateway/tunnel.js";
 
 export type { TunnelStatusRegistry } from "./gateway/tunnel.js";
 
@@ -82,6 +82,9 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
       tunnelRegistry,
       "/filesystem/preview",
     );
+  });
+  app.all("/gateway/computers/:computerId/agent/*", async (context) => {
+    return await proxyGatewayAgentHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
   app.route("/machines", createMachineRoutes(options.store, options.config));
   app.route("/llm", createAiGatewayRoutes(options.store, options.config));
@@ -160,6 +163,51 @@ const proxyGatewayFilesystemHttpRequest = async (
   return toGatewayDownloadResponse(proxied);
 };
 
+const proxyGatewayAgentHttpRequest = async (
+  context: Context<{ Variables: AppVariables }>,
+  gatewayAccessService: GatewayAccessService,
+  tunnelRegistry: TunnelStatusRegistry,
+): Promise<Response> => {
+  const computerId = context.req.param("computerId");
+  const requestUrl = new URL(context.req.url);
+
+  if (computerId === undefined || computerId.length === 0) {
+    return context.json({ error: { code: "NOT_FOUND", message: "Computer not found" } }, 404);
+  }
+
+  const token = readBearerToken(context.req.header("authorization"))
+    ?? requestUrl.searchParams.get("accessToken")
+    ?? requestUrl.searchParams.get("token")
+    ?? undefined;
+
+  if (token === undefined || token.length === 0) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Gateway access token is required" } }, 401);
+  }
+
+  const accessSession = await gatewayAccessService.authenticateAccessToken({ token, computerId });
+
+  if (accessSession === null) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
+  }
+
+  if (tunnelRegistry.proxyStreamingHttpRequest === undefined) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  const proxied = await tunnelRegistry.proxyStreamingHttpRequest(computerId, {
+    path: buildAgentProxyTargetPath(computerId, requestUrl),
+    method: context.req.method,
+    headers: getForwardedAgentHeaders(context),
+    body: await readProxyRequestBody(context),
+  });
+
+  if (proxied === null) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  return toGatewayAgentResponse(proxied);
+};
+
 const buildFilesystemProxyTargetPath = (
   requestUrl: URL,
   targetPathname: "/filesystem/download" | "/filesystem/preview",
@@ -170,6 +218,45 @@ const buildFilesystemProxyTargetPath = (
   const queryString = query.toString();
 
   return `${targetPathname}${queryString.length > 0 ? `?${queryString}` : ""}`;
+};
+
+const buildAgentProxyTargetPath = (computerId: string, requestUrl: URL): string => {
+  const prefix = `/gateway/computers/${encodeURIComponent(computerId)}/agent`;
+  const suffix = requestUrl.pathname.startsWith(prefix)
+    ? requestUrl.pathname.slice(prefix.length)
+    : "";
+  const query = new URLSearchParams(requestUrl.searchParams);
+  query.delete("accessToken");
+  query.delete("token");
+  const queryString = query.toString();
+
+  return `/agent${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
+};
+
+const getForwardedAgentHeaders = (context: Context<{ Variables: AppVariables }>): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  const contentType = context.req.header("content-type");
+  const lastEventId = context.req.header("last-event-id");
+
+  if (contentType !== undefined) {
+    headers["content-type"] = contentType;
+  }
+
+  if (lastEventId !== undefined) {
+    headers["last-event-id"] = lastEventId;
+  }
+
+  return headers;
+};
+
+const readProxyRequestBody = async (
+  context: Context<{ Variables: AppVariables }>,
+): Promise<Buffer | undefined> => {
+  if (context.req.method === "GET" || context.req.method === "HEAD") {
+    return undefined;
+  }
+
+  return Buffer.from(await context.req.arrayBuffer());
 };
 
 const toGatewayDownloadResponse = (proxied: GatewayHttpResponse): Response => {
@@ -189,11 +276,35 @@ const toGatewayDownloadResponse = (proxied: GatewayHttpResponse): Response => {
   });
 };
 
+const toGatewayAgentResponse = (proxied: GatewayHttpStreamResponse): Response => {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(proxied.headers)) {
+    if (isForwardedAgentHeader(name)) {
+      headers.set(name, value);
+    }
+  }
+
+  return new Response(proxied.body as unknown as ConstructorParameters<typeof Response>[0], {
+    status: proxied.statusCode,
+    headers,
+  });
+};
+
 const isForwardedDownloadHeader = (name: string): boolean => {
   const normalized = name.toLowerCase();
   return normalized === "content-type" ||
     normalized === "content-disposition" ||
     normalized === "cache-control";
+};
+
+const isForwardedAgentHeader = (name: string): boolean => {
+  const normalized = name.toLowerCase();
+  return [
+    "cache-control",
+    "content-type",
+    "x-accel-buffering",
+  ].includes(normalized);
 };
 
 const readBearerToken = (authorization: string | undefined): string | undefined => {
