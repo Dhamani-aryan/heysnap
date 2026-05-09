@@ -135,8 +135,12 @@ export class DrizzleCloudStore implements CloudStore {
     readonly status: ComputerRecord["status"];
     readonly providerMetadata: unknown;
     readonly capabilities: unknown;
+    readonly machineHealth?: unknown;
   }): Promise<ComputerRecord> {
-    const [computer] = await this.db.insert(computers).values(input).returning();
+    const [computer] = await this.db.insert(computers).values({
+      ...input,
+      machineHealth: input.machineHealth ?? {},
+    }).returning();
     return computer;
   }
 
@@ -159,6 +163,7 @@ export class DrizzleCloudStore implements CloudStore {
     readonly status?: ComputerRecord["status"];
     readonly providerMetadata?: unknown;
     readonly capabilities?: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion?: string | null;
     readonly lastHeartbeatAt?: Date | null;
   }): Promise<ComputerRecord | null> {
@@ -170,6 +175,7 @@ export class DrizzleCloudStore implements CloudStore {
         ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.providerMetadata !== undefined ? { providerMetadata: input.providerMetadata } : {}),
         ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
+        ...(input.machineHealth !== undefined ? { machineHealth: input.machineHealth } : {}),
         ...(input.machineServerVersion !== undefined ? { machineServerVersion: input.machineServerVersion } : {}),
         ...(input.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: input.lastHeartbeatAt } : {}),
         updatedAt,
@@ -193,6 +199,7 @@ export class DrizzleCloudStore implements CloudStore {
     readonly status?: ComputerRecord["status"];
     readonly providerMetadata?: unknown;
     readonly capabilities?: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion?: string | null;
     readonly lastHeartbeatAt?: Date | null;
   }): Promise<ComputerRecord | null> {
@@ -203,6 +210,7 @@ export class DrizzleCloudStore implements CloudStore {
         ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.providerMetadata !== undefined ? { providerMetadata: input.providerMetadata } : {}),
         ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
+        ...(input.machineHealth !== undefined ? { machineHealth: input.machineHealth } : {}),
         ...(input.machineServerVersion !== undefined ? { machineServerVersion: input.machineServerVersion } : {}),
         ...(input.lastHeartbeatAt !== undefined ? { lastHeartbeatAt: input.lastHeartbeatAt } : {}),
         updatedAt,

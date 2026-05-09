@@ -43,6 +43,7 @@ export const computers = pgTable("computers", {
   status: computerStatusEnum("status").notNull(),
   providerMetadata: jsonb("provider_metadata").notNull().default({}),
   capabilities: jsonb("capabilities").notNull().default([]),
+  machineHealth: jsonb("machine_health").notNull().default({}),
   machineServerVersion: text("machine_server_version"),
   lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
