@@ -44,6 +44,9 @@ jobs:
       - name: Test machine server
         run: pnpm --filter @ank1015-app/server test
 
+      - name: Test machine bootstrap
+        run: pnpm --filter @ank1015-app/machine-bootstrap test
+
       - name: Build machine server
         run: pnpm --filter @ank1015-app/server build
 
@@ -172,104 +175,3 @@ jobs:
             return value;
           }
           NODE
-
-      - name: Configure AWS credentials for cloud server host
-        if: ${{ inputs.channel == 'stable' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CLOUD_SERVER_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Update cloud server machine defaults
-        if: ${{ inputs.channel == 'stable' }}
-        id: update-defaults
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          COMMANDS="$(node <<'NODE'
-          const version = requireEnv("VERSION");
-
-          console.log(JSON.stringify({
-            commands: [
-              "set -euo pipefail",
-              "CURRENT_CLOUD_IMAGE=\"$(docker inspect ank1015-cloud-server --format '{{.Config.Image}}')\"",
-              "sudo cp /opt/ank1015/cloud-server.env /opt/ank1015/cloud-server.env.bak",
-              upsertEnvCommand("MACHINE_SERVER_VERSION", version),
-              "docker rm -f ank1015-cloud-server",
-              "docker run -d --name ank1015-cloud-server --restart unless-stopped --network host --env-file /opt/ank1015/cloud-server.env \"$CURRENT_CLOUD_IMAGE\"",
-              "sleep 2",
-              "docker exec ank1015-cloud-server /bin/sh -lc 'printf \"MACHINE_SERVER_VERSION=%s\\n\" \"$MACHINE_SERVER_VERSION\"'",
-              "docker logs --tail 50 ank1015-cloud-server",
-            ],
-          }));
-
-          function upsertEnvCommand(key, value) {
-            return [
-              `if sudo grep -q '^${key}=' /opt/ank1015/cloud-server.env; then`,
-              `  sudo sed -i "s|^${key}=.*|${key}=${value}|" /opt/ank1015/cloud-server.env;`,
-              "else",
-              `  printf '%s\\n' '${key}=${value}' | sudo tee -a /opt/ank1015/cloud-server.env >/dev/null;`,
-              "fi",
-            ].join(" ");
-          }
-
-          function requireEnv(name) {
-            const value = process.env[name];
-
-            if (value === undefined || value.trim().length === 0) {
-              throw new Error(`${name} is required`);
-            }
-
-            return value;
-          }
-          NODE
-          )"
-
-          COMMAND_ID="$(aws ssm send-command \
-            --region "${{ vars.AWS_REGION }}" \
-            --instance-ids "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
-            --document-name AWS-RunShellScript \
-            --comment "Update machine server defaults to $VERSION" \
-            --parameters "$COMMANDS" \
-            --query 'Command.CommandId' \
-            --output text)"
-          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
-          echo "Started SSM command $COMMAND_ID"
-
-      - name: Wait for cloud server defaults update
-        if: ${{ inputs.channel == 'stable' }}
-        run: |
-          COMMAND_ID="${{ steps.update-defaults.outputs.command_id }}"
-
-          while true; do
-            STATUS="$(aws ssm get-command-invocation \
-              --region "${{ vars.AWS_REGION }}" \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
-              --query 'Status' \
-              --output text)"
-            echo "SSM command $COMMAND_ID status: $STATUS"
-
-            case "$STATUS" in
-              Success)
-                aws ssm get-command-invocation \
-                  --region "${{ vars.AWS_REGION }}" \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
-                  --query '{stdout:StandardOutputContent,stderr:StandardErrorContent}' \
-                  --output json
-                exit 0
-                ;;
-              Failed|Cancelled|TimedOut|Cancelling)
-                aws ssm get-command-invocation \
-                  --region "${{ vars.AWS_REGION }}" \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "${{ vars.CLOUD_SERVER_INSTANCE_ID }}" \
-                  --query '{stdout:StandardOutputContent,stderr:StandardErrorContent}' \
-                  --output json
-                exit 1
-                ;;
-            esac
-
-            sleep 5
-          done
