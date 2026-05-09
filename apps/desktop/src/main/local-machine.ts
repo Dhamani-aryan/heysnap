@@ -40,7 +40,7 @@ export interface LocalMachineStatus {
     readonly filesystemRoot: string | null;
     readonly urls: {
       readonly filesystemWebSocketUrl: string;
-      readonly agentWebSocketUrl: string;
+      readonly agentBaseUrl: string;
       readonly capabilitiesWebSocketUrl: string;
     } | null;
     readonly error: string | null;
@@ -278,7 +278,7 @@ export class LocalMachineController {
       filesystemRoot: server.filesystemRoot.absolutePath,
       urls: {
         filesystemWebSocketUrl: server.urls.filesystemWebSocketUrl,
-        agentWebSocketUrl: server.urls.agentWebSocketUrl,
+        agentBaseUrl: server.urls.agentBaseUrl,
         capabilitiesWebSocketUrl: server.urls.capabilitiesWebSocketUrl,
       },
       error: null,

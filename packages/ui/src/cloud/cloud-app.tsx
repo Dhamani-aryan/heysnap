@@ -53,7 +53,7 @@ export interface LocalMachineBridgeStatus {
     readonly filesystemRoot: string | null;
     readonly urls: {
       readonly filesystemWebSocketUrl: string;
-      readonly agentWebSocketUrl: string;
+      readonly agentBaseUrl: string;
       readonly capabilitiesWebSocketUrl?: string;
     } | null;
     readonly error: string | null;
@@ -621,7 +621,7 @@ export function CloudApp({
       screenKey = `local-workspace:${selectedComputer.id}`;
       screenContent = (
         <MachineWorkspace
-          agentWebsocketUrl={localWorkspaceUrls.agentWebSocketUrl}
+          agentBaseUrl={localWorkspaceUrls.agentBaseUrl}
           capabilitiesWebsocketUrl={localWorkspaceUrls.capabilitiesWebSocketUrl}
           computer={selectedComputer}
           filesystemWebsocketUrl={localWorkspaceUrls.filesystemWebSocketUrl}
@@ -643,9 +643,9 @@ export function CloudApp({
       screenKey = `remote-workspace:${selectedComputer.id}`;
       screenContent = (
         <MachineWorkspace
-          agentWebsocketUrl={buildGatewayWebsocketUrl({
+          agentBaseUrl={buildGatewayHttpUrl({
             baseUrl: client.baseUrl,
-            path: accessSession.routes.agentWebSocketUrl,
+            path: accessSession.routes.agentBaseUrl,
             token: accessSession.accessSession.token,
           })}
           capabilitiesWebsocketUrl={accessSession.routes.capabilitiesWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
@@ -802,10 +802,21 @@ const buildGatewayWebsocketUrl = (input: {
   return url.toString();
 };
 
+const buildGatewayHttpUrl = (input: {
+  readonly baseUrl: string;
+  readonly path: string;
+  readonly token: string;
+}): string => {
+  const url = new URL(input.path, input.baseUrl);
+  url.searchParams.set("accessToken", input.token);
+
+  return url.toString();
+};
+
 const getLocalWorkspaceUrls = (
   computer: CloudComputer | null,
   status: LocalMachineBridgeStatus | null,
-): { readonly filesystemWebSocketUrl: string; readonly agentWebSocketUrl: string; readonly capabilitiesWebSocketUrl?: string } | null => {
+): { readonly filesystemWebSocketUrl: string; readonly agentBaseUrl: string; readonly capabilitiesWebSocketUrl?: string } | null => {
   if (
     computer === null ||
     computer.kind !== "local" ||
