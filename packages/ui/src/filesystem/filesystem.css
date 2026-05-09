@@ -231,6 +231,10 @@ button:disabled {
   gap: 8px;
 }
 
+.connectors-skills-heading {
+  margin-top: 26px;
+}
+
 .connectors-page-heading h1 {
   margin: 0;
   color: var(--cloud-text, #1f1f1f);
@@ -319,6 +323,16 @@ button:disabled {
   font-weight: 700;
 }
 
+.skill-logo-wrap {
+  background: #f5f5f5;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+:root.dark .skill-logo-wrap {
+  background: #1a1a1a;
+  color: rgba(255, 255, 255, 0.76);
+}
+
 .connector-copy {
   display: grid;
   min-width: 0;
@@ -365,6 +379,34 @@ button:disabled {
 
 :root.dark .connector-actions button {
   background: #1a1a1a;
+}
+
+.skill-toggle {
+  display: inline-flex;
+  min-width: 88px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.skill-toggle span {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.skill-toggle.is-active span {
+  background: #2da44e;
+}
+
+:root.dark .skill-toggle span {
+  background: rgba(255, 255, 255, 0.42);
+}
+
+:root.dark .skill-toggle.is-active span {
+  background: #3fb950;
 }
 
 .connector-connect-backdrop {
