@@ -1,5 +1,9 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+
 import { AgentCapabilitiesService } from "./service.js";
+
+const DEFAULT_MACHINE_ENV_FILE = "/opt/ank1015/machine.env";
 
 void main().catch((error) => {
   console.error(error instanceof Error ? error.message : "Capability helper failed");
@@ -7,6 +11,7 @@ void main().catch((error) => {
 });
 
 async function main(): Promise<void> {
+  loadMachineEnv();
   process.env.ANK1015_CAPABILITIES_HELPER_MODE = "1";
   const [operation, targetId, value] = process.argv.slice(2);
   const service = new AgentCapabilitiesService();
@@ -45,5 +50,30 @@ function requireTarget(targetId: string | undefined): string {
 function printProgress(progress: { readonly message: string }): void {
   if (progress.message.length > 0) {
     console.error(progress.message);
+  }
+}
+
+function loadMachineEnv(): void {
+  const envFile = process.env.ANK1015_MACHINE_ENV_FILE?.trim() || DEFAULT_MACHINE_ENV_FILE;
+  let contents: string;
+
+  try {
+    contents = readFileSync(envFile, "utf8");
+  } catch {
+    return;
+  }
+
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#")) {
+      continue;
+    }
+
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (match === null) {
+      continue;
+    }
+
+    process.env[match[1]] = match[2];
   }
 }

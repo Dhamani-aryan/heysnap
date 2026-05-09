@@ -117,7 +117,9 @@ install_capabilities_helper() {
     cat >/opt/ank1015/agent-capabilities-helper <<'HELPER'
 #!/usr/bin/env bash
 set -euo pipefail
+set -a
 source /opt/ank1015/machine.env
+set +a
 exec /usr/bin/node /opt/ank1015/machine-server/current/dist/capabilities/helper.js "$@"
 HELPER
     chown root:root /opt/ank1015/agent-capabilities-helper

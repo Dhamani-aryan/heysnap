@@ -84,6 +84,7 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("metadata.sha256");
     expect(userData).toContain("ExecStart=/usr/bin/node /opt/ank1015/machine-server/current/dist/index.js");
     expect(userData).toContain("User=agent");
+    expect(userData).toContain("set -a\nsource /opt/ank1015/machine.env\nset +a");
     expect(userData).toContain("cat >/home/agent/.codex/config.toml");
     expect(userData).toContain('model = "gpt-5.5"');
     expect(userData).toContain('base_url = "https://cloud.example.com/llm/openai/v1"');
