@@ -106,6 +106,15 @@ export class CloudClient {
     });
   }
 
+  getComputer(token: string, computerId: string): Promise<ComputerResponse> {
+    return this.request<ComputerResponse>(
+      `/computers/${encodeURIComponent(computerId)}`,
+      {
+        headers: this.authHeaders(token),
+      },
+    );
+  }
+
   createComputer(token: string, input: { readonly name: string }): Promise<ComputerResponse> {
     return this.request<ComputerResponse>("/computers", {
       method: "POST",
@@ -115,6 +124,16 @@ export class CloudClient {
         "content-type": "application/json",
       },
     });
+  }
+
+  startComputer(token: string, computerId: string): Promise<ComputerResponse> {
+    return this.request<ComputerResponse>(
+      `/computers/${encodeURIComponent(computerId)}/start`,
+      {
+        method: "POST",
+        headers: this.authHeaders(token),
+      },
+    );
   }
 
   createComputerAccessSession(token: string, computerId: string): Promise<ComputerAccessSessionResponse> {

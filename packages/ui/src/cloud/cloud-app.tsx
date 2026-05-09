@@ -12,7 +12,7 @@ import {
 } from "./cloud-client";
 import { LocalMachineOnboardingScreen } from "./local-machine-onboarding-screen";
 import { LoginScreen } from "./login-screen";
-import { MachineWorkspace } from "./machine-workspace";
+import { MachineWorkspace, MachineWorkspaceLoader } from "./machine-workspace";
 import { MyMachinesScreen } from "./my-machines-screen";
 import { RemoteMachineCreateScreen } from "./remote-machine-create-screen";
 
@@ -20,6 +20,7 @@ const DEFAULT_CLOUD_SERVER_URL = "https://api.heysnap.xyz";
 const DEFAULT_STORAGE_KEY = "ank1015:cloud-session-token";
 const MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX = ":machines-onboarding-shown";
 const MACHINES_REFRESH_INTERVAL_MS = 5000;
+const SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS = 2000;
 const ACCESS_SESSION_REFRESH_BUFFER_MS = 60_000;
 const CLOUD_SCREEN_TRANSITION = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
@@ -87,6 +88,7 @@ export function CloudApp({
   const shouldManageLocalMachine = includeLocalMachine && localMachineBridge !== undefined;
   const lastLocalSyncKeyRef = useRef<string | null>(null);
   const routeComputerIdRef = useRef<string | null>(initialComputerId ?? null);
+  const startingComputerIdsRef = useRef<Set<string>>(new Set());
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<CloudUser | null>(null);
   const [hasSeenMachinesOnboarding, setHasSeenMachinesOnboarding] = useState(() =>
@@ -113,10 +115,19 @@ export function CloudApp({
   const [localMachinePreview, setLocalMachinePreview] = useState<LocalMachineRegistrationPreview | null>(null);
   const [localMachineRegistrationError, setLocalMachineRegistrationError] = useState<string | null>(null);
   const [isAddingLocalMachine, setIsAddingLocalMachine] = useState(false);
+  const [workspaceMachineStartup, setWorkspaceMachineStartup] = useState<{
+    readonly computerId: string;
+    readonly phase: "checking" | "starting";
+  } | null>(null);
   const selectedComputer = selectedComputerId === null
     ? null
     : computers.find((computer) => computer.id === selectedComputerId) ?? null;
   const selectedComputerKind = selectedComputer?.kind ?? null;
+  const selectedComputerStatus = selectedComputer?.status ?? null;
+  const workspaceMachineStartupPhase = selectedComputerId !== null &&
+    workspaceMachineStartup?.computerId === selectedComputerId
+      ? workspaceMachineStartup.phase
+      : null;
   const localComputerForThisDevice = useMemo(() => {
     if (localMachinePreview === null) {
       return null;
@@ -172,6 +183,7 @@ export function CloudApp({
     removeStoredToken(storageKey);
     removeStoredBoolean(machinesOnboardingStorageKey);
     lastLocalSyncKeyRef.current = null;
+    startingComputerIdsRef.current.clear();
     setToken(null);
     setUser(null);
     setHasSeenMachinesOnboarding(false);
@@ -185,6 +197,7 @@ export function CloudApp({
     setLocalMachinePreview(null);
     setLocalMachineRegistrationError(null);
     setIsAddingLocalMachine(false);
+    setWorkspaceMachineStartup(null);
     setAuthState("unauthenticated");
   }, [machinesOnboardingStorageKey, storageKey]);
 
@@ -388,6 +401,7 @@ export function CloudApp({
       routeComputerIdRef.current = nextComputerId;
       setAccessSession(null);
       setWorkspaceError(null);
+      setWorkspaceMachineStartup(null);
     }
   }, [initialComputerId, initialThreadId]);
 
@@ -417,6 +431,175 @@ export function CloudApp({
       return;
     }
 
+    let isCurrent = true;
+    const computerId = selectedComputerId;
+
+    setWorkspaceMachineStartup({ computerId, phase: "checking" });
+    setWorkspaceError(null);
+
+    void client.getComputer(token, computerId)
+      .then(async (response) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        upsertComputer(response.computer);
+
+        if (response.computer.kind === "local") {
+          setWorkspaceMachineStartup((current) =>
+            current?.computerId === computerId ? null : current
+          );
+          return;
+        }
+
+        if (response.computer.status === "sleeping") {
+          setWorkspaceMachineStartup({ computerId, phase: "starting" });
+
+          if (startingComputerIdsRef.current.has(computerId)) {
+            return;
+          }
+
+          startingComputerIdsRef.current.add(computerId);
+
+          try {
+            const startResponse = await client.startComputer(token, computerId);
+
+            if (!isCurrent) {
+              return;
+            }
+
+            upsertComputer(startResponse.computer);
+
+            if (!isRemoteMachinePendingStartup(startResponse.computer.status)) {
+              setWorkspaceMachineStartup((current) =>
+                current?.computerId === computerId ? null : current
+              );
+            }
+          } finally {
+            startingComputerIdsRef.current.delete(computerId);
+          }
+
+          return;
+        }
+
+        if (isRemoteMachinePendingStartup(response.computer.status)) {
+          setWorkspaceMachineStartup({ computerId, phase: "starting" });
+          return;
+        }
+
+        setWorkspaceMachineStartup((current) =>
+          current?.computerId === computerId ? null : current
+        );
+      })
+      .catch((error) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        if (isAuthFailure(error)) {
+          clearSession();
+          return;
+        }
+
+        setWorkspaceMachineStartup((current) =>
+          current?.computerId === computerId ? null : current
+        );
+        setWorkspaceError(error instanceof Error ? error.message : "Failed to check machine status.");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [authState, clearSession, client, selectedComputerId, token, upsertComputer]);
+
+  useEffect(() => {
+    if (
+      authState !== "authenticated" ||
+      token === null ||
+      selectedComputerId === null ||
+      workspaceMachineStartupPhase !== "starting"
+    ) {
+      return;
+    }
+
+    let isCurrent = true;
+    let pollTimer: number | undefined;
+    const computerId = selectedComputerId;
+
+    const pollSelectedMachine = (): void => {
+      void client.getComputer(token, computerId)
+        .then((response) => {
+          if (!isCurrent) {
+            return;
+          }
+
+          upsertComputer(response.computer);
+
+          if (
+            response.computer.kind === "local" ||
+            isRemoteMachineConnectable(response.computer.status)
+          ) {
+            setWorkspaceMachineStartup((current) =>
+              current?.computerId === computerId ? null : current
+            );
+            return;
+          }
+
+          if (isRemoteMachineTerminal(response.computer.status)) {
+            setWorkspaceMachineStartup((current) =>
+              current?.computerId === computerId ? null : current
+            );
+            setWorkspaceError(getRemoteMachineUnavailableMessage(response.computer.status));
+            return;
+          }
+
+          pollTimer = window.setTimeout(pollSelectedMachine, SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS);
+        })
+        .catch((error) => {
+          if (!isCurrent) {
+            return;
+          }
+
+          if (isAuthFailure(error)) {
+            clearSession();
+            return;
+          }
+
+          pollTimer = window.setTimeout(pollSelectedMachine, SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS);
+        });
+    };
+
+    pollTimer = window.setTimeout(pollSelectedMachine, SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS);
+
+    return () => {
+      isCurrent = false;
+
+      if (pollTimer !== undefined) {
+        window.clearTimeout(pollTimer);
+      }
+    };
+  }, [
+    authState,
+    clearSession,
+    client,
+    selectedComputerId,
+    token,
+    upsertComputer,
+    workspaceMachineStartupPhase,
+  ]);
+
+  useEffect(() => {
+    if (authState !== "authenticated" || token === null || selectedComputerId === null) {
+      return;
+    }
+
+    if (workspaceMachineStartupPhase !== null) {
+      setAccessSession(null);
+      setIsLoadingWorkspace(workspaceMachineStartupPhase === "checking");
+      setWorkspaceError(null);
+      return;
+    }
+
     if (selectedComputer === null) {
       return;
     }
@@ -425,6 +608,13 @@ export function CloudApp({
       setAccessSession(null);
       setIsLoadingWorkspace(false);
       setWorkspaceError(localWorkspaceUrls === null ? "This local machine is not active in this desktop app." : null);
+      return;
+    }
+
+    if (!isRemoteMachineConnectable(selectedComputer.status)) {
+      setAccessSession(null);
+      setIsLoadingWorkspace(false);
+      setWorkspaceError(getRemoteMachineUnavailableMessage(selectedComputer.status));
       return;
     }
 
@@ -477,7 +667,9 @@ export function CloudApp({
     localWorkspaceUrls,
     selectedComputerId,
     selectedComputerKind,
+    selectedComputerStatus,
     token,
+    workspaceMachineStartupPhase,
   ]);
 
   const login = async (input: { readonly email: string; readonly password: string }): Promise<boolean> => {
@@ -581,6 +773,7 @@ export function CloudApp({
     setSelectedThreadId(null);
     setAccessSession(null);
     setWorkspaceError(null);
+    setWorkspaceMachineStartup(null);
     updateWorkspaceRoute({ computerId: computer.id, threadId: null });
   };
 
@@ -589,6 +782,7 @@ export function CloudApp({
     setSelectedThreadId(null);
     setAccessSession(null);
     setWorkspaceError(null);
+    setWorkspaceMachineStartup(null);
     updateWorkspaceRoute({ computerId: null, threadId: null });
   };
 
@@ -629,6 +823,12 @@ export function CloudApp({
     setIsRemoteMachineCreateVisible(false);
   };
 
+  const shouldShowWorkspaceStartup = selectedComputer !== null &&
+    selectedComputer.kind !== "local" &&
+    (
+      workspaceMachineStartupPhase === "starting" ||
+      isRemoteMachinePendingStartup(selectedComputer.status)
+    );
   let screenKey: string;
   let screenContent: React.ReactElement;
 
@@ -681,7 +881,18 @@ export function CloudApp({
       />
     );
   } else if (selectedComputerId !== null) {
-    if (selectedComputer !== null && localWorkspaceUrls !== null) {
+    if (shouldShowWorkspaceStartup && selectedComputer !== null) {
+      screenKey = `remote-workspace-starting:${selectedComputer.id}`;
+      screenContent = (
+        <main className="cloud-workspace">
+          <MachineWorkspaceLoader
+            ariaLabel="Starting machine"
+            computer={selectedComputer}
+            label="Starting"
+          />
+        </main>
+      );
+    } else if (selectedComputer !== null && localWorkspaceUrls !== null) {
       screenKey = `local-workspace:${selectedComputer.id}`;
       screenContent = (
         <MachineWorkspace
@@ -703,7 +914,15 @@ export function CloudApp({
           <div className="cloud-workspace-state">
             <button className="cloud-text-button" type="button" onClick={closeMachine}>Machines</button>
             <p>
-              {workspaceError ?? (isLoadingWorkspace ? "Opening machine..." : "Machine not found.")}
+              {workspaceError ?? (
+                workspaceMachineStartupPhase === "checking"
+                  ? "Checking machine..."
+                  : isLoadingWorkspace
+                    ? "Opening machine..."
+                    : workspaceMachineStartupPhase === "starting"
+                      ? "Starting machine..."
+                      : "Machine not found."
+              )}
             </p>
           </div>
         </main>
@@ -850,6 +1069,42 @@ const isAuthFailure = (error: unknown): boolean =>
   error !== null &&
   "status" in error &&
   (error as { readonly status?: unknown }).status === 401;
+
+const isRemoteMachineConnectable = (status: string): boolean =>
+  status === "online" || status === "idle";
+
+const isRemoteMachinePendingStartup = (status: string): boolean =>
+  status === "creating" || status === "starting";
+
+const isRemoteMachineTerminal = (status: string): boolean =>
+  status === "failed" || status === "offline" || status === "deleted";
+
+const getRemoteMachineUnavailableMessage = (status: string): string => {
+  if (status === "failed") {
+    return "Machine failed to start.";
+  }
+
+  if (status === "offline") {
+    return "Machine is offline.";
+  }
+
+  if (status === "deleted") {
+    return "Machine not found.";
+  }
+
+  if (status === "sleeping") {
+    return "Machine is sleeping.";
+  }
+
+  return `Machine is ${formatStatusLabel(status).toLowerCase()}.`;
+};
+
+const formatStatusLabel = (status: string): string =>
+  status
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 
 const isAccessSessionUsable = (
   response: ComputerAccessSessionResponse | null,

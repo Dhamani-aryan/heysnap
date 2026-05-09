@@ -11,7 +11,6 @@ import type { CloudComputer } from "./cloud-client";
 
 type ImageAsset = string | { readonly src: string };
 
-const WORKSPACE_LOADER_MINIMUM_MS = 2000;
 const WORKSPACE_TRANSITION = { duration: 0.42, ease: [0.22, 1, 0.36, 1] as const };
 const WORKSPACE_PATH_STORAGE_PREFIX = "heysnap:workspace-path";
 
@@ -42,14 +41,12 @@ export function MachineWorkspace({
   onThreadResolved,
   suppressConnectionLoader = false,
 }: MachineWorkspaceProps): React.ReactElement {
-  const [isMinimumLoaderElapsed, setIsMinimumLoaderElapsed] = useState(suppressConnectionLoader);
   const [isFilesystemOpen, setIsFilesystemOpen] = useState(suppressConnectionLoader);
   const latestFilesystemPathRef = useRef<string | null>(null);
   const initialFilesystemPathRef = useRef(
     selectedThreadId === null ? undefined : readStoredWorkspacePath(computer.id, selectedThreadId),
   );
-  const isWorkspaceReady = isMinimumLoaderElapsed && isFilesystemOpen;
-  const loaderImageUrl = computer.kind === "local" ? newMacImageUrl : macImageUrl;
+  const isWorkspaceReady = isFilesystemOpen;
 
   useEffect(() => {
     document.documentElement.dataset.cloudScreen = "workspace";
@@ -63,22 +60,12 @@ export function MachineWorkspace({
 
   useEffect(() => {
     if (suppressConnectionLoader) {
-      setIsMinimumLoaderElapsed(true);
       setIsFilesystemOpen(true);
       return;
     }
 
-    setIsMinimumLoaderElapsed(false);
     setIsFilesystemOpen(false);
-
-    const minimumTimer = window.setTimeout(() => {
-      setIsMinimumLoaderElapsed(true);
-    }, WORKSPACE_LOADER_MINIMUM_MS);
-
-    return () => {
-      window.clearTimeout(minimumTimer);
-    };
-  }, [computer.id, filesystemWebsocketUrl]);
+  }, [computer.id, filesystemWebsocketUrl, suppressConnectionLoader]);
 
   const handleFilesystemOpen = useCallback((): void => {
     setIsFilesystemOpen(true);
@@ -138,26 +125,46 @@ export function MachineWorkspace({
       </motion.div>
       <AnimatePresence>
         {!isWorkspaceReady ? (
-          <motion.section
+          <MachineWorkspaceLoader
             key="connecting"
-            className="cloud-workspace-loader"
-            aria-label="Connecting to machine"
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={WORKSPACE_TRANSITION}
-          >
-            <img
-              className="cloud-workspace-loader-image"
-              src={getImageSrc(loaderImageUrl)}
-              alt=""
-              aria-hidden="true"
-            />
-            <p>Connecting</p>
-          </motion.section>
+            ariaLabel="Connecting to machine"
+            computer={computer}
+            label="Connecting"
+          />
         ) : null}
       </AnimatePresence>
     </main>
+  );
+}
+
+export function MachineWorkspaceLoader({
+  ariaLabel,
+  computer,
+  label,
+}: {
+  readonly ariaLabel: string;
+  readonly computer: CloudComputer;
+  readonly label: string;
+}): React.ReactElement {
+  const loaderImageUrl = computer.kind === "local" ? newMacImageUrl : macImageUrl;
+
+  return (
+    <motion.section
+      className="cloud-workspace-loader"
+      aria-label={ariaLabel}
+      initial={{ opacity: 1 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={WORKSPACE_TRANSITION}
+    >
+      <img
+        className="cloud-workspace-loader-image"
+        src={getImageSrc(loaderImageUrl)}
+        alt=""
+        aria-hidden="true"
+      />
+      <p>{label}</p>
+    </motion.section>
   );
 }
 
