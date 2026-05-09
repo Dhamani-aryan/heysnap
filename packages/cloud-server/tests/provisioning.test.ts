@@ -3,10 +3,13 @@ import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 
 import type { CloudServerConfig } from "../src/config.js";
-import { buildRunInstancesRequest } from "../src/provisioning/aws-ec2-provisioner.js";
+import { AwsEc2Provisioner, buildRunInstancesRequest } from "../src/provisioning/aws-ec2-provisioner.js";
+import { createComputerProvisioner } from "../src/provisioning/factory.js";
+import { DockerMachineProvisioner } from "../src/provisioning/docker-provisioner.js";
 import { getDev8gbPreset } from "../src/provisioning/presets.js";
 import { renderMachineUserData } from "../src/provisioning/user-data.js";
 import type { ComputerRecord } from "../src/db/types.js";
+import type { CommandExecutor } from "../src/provisioning/types.js";
 
 describe("AWS EC2 provisioning", () => {
   it("builds the dev-8gb run-instances request shape", () => {
@@ -96,6 +99,123 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).not.toContain("ank1015-machine-heartbeat.service");
     expect(userData).not.toContain("/machines/register");
     expect(userData).not.toContain("bootstrap-placeholder");
+  });
+});
+
+describe("Docker machine provisioning", () => {
+  it("is selected only when COMPUTER_PROVISIONER=docker", () => {
+    expect(createComputerProvisioner(createConfig())).toBeInstanceOf(AwsEc2Provisioner);
+    expect(createComputerProvisioner({
+      ...createConfig(),
+      computerProvisioner: "docker",
+    })).toBeInstanceOf(DockerMachineProvisioner);
+  });
+
+  it("creates a machine container with identity, labels, network, channel, and workspace volume", async () => {
+    const commands: Array<{ command: string; args: readonly string[] }> = [];
+    const executor: CommandExecutor = async (command, args) => {
+      commands.push({ command, args });
+      if (args[0] === "network" && args[1] === "inspect") {
+        throw new Error("network missing");
+      }
+      if (args[0] === "run") {
+        return { stdout: "container-123\n", stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    };
+    const provisioner = new DockerMachineProvisioner({ executor });
+    const computer = createComputer();
+
+    const result = await provisioner.provisionComputer({
+      computer,
+      bootstrapToken: "bootstrap-token",
+      config: {
+        ...createConfig(),
+        computerProvisioner: "docker",
+        localDockerMachineImage: "machine-image:test",
+        localDockerNetwork: "ank1015-test",
+        localDockerCloudUrl: "http://host.docker.internal:4100",
+        machineServerChannel: "local",
+      },
+    });
+
+    expect(commands.map((entry) => [entry.command, ...entry.args])).toEqual([
+      ["docker", "network", "inspect", "ank1015-test"],
+      ["docker", "network", "create", "ank1015-test"],
+      expect.arrayContaining([
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        "ank1015-machine-computer-123",
+        "--label",
+        "ank1015:kind=machine",
+        "--label",
+        "ank1015:computer-id=computer-123",
+        "--network",
+        "ank1015-test",
+        "--restart",
+        "unless-stopped",
+        "-v",
+        "ank1015-workspace-computer-123:/workspace",
+        "-e",
+        "CLOUD_SERVER_PUBLIC_URL=http://host.docker.internal:4100",
+        "-e",
+        "ANK1015_COMPUTER_ID=computer-123",
+        "-e",
+        "ANK1015_BOOTSTRAP_TOKEN=bootstrap-token",
+        "-e",
+        "MACHINE_SERVER_CHANNEL=local",
+        "-e",
+        "ANK1015_MACHINE_SUPERVISOR=process",
+        "machine-image:test",
+      ]),
+    ]);
+    expect(result.providerMetadata).toMatchObject({
+      provider: "docker",
+      containerId: "container-123",
+      containerName: "ank1015-machine-computer-123",
+      image: "machine-image:test",
+      network: "ank1015-test",
+      workspaceVolume: "ank1015-workspace-computer-123",
+      lastAction: "provision",
+    });
+  });
+
+  it("maps lifecycle commands to docker and removes the local workspace volume on terminate", async () => {
+    const commands: Array<readonly string[]> = [];
+    const executor: CommandExecutor = async (command, args) => {
+      commands.push([command, ...args]);
+      return { stdout: "", stderr: "" };
+    };
+    const provisioner = new DockerMachineProvisioner({ executor });
+    const computer = {
+      ...createComputer(),
+      providerMetadata: {
+        provider: "docker",
+        containerName: "ank1015-machine-computer-123",
+        image: "machine-image:test",
+        network: "ank1015-test",
+        workspaceVolume: "ank1015-workspace-computer-123",
+      },
+    };
+
+    await provisioner.startComputer(computer);
+    await provisioner.stopComputer(computer);
+    await provisioner.restartComputer(computer);
+    const metadata = await provisioner.terminateComputer(computer);
+
+    expect(commands).toEqual([
+      ["docker", "start", "ank1015-machine-computer-123"],
+      ["docker", "stop", "ank1015-machine-computer-123"],
+      ["docker", "restart", "ank1015-machine-computer-123"],
+      ["docker", "rm", "-f", "ank1015-machine-computer-123"],
+      ["docker", "volume", "rm", "-f", "ank1015-workspace-computer-123"],
+    ]);
+    expect(metadata).toMatchObject({
+      provider: "docker",
+      lastAction: "terminate",
+    });
   });
 });
 
