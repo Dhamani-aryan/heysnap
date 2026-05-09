@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import type { ReadableStream } from "node:stream/web";
 
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,41 +74,52 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
-  it("routes agent websocket data through the same machine tunnel", async () => {
-    const { server, baseUrl, computer, access, machine } = await startConnectedTunnel();
-    const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
-    const gateway = await openWebSocket(
-      `${baseUrl}/gateway/computers/${computer.id}/agent?accessToken=${access.token}`,
-    );
-    const openMessage = await machineOpen;
+  it("streams agent HTTP responses through the machine tunnel", async () => {
+    const { server, computer, machine, registry } = await startConnectedTunnel();
+    await waitForCondition(() => registry.isConnected(computer.id));
+    const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
+    const proxyPromise = registry.proxyStreamingHttpRequest(computer.id, {
+      path: "/agent/runs",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: Buffer.from("{\"path\":\"Projects\"}", "utf8"),
+    });
+    const request = await requestPromise;
 
-    expect(openMessage).toMatchObject({
-      type: "open",
-      route: "agent",
-      path: "/agent",
+    expect(request).toMatchObject({
+      type: "httpRequest",
+      path: "/agent/runs",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      bodyBase64: Buffer.from("{\"path\":\"Projects\"}", "utf8").toString("base64"),
+      stream: true,
     });
 
-    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
     machine.send(JSON.stringify({
-      type: "data",
-      connectionId: openMessage.connectionId,
-      data: Buffer.from(JSON.stringify({ type: "hello", serverTime: "now" }), "utf8").toString("base64"),
-      dataType: "text",
+      type: "httpResponseStart",
+      connectionId: request.connectionId,
+      statusCode: 200,
+      headers: { "content-type": "text/event-stream" },
     }));
+    machine.send(JSON.stringify({
+      type: "httpResponseChunk",
+      connectionId: request.connectionId,
+      bodyBase64: Buffer.from("event: run_start\n", "utf8").toString("base64"),
+    }));
+    machine.send(JSON.stringify({
+      type: "httpResponseChunk",
+      connectionId: request.connectionId,
+      bodyBase64: Buffer.from("data: {\"runId\":\"run-1\"}\n\n", "utf8").toString("base64"),
+    }));
+    machine.send(JSON.stringify({ type: "httpResponseEnd", connectionId: request.connectionId }));
 
-    const gatewayHello = await waitForJsonFrame(gateway);
-    expect(gatewayHello.isBinary).toBe(false);
-    expect(gatewayHello.message).toMatchObject({ type: "hello" });
-    gateway.send(JSON.stringify({ type: "ping", requestId: "agent-ping-1" }));
+    const response = await proxyPromise;
 
-    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
-    expect(dataMessage.dataType).toBe("text");
-    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
-      type: "ping",
-      requestId: "agent-ping-1",
-    });
+    expect(response).not.toBeNull();
+    expect(response?.statusCode).toBe(200);
+    expect(response?.headers["content-type"]).toBe("text/event-stream");
+    expect(await readStreamText(response?.body)).toBe("event: run_start\ndata: {\"runId\":\"run-1\"}\n\n");
 
-    gateway.close();
     machine.close();
     await closeServer(server);
   });
@@ -247,6 +259,10 @@ interface CloudHttpRequestMessage {
   readonly type: "httpRequest";
   readonly connectionId: string;
   readonly path: string;
+  readonly method?: string;
+  readonly headers?: Record<string, string>;
+  readonly bodyBase64?: string;
+  readonly stream?: boolean;
 }
 
 const startTunnelServer = async (): Promise<{
@@ -378,6 +394,26 @@ const waitForCondition = (
       }
     }, 10);
   });
+
+const readStreamText = async (stream: ReadableStream<Uint8Array> | undefined): Promise<string> => {
+  if (stream === undefined) {
+    return "";
+  }
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      return text;
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+};
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
