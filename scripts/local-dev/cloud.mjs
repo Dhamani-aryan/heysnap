@@ -16,6 +16,7 @@ export const createLocalCloudEnv = () => ({
   LOCAL_DOCKER_NETWORK: process.env.LOCAL_DOCKER_NETWORK || "ank1015-local",
   LOCAL_DOCKER_CLOUD_URL: process.env.LOCAL_DOCKER_CLOUD_URL || "http://host.docker.internal:4100",
   MACHINE_SERVER_CHANNEL: process.env.MACHINE_SERVER_CHANNEL || "local",
+  AI_GATEWAY_CAPTURE_BODIES: process.env.AI_GATEWAY_CAPTURE_BODIES || "true",
 });
 
 export const runLocalCloudServer = () => {

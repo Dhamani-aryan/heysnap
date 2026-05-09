@@ -77,7 +77,7 @@ export const getDevelopmentCloudServerConfig = (
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
-  aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
+  aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, true),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS, [
     "http://localhost:3000",

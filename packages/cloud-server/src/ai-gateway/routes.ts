@@ -107,17 +107,21 @@ export const createAiGatewayRoutes = (
         model: usageModel,
         metadata: gatewayMetadata,
       });
-      const observedBody = upstreamResponse.body === null
-        ? null
-        : upstreamResponse.body.pipeThrough(observer.createTransformStream());
+      let downstreamBody: ReadableStream<Uint8Array> | null = null;
 
-      if (observedBody === null) {
+      if (upstreamResponse.body === null) {
         void observer.finish().catch((error) => {
+          console.error("failed to finish AI usage logging", error);
+        });
+      } else {
+        const [clientBody, loggingBody] = upstreamResponse.body.tee();
+        downstreamBody = clientBody;
+        void observer.consume(loggingBody).catch((error) => {
           console.error("failed to finish AI usage logging", error);
         });
       }
 
-      return new Response(observedBody, {
+      return new Response(downstreamBody, {
         status: upstreamResponse.status,
         statusText: upstreamResponse.statusText,
         headers: responseHeaders,
@@ -177,16 +181,19 @@ const readProxyRequestBody = async (
     return { body: undefined, text: null, capture: null };
   }
 
-  if (!captureBodies) {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+
+  if (!captureBodies && !contentType.includes("application/json")) {
     return { body: request.body, text: null, capture: null };
   }
 
   const bytes = new Uint8Array(await request.arrayBuffer());
-  const capture = captureBytes(bytes, maxBytes);
+  const capture = captureBodies ? captureBytes(bytes, maxBytes) : null;
+  const text = new TextDecoder().decode(bytes);
 
   return {
     body: bytes,
-    text: capture.text,
+    text,
     capture,
   };
 };
@@ -385,14 +392,26 @@ class AiGatewayResponseObserver {
 
   constructor(private readonly options: AiGatewayResponseObserverOptions) {}
 
-  createTransformStream(): TransformStream<Uint8Array, Uint8Array> {
-    return new TransformStream<Uint8Array, Uint8Array>({
-      transform: (chunk, controller) => {
-        this.observeChunk(chunk);
-        controller.enqueue(chunk);
-      },
-      flush: () => this.finish(),
-    });
+  async consume(stream: ReadableStream<Uint8Array>): Promise<void> {
+    const reader = stream.getReader();
+
+    try {
+      for (;;) {
+        const next = await reader.read();
+
+        if (next.done) {
+          break;
+        }
+
+        this.observeChunk(next.value);
+      }
+
+      await this.finish();
+    } catch (error) {
+      await this.fail(error);
+    } finally {
+      reader.releaseLock();
+    }
   }
 
   private observeChunk(chunk: Uint8Array): void {
@@ -423,10 +442,11 @@ class AiGatewayResponseObserver {
 
     const completedAt = new Date();
     const observed = this.usageParser.finish();
+    const failed = this.options.httpStatus >= 400;
 
     await this.options.store.updateAiUsageRequest({
       id: this.options.usageId,
-      status: this.options.httpStatus >= 400 ? "failed" : "succeeded",
+      status: failed ? "failed" : "succeeded",
       httpStatus: this.options.httpStatus,
       model: observed.model ?? this.options.model,
       inputTokens: observed.inputTokens,
@@ -436,8 +456,49 @@ class AiGatewayResponseObserver {
       totalTokens: observed.totalTokens,
       completedAt,
       durationMs: completedAt.getTime() - this.options.startedAt.getTime(),
+      errorMessage: failed
+        ? observed.errorMessage ?? `Upstream request failed with HTTP ${String(this.options.httpStatus)}`
+        : null,
       metadata: {
         ...this.options.metadata,
+        ...(observed.rawUsage !== undefined ? { upstreamUsage: observed.rawUsage } : {}),
+        usageParseError: observed.parseError,
+      },
+    });
+
+    if (this.options.captureBodies) {
+      await this.options.store.createAiUsagePayload({
+        usageRequestId: this.options.usageId,
+        requestHeaders: this.options.requestHeaders,
+        requestBody: this.options.requestCapture?.text ?? null,
+        requestBodyTruncated: this.options.requestCapture?.truncated ?? false,
+        responseHeaders: this.options.responseHeaders,
+        responseBody: this.responseText.length > 0 ? this.responseText : null,
+        responseBodyTruncated: this.responseTruncated,
+      });
+    }
+  }
+
+  private async fail(error: unknown): Promise<void> {
+    const completedAt = new Date();
+    const observed = this.usageParser.finish();
+
+    await this.options.store.updateAiUsageRequest({
+      id: this.options.usageId,
+      status: "failed",
+      httpStatus: this.options.httpStatus,
+      model: observed.model ?? this.options.model,
+      inputTokens: observed.inputTokens,
+      outputTokens: observed.outputTokens,
+      cachedInputTokens: observed.cachedInputTokens,
+      reasoningOutputTokens: observed.reasoningOutputTokens,
+      totalTokens: observed.totalTokens,
+      completedAt,
+      durationMs: completedAt.getTime() - this.options.startedAt.getTime(),
+      errorMessage: error instanceof Error ? error.message : "Upstream response stream failed",
+      metadata: {
+        ...this.options.metadata,
+        ...(observed.rawUsage !== undefined ? { upstreamUsage: observed.rawUsage } : {}),
         usageParseError: observed.parseError,
       },
     });
@@ -463,6 +524,8 @@ interface ObservedUsage {
   readonly cachedInputTokens: number;
   readonly reasoningOutputTokens: number;
   readonly totalTokens: number;
+  readonly rawUsage: Record<string, unknown> | undefined;
+  readonly errorMessage: string | null;
   readonly parseError: string | null;
 }
 
@@ -474,6 +537,8 @@ class UsageStreamParser {
   private cachedInputTokens = 0;
   private reasoningOutputTokens = 0;
   private totalTokens = 0;
+  private rawUsage: Record<string, unknown> | undefined;
+  private errorMessage: string | null = null;
   private parseError: string | null = null;
 
   push(text: string): void {
@@ -496,6 +561,7 @@ class UsageStreamParser {
   finish(): ObservedUsage {
     if (this.buffer.trim().length > 0) {
       this.observeEvent(this.buffer);
+      this.buffer = "";
     }
 
     return {
@@ -505,6 +571,8 @@ class UsageStreamParser {
       cachedInputTokens: this.cachedInputTokens,
       reasoningOutputTokens: this.reasoningOutputTokens,
       totalTokens: this.totalTokens,
+      rawUsage: this.rawUsage,
+      errorMessage: this.errorMessage,
       parseError: this.parseError,
     };
   }
@@ -533,9 +601,15 @@ class UsageStreamParser {
     const response = asRecord(record?.["response"]);
     const model = stringField(record, "model") ?? stringField(response, "model");
     const usage = asRecord(record?.["usage"]) ?? asRecord(response?.["usage"]);
+    const error = asRecord(record?.["error"]) ?? asRecord(response?.["error"]);
 
     if (model !== undefined) {
       this.model = model;
+    }
+
+    const errorMessage = stringField(error, "message") ?? stringField(error, "code");
+    if (errorMessage !== undefined) {
+      this.errorMessage = errorMessage;
     }
 
     if (usage !== undefined) {
@@ -545,6 +619,7 @@ class UsageStreamParser {
       this.cachedInputTokens = parsed.cachedInputTokens;
       this.reasoningOutputTokens = parsed.reasoningOutputTokens;
       this.totalTokens = parsed.totalTokens;
+      this.rawUsage = usage;
     }
   }
 }
