@@ -10,9 +10,7 @@ export interface CloudServerConfig {
   readonly awsEc2RootVolumeGb: number;
   readonly awsMachineAmiSsmParameter: string;
   readonly awsMachineInstanceProfileName: string | undefined;
-  readonly machineServerImage?: string;
-  readonly machineServerVersion: string;
-  readonly codexDefaultModel?: string;
+  readonly machineServerChannel: string;
   readonly aiGatewayAzureBaseUrl?: string;
   readonly aiGatewayAzureImagesBaseUrl?: string;
   readonly aiGatewayAzureApiKey?: string;
@@ -39,9 +37,7 @@ export const getCloudServerConfig = (
   awsMachineAmiSsmParameter: readOptionalEnv(env, "AWS_MACHINE_AMI_SSM_PARAMETER") ??
     DEFAULT_MACHINE_AMI_SSM_PARAMETER,
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
-  machineServerImage: readOptionalEnv(env, "MACHINE_SERVER_IMAGE"),
-  machineServerVersion: readOptionalEnv(env, "MACHINE_SERVER_VERSION") ?? "latest",
-  codexDefaultModel: readOptionalEnv(env, "CODEX_DEFAULT_MODEL") ?? "gpt-5.5",
+  machineServerChannel: readOptionalEnv(env, "MACHINE_SERVER_CHANNEL") ?? "stable",
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
@@ -65,9 +61,7 @@ export const getDevelopmentCloudServerConfig = (
   awsEc2RootVolumeGb: parsePositiveInteger(env.AWS_EC2_ROOT_VOLUME_GB, 80),
   awsMachineAmiSsmParameter: env.AWS_MACHINE_AMI_SSM_PARAMETER?.trim() || DEFAULT_MACHINE_AMI_SSM_PARAMETER,
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
-  machineServerImage: readOptionalEnv(env, "MACHINE_SERVER_IMAGE"),
-  machineServerVersion: env.MACHINE_SERVER_VERSION?.trim() || "development",
-  codexDefaultModel: env.CODEX_DEFAULT_MODEL?.trim() || "gpt-5.5",
+  machineServerChannel: env.MACHINE_SERVER_CHANNEL?.trim() || "stable",
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
