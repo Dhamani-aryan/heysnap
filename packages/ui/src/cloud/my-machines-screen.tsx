@@ -20,7 +20,7 @@ const getImageSrc = (asset: ImageAsset): string => {
 };
 
 export interface MyMachinesScreenProps {
-  readonly computers: CloudComputer[];
+  readonly computers: readonly CloudComputer[];
   readonly error: string | null;
   readonly isCreatingMachine: boolean;
   readonly isLoading: boolean;

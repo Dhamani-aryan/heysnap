@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { CloudApp } from "@ank1015-app/ui";
+import { CloudApp, CloudRuntimeProvider } from "@ank1015-app/ui";
 import "@ank1015-app/ui/filesystem.css";
 import "@ank1015-app/ui/cloud.css";
 import "./style.css";
@@ -25,10 +25,12 @@ createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <>
       <DesktopTitleBar />
-      <CloudApp
+      <CloudRuntimeProvider
         cloudServerUrl={cloudServerUrl}
         storageKey="ank1015:desktop-session-token"
-      />
+      >
+        <CloudApp />
+      </CloudRuntimeProvider>
       <DesktopUpdatePrompt />
     </>
   </React.StrictMode>,

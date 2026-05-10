@@ -1,26 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import type { AgentThreadSummary } from "../agent/types";
+import type { CloudComputer } from "./cloud-client";
 import {
-  CloudClient,
-  type CloudComputer,
-  type CloudUser,
-  type ComputerAccessSessionResponse,
-} from "./cloud-client";
+  CloudRuntimeProvider,
+  useCloudAuthStore,
+  useCloudMachinesStore,
+  useCloudRuntime,
+  useOptionalCloudRuntime,
+} from "./cloud-runtime";
 import { LoginScreen } from "./login-screen";
 import { MachineWorkspace, MachineWorkspaceLoader } from "./machine-workspace";
 import { MyMachinesScreen } from "./my-machines-screen";
+import {
+  useBootstrapAuth,
+  useLoginMutation,
+  useLogoutMutation,
+  MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX,
+} from "./queries/use-cloud-session";
+import {
+  useCloudComputers,
+  useCreateMachineMutation,
+  useMachineWorkspaceSession,
+  useMachinesQuery,
+  useStopMachineMutation,
+} from "./queries/use-machine-queries";
+import { readStoredBoolean, writeStoredBoolean } from "./state/cloud-storage";
 import { RemoteMachineCreateScreen } from "./remote-machine-create-screen";
 
 const DEFAULT_CLOUD_SERVER_URL = "https://api.heysnap.xyz";
 const DEFAULT_STORAGE_KEY = "ank1015:cloud-session-token";
-const MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX = ":machines-onboarding-shown";
-const MACHINES_REFRESH_INTERVAL_MS = 5000;
-const SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS = 2000;
-const ACCESS_SESSION_REFRESH_BUFFER_MS = 60_000;
 const CLOUD_SCREEN_TRANSITION = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
 export interface CloudAppProps {
@@ -45,60 +57,37 @@ export interface CloudRouteChangeOptions {
   readonly replace?: boolean;
 }
 
-export function CloudApp({
-  cloudServerUrl = DEFAULT_CLOUD_SERVER_URL,
+export function CloudApp(props: CloudAppProps): React.ReactElement {
+  const runtime = useOptionalCloudRuntime();
+
+  if (runtime === null) {
+    return (
+      <CloudRuntimeProvider
+        cloudServerUrl={props.cloudServerUrl ?? DEFAULT_CLOUD_SERVER_URL}
+        storageKey={props.storageKey ?? DEFAULT_STORAGE_KEY}
+      >
+        <CloudAppContent {...props} />
+      </CloudRuntimeProvider>
+    );
+  }
+
+  return <CloudAppContent {...props} />;
+}
+
+function CloudAppContent({
   route,
   onRouteChange,
-  storageKey = DEFAULT_STORAGE_KEY,
 }: CloudAppProps): React.ReactElement {
-  const client = useMemo(() => new CloudClient(cloudServerUrl), [cloudServerUrl]);
+  const { authStore, client, machinesStore, storageKey } = useCloudRuntime();
   const machinesOnboardingStorageKey = `${storageKey}${MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX}`;
   const [internalRoute, setInternalRoute] = useState<CloudAppRoute>({ view: "home" });
-  const activeRoute = route ?? internalRoute;
-  const routeComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
-  const routeThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
-  const routeComputerIdRef = useRef<string | null>(routeComputerId);
-  const startingComputerIdsRef = useRef<Set<string>>(new Set());
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<CloudUser | null>(null);
   const [hasSeenMachinesOnboarding, setHasSeenMachinesOnboarding] = useState(() =>
     readStoredBoolean(machinesOnboardingStorageKey),
   );
-  const [computers, setComputers] = useState<CloudComputer[]>([]);
-  const [hasLoadedMachines, setHasLoadedMachines] = useState(false);
-  const [selectedComputerId, setSelectedComputerId] = useState<string | null>(routeComputerId);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(routeThreadId);
-  const [accessSession, setAccessSession] = useState<ComputerAccessSessionResponse | null>(null);
-  const [accessSessionRefreshTick, setAccessSessionRefreshTick] = useState(0);
-  const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [machinesError, setMachinesError] = useState<string | null>(null);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isLoadingMachines, setIsLoadingMachines] = useState(false);
-  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
-  const [isCreatingMachine, setIsCreatingMachine] = useState(false);
-  const [workspaceMachineStartup, setWorkspaceMachineStartup] = useState<{
-    readonly computerId: string;
-    readonly phase: "checking" | "starting";
-  } | null>(null);
-  const selectedComputer = selectedComputerId === null
-    ? null
-    : computers.find((computer) => computer.id === selectedComputerId) ?? null;
-  const selectedComputerKind = selectedComputer?.kind ?? null;
-  const selectedComputerStatus = selectedComputer?.status ?? null;
-  const workspaceMachineStartupPhase = selectedComputerId !== null &&
-    workspaceMachineStartup?.computerId === selectedComputerId
-      ? workspaceMachineStartup.phase
-      : null;
-  const isPreparingMachinesGate =
-    authState === "authenticated" &&
-    hasLoadedMachines === false;
-  const shouldShowFirstRemoteMachineCreate =
-    hasLoadedMachines &&
-    computers.length === 0 &&
-    machinesError === null;
-
+  const [canShowMissingMachine, setCanShowMissingMachine] = useState(false);
+  const activeRoute = route ?? internalRoute;
+  const selectedComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
+  const selectedThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
   const changeRoute = useCallback((
     nextRoute: CloudAppRoute,
     options: CloudRouteChangeOptions = {},
@@ -110,129 +99,62 @@ export function CloudApp({
 
     setInternalRoute(nextRoute);
   }, [onRouteChange]);
-
-  const clearSession = useCallback(() => {
-    removeStoredToken(storageKey);
-    removeStoredBoolean(machinesOnboardingStorageKey);
-    startingComputerIdsRef.current.clear();
-    setToken(null);
-    setUser(null);
-    setHasSeenMachinesOnboarding(false);
-    setComputers([]);
-    setHasLoadedMachines(false);
-    setSelectedComputerId(null);
-    setSelectedThreadId(null);
-    setAccessSession(null);
-    setWorkspaceMachineStartup(null);
-    setAuthState("unauthenticated");
+  const routeToLogin = useCallback((): void => {
     changeRoute({ view: "login" }, { replace: true });
-  }, [changeRoute, machinesOnboardingStorageKey, storageKey]);
+  }, [changeRoute]);
+  const user = useCloudAuthStore((state) => state.user);
+  const authState = useCloudAuthStore((state) => state.status);
+  const computers = useCloudComputers();
+  const selectedComputer = useCloudMachinesStore((state) =>
+    selectedComputerId === null ? null : state.computersById[selectedComputerId] ?? null
+  );
+  const hasLoadedMachines = useCloudMachinesStore((state) => state.hasLoaded);
+  const machinesError = useCloudMachinesStore((state) => state.error);
+  const machinesQuery = useMachinesQuery();
+  const workspaceSession = useMachineWorkspaceSession(selectedComputerId);
+  const loginMutation = useLoginMutation();
+  const logoutMutation = useLogoutMutation({
+    onLogout: routeToLogin,
+  });
+  const createMachineMutation = useCreateMachineMutation();
+  const stopMachineMutation = useStopMachineMutation();
+  const shouldShowFirstRemoteMachineCreate =
+    hasLoadedMachines &&
+    computers.length === 0 &&
+    machinesError === null;
+  const isPreparingMachinesGate =
+    authState === "authenticated" &&
+    hasLoadedMachines === false &&
+    activeRoute.view !== "workspace";
 
-  const upsertComputer = useCallback((computer: CloudComputer): void => {
-    setComputers((currentComputers) => [
-      computer,
-      ...currentComputers.filter((currentComputer) => currentComputer.id !== computer.id),
-    ]);
-  }, []);
-
-  const refreshMachines = useCallback(async () => {
-    if (token === null) {
-      return;
-    }
-
-    setIsLoadingMachines(true);
-    setMachinesError(null);
-
-    try {
-      const response = await client.listComputers(token);
-      setComputers(response.computers);
-      setHasLoadedMachines(true);
-    } catch (error) {
-      if (isAuthFailure(error)) {
-        clearSession();
-        return;
-      }
-
-      setHasLoadedMachines(true);
-      setMachinesError(error instanceof Error ? error.message : "Failed to load machines.");
-    } finally {
-      setIsLoadingMachines(false);
-    }
-  }, [clearSession, client, token]);
+  useBootstrapAuth({
+    onAuthFailure: routeToLogin,
+  });
 
   useEffect(() => {
     setHasSeenMachinesOnboarding(readStoredBoolean(machinesOnboardingStorageKey));
   }, [machinesOnboardingStorageKey]);
 
   useEffect(() => {
-    const storedToken = readStoredToken(storageKey);
+    setCanShowMissingMachine(false);
 
-    if (storedToken === null) {
-      setAuthState("unauthenticated");
+    if (
+      selectedComputerId === null ||
+      selectedComputer !== null ||
+      !hasLoadedMachines ||
+      machinesQuery.isFetching
+    ) {
       return;
     }
 
-    let isCurrent = true;
-    setToken(storedToken);
-    setAuthState("checking");
-
-    void client.me(storedToken)
-      .then((response) => {
-        if (!isCurrent) {
-          return;
-        }
-
-        setUser(response.user);
-        setAuthState("authenticated");
-      })
-      .catch(() => {
-        if (isCurrent) {
-          clearSession();
-        }
-      });
+    const timer = window.setTimeout(() => {
+      setCanShowMissingMachine(true);
+    }, 800);
 
     return () => {
-      isCurrent = false;
+      window.clearTimeout(timer);
     };
-  }, [clearSession, client, storageKey]);
-
-  useEffect(() => {
-    if (authState !== "authenticated") {
-      return;
-    }
-
-    void refreshMachines();
-  }, [authState, refreshMachines]);
-
-  useEffect(() => {
-    if (authState !== "authenticated") {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      void refreshMachines();
-    }, MACHINES_REFRESH_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [authState, refreshMachines]);
-
-  useEffect(() => {
-    const nextComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
-    const nextThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
-    const didComputerChange = routeComputerIdRef.current !== nextComputerId;
-
-    setSelectedComputerId(nextComputerId);
-    setSelectedThreadId(nextThreadId);
-
-    if (didComputerChange) {
-      routeComputerIdRef.current = nextComputerId;
-      setAccessSession(null);
-      setWorkspaceError(null);
-      setWorkspaceMachineStartup(null);
-    }
-  }, [activeRoute]);
+  }, [hasLoadedMachines, machinesQuery.isFetching, selectedComputer, selectedComputerId]);
 
   useEffect(() => {
     if (authState === "checking") {
@@ -276,286 +198,18 @@ export function CloudApp({
     user,
   ]);
 
-  useEffect(() => {
-    if (accessSession === null) {
-      return;
-    }
-
-    const expiresAt = Date.parse(accessSession.accessSession.expiresAt);
-
-    if (!Number.isFinite(expiresAt)) {
-      return;
-    }
-
-    const refreshDelay = Math.max(0, expiresAt - Date.now() - ACCESS_SESSION_REFRESH_BUFFER_MS);
-    const refreshTimer = window.setTimeout(() => {
-      setAccessSessionRefreshTick((currentTick) => currentTick + 1);
-    }, refreshDelay);
-
-    return () => {
-      window.clearTimeout(refreshTimer);
-    };
-  }, [accessSession]);
-
-  useEffect(() => {
-    if (authState !== "authenticated" || token === null || selectedComputerId === null) {
-      return;
-    }
-
-    let isCurrent = true;
-    const computerId = selectedComputerId;
-
-    setWorkspaceMachineStartup({ computerId, phase: "checking" });
-    setWorkspaceError(null);
-
-    void client.getComputer(token, computerId)
-      .then(async (response) => {
-        if (!isCurrent) {
-          return;
-        }
-
-        upsertComputer(response.computer);
-
-        if (response.computer.kind === "local") {
-          setWorkspaceMachineStartup((current) =>
-            current?.computerId === computerId ? null : current
-          );
-          return;
-        }
-
-        if (response.computer.status === "sleeping") {
-          setWorkspaceMachineStartup({ computerId, phase: "starting" });
-
-          if (startingComputerIdsRef.current.has(computerId)) {
-            return;
-          }
-
-          startingComputerIdsRef.current.add(computerId);
-
-          try {
-            const startResponse = await client.startComputer(token, computerId);
-
-            if (!isCurrent) {
-              return;
-            }
-
-            upsertComputer(startResponse.computer);
-
-            if (!isRemoteMachinePendingStartup(startResponse.computer.status)) {
-              setWorkspaceMachineStartup((current) =>
-                current?.computerId === computerId ? null : current
-              );
-            }
-          } finally {
-            startingComputerIdsRef.current.delete(computerId);
-          }
-
-          return;
-        }
-
-        if (isRemoteMachinePendingStartup(response.computer.status)) {
-          setWorkspaceMachineStartup({ computerId, phase: "starting" });
-          return;
-        }
-
-        setWorkspaceMachineStartup((current) =>
-          current?.computerId === computerId ? null : current
-        );
-      })
-      .catch((error) => {
-        if (!isCurrent) {
-          return;
-        }
-
-        if (isAuthFailure(error)) {
-          clearSession();
-          return;
-        }
-
-        setWorkspaceMachineStartup((current) =>
-          current?.computerId === computerId ? null : current
-        );
-        setWorkspaceError(error instanceof Error ? error.message : "Failed to check machine status.");
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [authState, clearSession, client, selectedComputerId, token, upsertComputer]);
-
-  useEffect(() => {
-    if (
-      authState !== "authenticated" ||
-      token === null ||
-      selectedComputerId === null ||
-      workspaceMachineStartupPhase !== "starting"
-    ) {
-      return;
-    }
-
-    let isCurrent = true;
-    let pollTimer: number | undefined;
-    const computerId = selectedComputerId;
-
-    const pollSelectedMachine = (): void => {
-      void client.getComputer(token, computerId)
-        .then((response) => {
-          if (!isCurrent) {
-            return;
-          }
-
-          upsertComputer(response.computer);
-
-          if (
-            response.computer.kind === "local" ||
-            isRemoteMachineConnectable(response.computer.status)
-          ) {
-            setWorkspaceMachineStartup((current) =>
-              current?.computerId === computerId ? null : current
-            );
-            return;
-          }
-
-          if (isRemoteMachineTerminal(response.computer.status)) {
-            setWorkspaceMachineStartup((current) =>
-              current?.computerId === computerId ? null : current
-            );
-            setWorkspaceError(getRemoteMachineUnavailableMessage(response.computer.status));
-            return;
-          }
-
-          pollTimer = window.setTimeout(pollSelectedMachine, SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS);
-        })
-        .catch((error) => {
-          if (!isCurrent) {
-            return;
-          }
-
-          if (isAuthFailure(error)) {
-            clearSession();
-            return;
-          }
-
-          pollTimer = window.setTimeout(pollSelectedMachine, SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS);
-        });
-    };
-
-    pollTimer = window.setTimeout(pollSelectedMachine, SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS);
-
-    return () => {
-      isCurrent = false;
-
-      if (pollTimer !== undefined) {
-        window.clearTimeout(pollTimer);
-      }
-    };
-  }, [
-    authState,
-    clearSession,
-    client,
-    selectedComputerId,
-    token,
-    upsertComputer,
-    workspaceMachineStartupPhase,
-  ]);
-
-  useEffect(() => {
-    if (authState !== "authenticated" || token === null || selectedComputerId === null) {
-      return;
-    }
-
-    if (workspaceMachineStartupPhase !== null) {
-      setAccessSession(null);
-      setIsLoadingWorkspace(workspaceMachineStartupPhase === "checking");
-      setWorkspaceError(null);
-      return;
-    }
-
-    if (selectedComputer === null) {
-      return;
-    }
-
-    if (!isRemoteMachineConnectable(selectedComputer.status)) {
-      setAccessSession(null);
-      setIsLoadingWorkspace(false);
-      setWorkspaceError(getRemoteMachineUnavailableMessage(selectedComputer.status));
-      return;
-    }
-
-    if (isAccessSessionUsable(accessSession, selectedComputerId)) {
-      setIsLoadingWorkspace(false);
-      setWorkspaceError(null);
-      return;
-    }
-
-    let isCurrent = true;
-    setIsLoadingWorkspace(true);
-    setWorkspaceError(null);
-    if (accessSession?.accessSession.computerId !== selectedComputerId) {
-      setAccessSession(null);
-    }
-
-    void client.createComputerAccessSession(token, selectedComputerId)
-      .then((response) => {
-        if (isCurrent) {
-          setAccessSession(response);
-        }
-      })
-      .catch((error) => {
-        if (!isCurrent) {
-          return;
-        }
-
-        if (isAuthFailure(error)) {
-          clearSession();
-          return;
-        }
-
-        setWorkspaceError(error instanceof Error ? error.message : "Failed to open machine.");
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsLoadingWorkspace(false);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [
-    accessSession,
-    accessSessionRefreshTick,
-    authState,
-    clearSession,
-    client,
-    selectedComputerId,
-    selectedComputerKind,
-    selectedComputerStatus,
-    token,
-    workspaceMachineStartupPhase,
-  ]);
-
   const login = async (input: { readonly email: string; readonly password: string }): Promise<boolean> => {
-    setIsLoggingIn(true);
-    setLoginError(null);
-
     try {
-      const response = await client.login(input);
-      writeStoredToken(storageKey, response.session.token);
-      setToken(response.session.token);
-      setUser(response.user);
+      await loginMutation.mutateAsync(input);
       return true;
-    } catch (error) {
-      setLoginError(error instanceof Error ? error.message : "Unable to sign in.");
+    } catch {
       return false;
-    } finally {
-      setIsLoggingIn(false);
     }
   };
 
   const completeLogin = useCallback((): void => {
-    setAuthState("authenticated");
-  }, []);
+    authStore.getState().completeLogin();
+  }, [authStore]);
 
   const dismissMachinesOnboarding = useCallback((): void => {
     writeStoredBoolean(machinesOnboardingStorageKey, true);
@@ -563,97 +217,36 @@ export function CloudApp({
   }, [machinesOnboardingStorageKey]);
 
   const logout = async (): Promise<void> => {
-    const currentToken = token;
-    clearSession();
-
-    if (currentToken !== null) {
-      try {
-        await client.logout(currentToken);
-      } catch {
-        // The local session should still be cleared if the remote revoke fails.
-      }
+    try {
+      await logoutMutation.mutateAsync();
+    } catch {
+      // The local session is cleared before the remote revoke request is sent.
     }
   };
 
   const createMachine = async (input: { readonly name: string }): Promise<void> => {
-    if (token === null) {
-      clearSession();
-      return;
-    }
-
-    setIsCreatingMachine(true);
-    setMachinesError(null);
-
     try {
-      const response = await client.createComputer(token, input);
-      upsertComputer(response.computer);
+      await createMachineMutation.mutateAsync(input);
       changeRoute({ view: "machines" }, { replace: true });
-      void refreshMachines();
-    } catch (error) {
-      if (isAuthFailure(error)) {
-        clearSession();
-        return;
-      }
-
-      setMachinesError(error instanceof Error ? error.message : "Failed to create machine.");
-      void refreshMachines();
-      throw error;
-    } finally {
-      setIsCreatingMachine(false);
+    } catch {
+      // The mutation stores the error for the form.
     }
   };
 
   const sleepSelectedMachine = useCallback(async (): Promise<void> => {
-    if (token === null || selectedComputerId === null) {
-      clearSession();
+    if (selectedComputerId === null) {
       return;
     }
 
-    const computerId = selectedComputerId;
-
-    try {
-      const response = await client.stopComputer(token, computerId);
-      upsertComputer(response.computer);
-      setSelectedComputerId(null);
-      setSelectedThreadId(null);
-      setAccessSession(null);
-      setWorkspaceError(null);
-      setWorkspaceMachineStartup(null);
-      changeRoute({ view: "machines" });
-      void refreshMachines();
-    } catch (error) {
-      if (isAuthFailure(error)) {
-        clearSession();
-        return;
-      }
-
-      throw error;
-    }
-  }, [
-    clearSession,
-    client,
-    refreshMachines,
-    selectedComputerId,
-    token,
-    changeRoute,
-    upsertComputer,
-  ]);
+    await stopMachineMutation.mutateAsync(selectedComputerId);
+    changeRoute({ view: "machines" });
+  }, [changeRoute, selectedComputerId, stopMachineMutation]);
 
   const openMachine = (computer: CloudComputer): void => {
-    setSelectedComputerId(computer.id);
-    setSelectedThreadId(null);
-    setAccessSession(null);
-    setWorkspaceError(null);
-    setWorkspaceMachineStartup(null);
     changeRoute({ view: "workspace", computerId: computer.id, threadId: null });
   };
 
   const closeMachine = (): void => {
-    setSelectedComputerId(null);
-    setSelectedThreadId(null);
-    setAccessSession(null);
-    setWorkspaceError(null);
-    setWorkspaceMachineStartup(null);
     changeRoute({ view: "machines" });
   };
 
@@ -662,7 +255,6 @@ export function CloudApp({
       return;
     }
 
-    setSelectedThreadId(thread.id);
     changeRoute({ view: "workspace", computerId: selectedComputerId, threadId: thread.id });
   }, [changeRoute, selectedComputerId]);
 
@@ -671,7 +263,6 @@ export function CloudApp({
       return;
     }
 
-    setSelectedThreadId(null);
     changeRoute({ view: "workspace", computerId: selectedComputerId, threadId: null });
   }, [changeRoute, selectedComputerId]);
 
@@ -680,32 +271,38 @@ export function CloudApp({
       return;
     }
 
-    setSelectedThreadId(threadId);
     changeRoute({ view: "workspace", computerId: selectedComputerId, threadId }, { replace: true });
   }, [changeRoute, selectedComputerId, selectedThreadId]);
 
   const startRemoteMachineCreate = (): void => {
-    setMachinesError(null);
+    machinesStore.getState().setError(null);
+    createMachineMutation.reset();
     changeRoute({ view: "machine-create" });
   };
 
   const closeRemoteMachineCreate = (): void => {
-    setMachinesError(null);
+    machinesStore.getState().setError(null);
+    createMachineMutation.reset();
     changeRoute({ view: "machines" });
+  };
+
+  const refreshMachines = async (): Promise<void> => {
+    await machinesQuery.refetch();
   };
 
   const shouldShowWorkspaceStartup = selectedComputer !== null &&
     selectedComputer.kind !== "local" &&
-    (
-      workspaceMachineStartupPhase === "starting" ||
-      isRemoteMachinePendingStartup(selectedComputer.status)
-    );
+    selectedComputer.status === "starting";
   const shouldShowRouteLoader =
     activeRoute.view === "home" ||
     (user === null && activeRoute.view !== "login") ||
     (authState === "unauthenticated" && activeRoute.view !== "login") ||
     (authState === "authenticated" && activeRoute.view === "login") ||
     (activeRoute.view === "machines" && shouldShowFirstRemoteMachineCreate);
+  const loginError = loginMutation.error instanceof Error ? loginMutation.error.message : null;
+  const createMachineError = createMachineMutation.error instanceof Error
+    ? createMachineMutation.error.message
+    : machinesError;
   let screenKey: string;
   let screenContent: React.ReactElement;
 
@@ -721,7 +318,7 @@ export function CloudApp({
     screenContent = (
       <LoginScreen
         error={loginError}
-        isSubmitting={isLoggingIn}
+        isSubmitting={loginMutation.isPending}
         onSuccessComplete={completeLogin}
         onSubmit={login}
       />
@@ -737,8 +334,8 @@ export function CloudApp({
     screenKey = "remote-machine-create";
     screenContent = (
       <RemoteMachineCreateScreen
-        error={machinesError}
-        isSubmitting={isCreatingMachine}
+        error={createMachineError}
+        isSubmitting={createMachineMutation.isPending}
         onBack={closeRemoteMachineCreate}
         onCreateMachine={createMachine}
         onLogout={logout}
@@ -757,24 +354,19 @@ export function CloudApp({
           />
         </main>
       );
-    } else if (selectedComputer === null || accessSession === null) {
+    } else if (selectedComputer === null || workspaceSession.accessSession === null) {
+      const workspaceStateMessage = workspaceSession.error === "Machine not found." && !canShowMissingMachine
+        ? null
+        : workspaceSession.error;
       screenKey = "workspace-state";
       screenContent = (
         <main className="cloud-shell">
-          <div className="cloud-workspace-state">
-            <button className="cloud-text-button" type="button" onClick={closeMachine}>Machines</button>
-            <p>
-              {workspaceError ?? (
-                workspaceMachineStartupPhase === "checking"
-                  ? "Checking machine..."
-                  : isLoadingWorkspace
-                    ? "Opening machine..."
-                    : workspaceMachineStartupPhase === "starting"
-                      ? "Starting machine..."
-                      : "Machine not found."
-              )}
-            </p>
-          </div>
+          {workspaceStateMessage === null ? null : (
+            <div className="cloud-workspace-state">
+              <button className="cloud-text-button" type="button" onClick={closeMachine}>Machines</button>
+              <p>{workspaceStateMessage}</p>
+            </div>
+          )}
         </main>
       );
     } else {
@@ -783,19 +375,19 @@ export function CloudApp({
         <MachineWorkspace
           agentBaseUrl={buildGatewayHttpUrl({
             baseUrl: client.baseUrl,
-            path: accessSession.routes.agentBaseUrl,
-            token: accessSession.accessSession.token,
+            path: workspaceSession.accessSession.routes.agentBaseUrl,
+            token: workspaceSession.accessSession.accessSession.token,
           })}
-          capabilitiesWebsocketUrl={accessSession.routes.capabilitiesWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
+          capabilitiesWebsocketUrl={workspaceSession.accessSession.routes.capabilitiesWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
             baseUrl: client.baseUrl,
-            path: accessSession.routes.capabilitiesWebSocketUrl,
-            token: accessSession.accessSession.token,
+            path: workspaceSession.accessSession.routes.capabilitiesWebSocketUrl,
+            token: workspaceSession.accessSession.accessSession.token,
           })}
           computer={selectedComputer}
           filesystemWebsocketUrl={buildGatewayWebsocketUrl({
             baseUrl: client.baseUrl,
-            path: accessSession.routes.filesystemWebSocketUrl,
-            token: accessSession.accessSession.token,
+            path: workspaceSession.accessSession.routes.filesystemWebSocketUrl,
+            token: workspaceSession.accessSession.accessSession.token,
           })}
           selectedThreadId={selectedThreadId}
           onSelectThread={selectThread}
@@ -803,7 +395,7 @@ export function CloudApp({
           onThreadResolved={resolveThread}
           onBackToMachines={closeMachine}
           onSleepMachine={sleepSelectedMachine}
-          suppressConnectionLoader={selectedThreadId !== null}
+          suppressConnectionLoader={true}
         />
       );
     }
@@ -813,8 +405,8 @@ export function CloudApp({
       <MyMachinesScreen
         computers={computers}
         error={machinesError}
-        isCreatingMachine={isCreatingMachine}
-        isLoading={isLoadingMachines}
+        isCreatingMachine={createMachineMutation.isPending}
+        isLoading={machinesQuery.isFetching}
         onOpenMachine={openMachine}
         onLogout={logout}
         onDismissOnboarding={dismissMachinesOnboarding}
@@ -848,134 +440,6 @@ export function CloudApp({
     </AnimatePresence>
   );
 }
-
-const readStoredToken = (storageKey: string): string | null => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const token = window.localStorage.getItem(storageKey);
-    return token === null || token.length === 0 ? null : token;
-  } catch {
-    return null;
-  }
-};
-
-const writeStoredToken = (storageKey: string, token: string): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(storageKey, token);
-  } catch {
-    // The in-memory session still works for this tab when storage is unavailable.
-  }
-};
-
-const removeStoredToken = (storageKey: string): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(storageKey);
-  } catch {
-    // Nothing else to clear.
-  }
-};
-
-const readStoredBoolean = (storageKey: string): boolean => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    return window.localStorage.getItem(storageKey) === "true";
-  } catch {
-    return false;
-  }
-};
-
-const writeStoredBoolean = (storageKey: string, value: boolean): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(storageKey, value ? "true" : "false");
-  } catch {
-    // Showing the modal again is acceptable when storage is unavailable.
-  }
-};
-
-const removeStoredBoolean = (storageKey: string): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(storageKey);
-  } catch {
-    // Nothing else to clear.
-  }
-};
-
-const isAuthFailure = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "status" in error &&
-  (error as { readonly status?: unknown }).status === 401;
-
-const isRemoteMachineConnectable = (status: string): boolean =>
-  status === "online" || status === "idle";
-
-const isRemoteMachinePendingStartup = (status: string): boolean =>
-  status === "creating" || status === "starting";
-
-const isRemoteMachineTerminal = (status: string): boolean =>
-  status === "failed" || status === "offline" || status === "deleted";
-
-const getRemoteMachineUnavailableMessage = (status: string): string => {
-  if (status === "failed") {
-    return "Machine failed to start.";
-  }
-
-  if (status === "offline") {
-    return "Machine is offline.";
-  }
-
-  if (status === "deleted") {
-    return "Machine not found.";
-  }
-
-  if (status === "sleeping") {
-    return "Machine is sleeping.";
-  }
-
-  return `Machine is ${formatStatusLabel(status).toLowerCase()}.`;
-};
-
-const formatStatusLabel = (status: string): string =>
-  status
-    .split("-")
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-
-const isAccessSessionUsable = (
-  response: ComputerAccessSessionResponse | null,
-  computerId: string,
-): boolean => {
-  if (response === null || response.accessSession.computerId !== computerId) {
-    return false;
-  }
-
-  const expiresAt = Date.parse(response.accessSession.expiresAt);
-
-  return Number.isFinite(expiresAt) && expiresAt - Date.now() > ACCESS_SESSION_REFRESH_BUFFER_MS;
-};
 
 const buildGatewayWebsocketUrl = (input: {
   readonly baseUrl: string;

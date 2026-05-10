@@ -458,7 +458,7 @@ button {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 12px;
+  gap: 16px;
   background: var(--cloud-bg);
   color: var(--cloud-text);
   pointer-events: auto;
@@ -466,7 +466,7 @@ button {
 
 .cloud-workspace-loader-image {
   display: block;
-  width: min(116px, 28vw);
+  width: min(156px, 36vw);
   height: auto;
   object-fit: contain;
 }
@@ -474,7 +474,7 @@ button {
 .cloud-workspace-loader p {
   margin: 0;
   color: var(--cloud-muted);
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 400;
   letter-spacing: 0;
 }

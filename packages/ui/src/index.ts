@@ -2,6 +2,8 @@ export { AppShell } from "./app-shell";
 export { Button } from "./button";
 export { CloudApp } from "./cloud/cloud-app";
 export type { CloudAppProps, CloudAppRoute, CloudRouteChangeOptions } from "./cloud/cloud-app";
+export { CloudRuntimeProvider } from "./cloud/cloud-runtime";
+export type { CloudRuntimeProviderProps } from "./cloud/cloud-runtime";
 export { CloudClient, CloudApiError } from "./cloud/cloud-client";
 export type {
   AuthResponse,
