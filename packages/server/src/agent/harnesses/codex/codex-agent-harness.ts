@@ -207,11 +207,15 @@ export class CodexAgentHarness implements IAgentHarness {
         queue.push(notification);
       }
     });
+    const codexInput = agentContentToCodexInput(_input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: _input.path,
+    });
 
     try {
       const turnResponse = await this.client.request<CodexTurnStartResponse>("turn/start", {
         threadId,
-        input: agentContentToCodexInput(_input.content),
+        input: codexInput,
       });
       turnId = turnResponse.turn.id;
       const scope = { runId: turnId, threadId };
@@ -885,7 +889,13 @@ class AsyncQueue<T> {
   }
 }
 
-const agentContentToCodexInput = (content: AgentContent): CodexUserInput[] => {
+const agentContentToCodexInput = (
+  content: AgentContent,
+  navigatedDirectory?: {
+    readonly filesystemRoot: string;
+    readonly path: string;
+  },
+): CodexUserInput[] => {
   const inputs = content.map((block): CodexUserInput => {
     switch (block.type) {
       case "text":
@@ -897,8 +907,29 @@ const agentContentToCodexInput = (content: AgentContent): CodexUserInput[] => {
     }
   });
 
-  return inputs.length > 0 ? inputs : [{ type: "text", text: "" }];
+  const userInputs: CodexUserInput[] = inputs.length > 0 ? inputs : [{ type: "text", text: "" }];
+
+  if (navigatedDirectory === undefined) {
+    return userInputs;
+  }
+
+  const absolutePath = resolveClientPath(navigatedDirectory.filesystemRoot, navigatedDirectory.path);
+  const directoryInput: CodexUserInput = {
+    type: "text",
+    text: `<navigated_directory>${escapeXmlText(absolutePath)}</navigated_directory>`,
+  };
+
+  return [
+    ...userInputs,
+    directoryInput,
+  ];
 };
+
+const escapeXmlText = (text: string): string =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 
 const notificationBelongsToThread = (notification: CodexAppServerNotification, threadId: string): boolean => {
   if (notification.method === "error") {

@@ -735,7 +735,13 @@ describe("codex agent harness", () => {
         method: "turn/start",
         params: {
           threadId: "thread-new",
-          input: [{ type: "text", text: "Hello Codex" }],
+          input: [
+            { type: "text", text: "Hello Codex" },
+            {
+              type: "text",
+              text: "<navigated_directory>/workspace/Desktop/Projects/app</navigated_directory>",
+            },
+          ],
         },
       },
     ]);
@@ -837,12 +843,116 @@ describe("codex agent harness", () => {
         method: "turn/start",
         params: {
           threadId: "thread-old",
-          input: [{ type: "text", text: "Continue" }],
+          input: [
+            { type: "text", text: "Continue" },
+            {
+              type: "text",
+              text: "<navigated_directory>/workspace/Desktop/Projects/ignored</navigated_directory>",
+            },
+          ],
         },
       },
     ]);
     expect(events.some((event) => event.type === "thread.created")).toBe(false);
     expect(events.map((event) => event.type)).toContain("turn.completed");
+  });
+
+  it("hides appended navigated directory context from user messages", async () => {
+    let client: FakeCodexClient;
+    client = new FakeCodexClient((method) => {
+      if (method === "thread/resume") {
+        return {
+          thread: createCodexThread({
+            id: "thread-directory-context",
+            preview: "Directory context",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 20,
+          }),
+        };
+      }
+
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          client.emit(createNotification("item/started", {
+            threadId: "thread-directory-context",
+            turnId: "turn-directory-context",
+            item: {
+              type: "userMessage",
+              id: "live-user-directory-context",
+              content: [
+                { type: "text", text: "Where am I?" },
+                { type: "text", text: "<navigated_directory>/workspace/Desktop/Projects/app</navigated_directory>" },
+              ],
+            },
+          }));
+          client.emit(createNotification("turn/completed", {
+            threadId: "thread-directory-context",
+            turn: { id: "turn-directory-context", status: "completed" },
+          }));
+        });
+        return { turn: { id: "turn-directory-context", status: "inProgress", items: [] } };
+      }
+
+      if (method === "thread/read") {
+        return {
+          thread: createCodexThread({
+            id: "thread-directory-context",
+            preview: "Directory context",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 30,
+            turns: [
+              {
+                id: "turn-directory-context",
+                status: "completed",
+                items: [
+                  {
+                    type: "userMessage",
+                    id: "persisted-user-directory-context",
+                    content: [
+                      {
+                        type: "text",
+                        text: "Where am I?\n<navigated_directory>/workspace/Desktop/Projects/app</navigated_directory>",
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected method ${method}`);
+    });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    const events = await collectAsyncIterable(harness.sendMessage({
+      threadId: "thread-directory-context",
+      path: "Projects/app",
+      content: [{ type: "text", content: "Where am I?" }],
+    }));
+    const thread = await harness.getThread({ threadId: "thread-directory-context" });
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "message.completed",
+        message: expect.objectContaining({
+          role: "user",
+          content: [{ type: "text", content: "Where am I?" }],
+        }),
+      }),
+    ]));
+    expect(thread.messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: [{ type: "text", content: "Where am I?" }],
+      }),
+    ]);
   });
 
   it("keeps live interrupted assistant text when Codex thread history omits it", async () => {

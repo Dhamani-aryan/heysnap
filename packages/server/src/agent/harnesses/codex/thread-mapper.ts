@@ -36,6 +36,7 @@ export interface CodexThread {
 }
 
 type CodexSessionSource = string | { readonly [key: string]: unknown };
+const NAVIGATED_DIRECTORY_PATTERN = /\s*<navigated_directory>[\s\S]*?<\/navigated_directory>\s*/gu;
 
 export interface CodexTurn {
   readonly id: string;
@@ -483,40 +484,42 @@ const durationCarrierItemId = (items: readonly CodexThreadItem[]): string | unde
 };
 
 const codexUserInputsToAgentContent = (inputs: readonly CodexUserInput[]): AgentContent => {
-  const content = inputs.map((input): TextContent => {
+  const content = inputs.flatMap((input): TextContent[] => {
     switch (input.type) {
-      case "text":
-        return {
+      case "text": {
+        const text = input.text.replace(NAVIGATED_DIRECTORY_PATTERN, "").trim();
+        return text.length === 0 ? [] : [{
           type: "text",
-          content: input.text,
+          content: text,
           metadata: compactRecord({
             textElements: input.textElements,
           }),
-        };
+        }];
+      }
       case "image":
-        return {
+        return [{
           type: "text",
           content: `[Image: ${input.url}]`,
           metadata: { codexInput: input },
-        };
+        }];
       case "localImage":
-        return {
+        return [{
           type: "text",
           content: `[Local image: ${input.path}]`,
           metadata: { codexInput: input },
-        };
+        }];
       case "skill":
-        return {
+        return [{
           type: "text",
           content: `[$${input.name}]`,
           metadata: { codexInput: input },
-        };
+        }];
       case "mention":
-        return {
+        return [{
           type: "text",
           content: `[$${input.name}]`,
           metadata: { codexInput: input },
-        };
+        }];
     }
   });
 
