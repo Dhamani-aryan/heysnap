@@ -16,11 +16,13 @@ export const computerStatusEnum = pgEnum("computer_status", [
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull(),
+  username: text("username").notNull(),
   passwordHash: text("password_hash").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   emailUnique: uniqueIndex("users_email_unique").on(table.email),
+  usernameUnique: uniqueIndex("users_username_unique").on(table.username),
 }));
 
 export const sessions = pgTable("sessions", {

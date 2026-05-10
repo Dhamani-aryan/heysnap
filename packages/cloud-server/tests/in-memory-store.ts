@@ -36,11 +36,16 @@ export class InMemoryCloudStore implements CloudStore {
   readonly aiUsageRequests = new Map<string, AiUsageRequestRecord>();
   readonly aiUsagePayloads = new Map<string, AiUsagePayloadRecord>();
 
-  async createUser(input: { readonly email: string; readonly passwordHash: string }): Promise<UserRecord> {
+  async createUser(input: {
+    readonly email: string;
+    readonly username: string;
+    readonly passwordHash: string;
+  }): Promise<UserRecord> {
     const now = new Date();
     const user = {
       id: randomUUID(),
       email: input.email,
+      username: input.username,
       passwordHash: input.passwordHash,
       createdAt: now,
       updatedAt: now,
@@ -55,6 +60,10 @@ export class InMemoryCloudStore implements CloudStore {
 
   async getUserByEmail(email: string): Promise<UserRecord | null> {
     return Array.from(this.users.values()).find((user) => user.email === email) ?? null;
+  }
+
+  async getUserByUsername(username: string): Promise<UserRecord | null> {
+    return Array.from(this.users.values()).find((user) => user.username === username) ?? null;
   }
 
   async getUserById(userId: string): Promise<UserRecord | null> {

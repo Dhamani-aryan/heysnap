@@ -39,7 +39,11 @@ import {
 export class DrizzleCloudStore implements CloudStore {
   constructor(private readonly db: DbClient) {}
 
-  async createUser(input: { readonly email: string; readonly passwordHash: string }): Promise<UserRecord> {
+  async createUser(input: {
+    readonly email: string;
+    readonly username: string;
+    readonly passwordHash: string;
+  }): Promise<UserRecord> {
     const [user] = await this.db.insert(users).values(input).returning();
     return user;
   }
@@ -50,6 +54,11 @@ export class DrizzleCloudStore implements CloudStore {
 
   async getUserByEmail(email: string): Promise<UserRecord | null> {
     const [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+    return user ?? null;
+  }
+
+  async getUserByUsername(username: string): Promise<UserRecord | null> {
+    const [user] = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
     return user ?? null;
   }
 

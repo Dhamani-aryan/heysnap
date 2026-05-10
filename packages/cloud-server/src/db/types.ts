@@ -13,6 +13,7 @@ export type ComputerStatus =
 export interface UserRecord {
   readonly id: string;
   readonly email: string;
+  readonly username: string;
   readonly passwordHash: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -169,10 +170,12 @@ export interface AiUsageBreakdownRow {
 export interface CloudStore {
   createUser(input: {
     readonly email: string;
+    readonly username: string;
     readonly passwordHash: string;
   }): Promise<UserRecord>;
   listUsers(): Promise<UserRecord[]>;
   getUserByEmail(email: string): Promise<UserRecord | null>;
+  getUserByUsername(username: string): Promise<UserRecord | null>;
   getUserById(userId: string): Promise<UserRecord | null>;
   updateUserPassword(input: {
     readonly userId: string;
