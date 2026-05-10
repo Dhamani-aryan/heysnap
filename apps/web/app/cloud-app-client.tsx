@@ -1,30 +1,25 @@
 "use client";
 
 import { useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { CloudApp } from "@ank1015-app/ui";
+import { useRouter } from "next/navigation";
+import { CloudApp, type CloudAppRoute, type CloudRouteChangeOptions } from "@ank1015-app/ui";
 
 export interface WebCloudAppProps {
   readonly cloudServerUrl: string;
-  readonly initialComputerId?: string;
-  readonly initialThreadId?: string;
+  readonly route: CloudAppRoute;
 }
 
 export function WebCloudApp({
   cloudServerUrl,
-  initialComputerId,
-  initialThreadId,
+  route,
 }: WebCloudAppProps): React.ReactElement {
   const router = useRouter();
-  const params = useParams();
-  const routeComputerId = initialComputerId ?? readRouteParam(params["computerId"]);
-  const routeThreadId = initialThreadId ?? readRouteParam(params["threadId"]);
 
-  const handleWorkspaceRouteChange = useCallback((
-    route: { readonly computerId: string | null; readonly threadId: string | null },
-    options: { readonly replace?: boolean } = {},
+  const handleRouteChange = useCallback((
+    nextRoute: CloudAppRoute,
+    options: CloudRouteChangeOptions = {},
   ): void => {
-    const nextPath = buildWorkspacePath(route);
+    const nextPath = buildRoutePath(nextRoute);
     if (options.replace === true) {
       router.replace(nextPath);
       return;
@@ -36,30 +31,32 @@ export function WebCloudApp({
   return (
     <CloudApp
       cloudServerUrl={cloudServerUrl}
-      initialComputerId={routeComputerId}
-      initialThreadId={routeThreadId}
-      onWorkspaceRouteChange={handleWorkspaceRouteChange}
+      route={route}
+      onRouteChange={handleRouteChange}
       storageKey="ank1015:web-session-token"
     />
   );
 }
 
-const buildWorkspacePath = (route: {
-  readonly computerId: string | null;
-  readonly threadId: string | null;
-}): string => {
-  if (route.computerId === null) {
+const buildRoutePath = (route: CloudAppRoute): string => {
+  if (route.view === "home") {
     return "/";
   }
 
-  const machinePath = `/${encodeURIComponent(route.computerId)}`;
-  return route.threadId === null ? machinePath : `${machinePath}/${encodeURIComponent(route.threadId)}`;
-};
-
-const readRouteParam = (value: string | string[] | undefined): string | undefined => {
-  if (Array.isArray(value)) {
-    return value[0];
+  if (route.view === "login") {
+    return "/login";
   }
 
-  return value;
+  if (route.view === "machines") {
+    return "/machines";
+  }
+
+  if (route.view === "machine-create") {
+    return "/machines/create";
+  }
+
+  const machinePath = `/machines/${encodeURIComponent(route.computerId)}`;
+  return route.threadId === null || route.threadId === undefined
+    ? machinePath
+    : `${machinePath}/${encodeURIComponent(route.threadId)}`;
 };
