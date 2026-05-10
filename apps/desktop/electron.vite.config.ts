@@ -3,12 +3,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ["@ank1015-app/server"] })],
-    build: {
-      rollupOptions: {
-        external: ["@homebridge/node-pty-prebuilt-multiarch", "chokidar", "trash", "ws"],
-      },
-    },
+    plugins: [externalizeDepsPlugin()],
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

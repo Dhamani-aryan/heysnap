@@ -1,11 +1,7 @@
 export { AppShell } from "./app-shell";
 export { Button } from "./button";
 export { CloudApp } from "./cloud/cloud-app";
-export type {
-  CloudAppProps,
-  LocalMachineBridge,
-  LocalMachineBridgeStatus,
-} from "./cloud/cloud-app";
+export type { CloudAppProps } from "./cloud/cloud-app";
 export { CloudClient, CloudApiError } from "./cloud/cloud-client";
 export type {
   AuthResponse,

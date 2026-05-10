@@ -20,7 +20,6 @@ const getImageSrc = (asset: ImageAsset): string => {
 };
 
 export interface MyMachinesScreenProps {
-  readonly activeLocalComputerId: string | null;
   readonly computers: CloudComputer[];
   readonly error: string | null;
   readonly isCreatingMachine: boolean;
@@ -35,7 +34,6 @@ export interface MyMachinesScreenProps {
 }
 
 export function MyMachinesScreen({
-  activeLocalComputerId,
   computers,
   showOnboardingModal,
   onDismissOnboarding,
@@ -74,14 +72,13 @@ export function MyMachinesScreen({
         <div className="cloud-machines-page-inner">
           <h1 className="cloud-machines-title">Machines</h1>
           <p className="cloud-machines-subtitle">
-            Your cloud and local computers. <span>Learn more</span>
+            Your machines. <span>Learn more</span>
           </p>
 
           <div className="cloud-machines-grid">
             {sortedComputers.map((computer) => (
               <MachineCard
                 key={computer.id}
-                activeLocalComputerId={activeLocalComputerId}
                 computer={computer}
                 onOpenMachine={onOpenMachine}
               />
@@ -148,13 +145,11 @@ export function MyMachinesScreen({
                   src={getImageSrc(newMacImageUrl)}
                   alt=""
                 />
-                <p className="cloud-machines-onboarding-caption">These represent local machines.</p>
+                <p className="cloud-machines-onboarding-caption">Open connected machines from one place.</p>
               </div>
             </div>
             <p className="cloud-machines-onboarding-copy">
-              HeySnap works on your local machine and creates a 24*7 dedicated cloud machine for you as well. To add a
-              new remote machine click on the plus box. To add a new local machine, just install the Heysnap desktop app
-              and login with the same account.
+              HeySnap creates a 24*7 dedicated cloud machine for your workspace. To add a new machine, click the plus box.
             </p>
             <button
               className="cloud-primary-button cloud-machines-onboarding-action"
@@ -180,16 +175,14 @@ export function MyMachinesScreen({
 }
 
 const MachineCard = ({
-  activeLocalComputerId,
   computer,
   onOpenMachine,
 }: {
-  readonly activeLocalComputerId: string | null;
   readonly computer: CloudComputer;
   readonly onOpenMachine: (computer: CloudComputer) => void;
 }): React.ReactElement => {
   const isLocal = computer.kind === "local";
-  const displayStatus = getMachineDisplayStatus(computer, activeLocalComputerId);
+  const displayStatus = getMachineDisplayStatus(computer);
   const canOpenMachine = displayStatus.canOpen;
 
   return (
@@ -248,13 +241,8 @@ const formatMachineStatus = (status: string): string =>
 
 const getMachineDisplayStatus = (
   computer: CloudComputer,
-  activeLocalComputerId: string | null,
 ): { readonly status: string; readonly label: string; readonly canOpen: boolean } => {
-  if (
-    computer.kind === "local" &&
-    computer.tunnelConnected !== true &&
-    computer.id !== activeLocalComputerId
-  ) {
+  if (computer.kind === "local" && computer.tunnelConnected !== true) {
     return {
       status: "tunnel-disconnected",
       label: "Tunnel disconnected",

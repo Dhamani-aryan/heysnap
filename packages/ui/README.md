@@ -16,8 +16,8 @@ machine workspace layout, filesystem browser, and agent chat/thread views.
 
 ## Consumers
 
-- `apps/web` renders `CloudApp` without local machine support.
-- `apps/desktop` renders `CloudApp` with the Electron local-machine bridge.
+- `apps/web` renders `CloudApp`.
+- `apps/desktop` renders the same `CloudApp` in Electron.
 
 ## Commands
 
@@ -30,4 +30,4 @@ pnpm --filter @ank1015-app/ui build
 
 This package should stay runtime-agnostic. It should not directly import
 Electron, Node, AWS, Docker, or cloud-server internals. Runtime-specific
-behavior should be passed in through props such as the local-machine bridge.
+behavior should be passed in through props.
