@@ -94,12 +94,10 @@ button {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  transition: opacity 820ms ease;
 }
 
-.cloud-auth-shell[data-success-phase="exiting"] {
-  opacity: 0;
-}
+/* Exit fade is driven inline by motion in login-screen.tsx so it stays in
+   lock-step with the panel and text springs — no CSS transition needed. */
 
 .cloud-floating-actions {
   position: fixed;
