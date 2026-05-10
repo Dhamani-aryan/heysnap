@@ -23,6 +23,7 @@ apt-get install -y --no-install-recommends \
   libreoffice \
   pandoc \
   pkg-config \
+  poppler-utils \
   postgresql-client \
   python-is-python3 \
   python3 \
@@ -56,7 +57,7 @@ apt-get install -y --no-install-recommends gh ngrok
 
 corepack enable
 corepack prepare pnpm@9.15.2 --activate
-npm install -g vercel@latest @openai/codex@latest heysnap-image-gen@0.1.1
+npm install -g vercel@latest @openai/codex@latest heysnap-image-gen@0.1.1 docx pptxgenjs react-icons react react-dom sharp
 
 download https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 chmod +x /usr/local/bin/uv /usr/local/bin/uvx
@@ -109,17 +110,23 @@ python -m venv /opt/ank1015/venvs/default
 /opt/ank1015/venvs/default/bin/python -m pip install --upgrade pip setuptools wheel
 /opt/ank1015/venvs/default/bin/python -m pip install \
   beautifulsoup4 \
+  defusedxml \
   duckdb \
   httpx \
+  lxml \
+  "markitdown[pptx]" \
   matplotlib \
   numpy \
   openpyxl \
   pandas \
+  Pillow \
   pdfplumber \
   pypdf \
+  reportlab \
   python-docx \
   python-pptx \
   requests \
+  xlrd \
   xlsxwriter
 
 if ! command -v magick >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then
@@ -159,6 +166,7 @@ fi
 
 cat >/etc/profile.d/ank1015-dev-env.sh <<'SCRIPT'
 export PATH="/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export NODE_PATH="$(npm root -g):${NODE_PATH:-}"
 export ANK1015_FILESYSTEM_ROOT="${ANK1015_FILESYSTEM_ROOT:-/workspace}"
 SCRIPT
 chmod 0644 /etc/profile.d/ank1015-dev-env.sh
