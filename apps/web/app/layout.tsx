@@ -3,6 +3,9 @@ import "@ank1015-app/ui/filesystem.css";
 import "@ank1015-app/ui/cloud.css";
 
 import heysnapIcon from "../../assets/heysnap.ico";
+import { WebCloudRuntimeProvider } from "./cloud-runtime-provider";
+
+const cloudServerUrl = process.env.NEXT_PUBLIC_CLOUD_SERVER_URL?.trim() || "https://api.heysnap.xyz";
 
 const getIconSrc = (icon: string | { readonly src: string }): string => {
   return typeof icon === "string" ? icon : icon.src;
@@ -40,7 +43,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <WebCloudRuntimeProvider cloudServerUrl={cloudServerUrl}>
+          {children}
+        </WebCloudRuntimeProvider>
+      </body>
     </html>
   );
 }
