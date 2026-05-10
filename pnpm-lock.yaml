@@ -20,18 +20,9 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@ank1015-app/server':
-        specifier: workspace:*
-        version: link:../../packages/server
       '@ank1015-app/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@homebridge/node-pty-prebuilt-multiarch':
-        specifier: ^0.13.1
-        version: 0.13.1
-      chokidar:
-        specifier: ^5.0.0
-        version: 5.0.0
       electron-updater:
         specifier: ^6.8.3
         version: 6.8.3
@@ -41,12 +32,6 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.5(react@19.2.5)
-      trash:
-        specifier: ^10.1.1
-        version: 10.1.1
-      ws:
-        specifier: ^8.20.0
-        version: 8.20.0
     devDependencies:
       '@types/react':
         specifier: ^19.1.2
