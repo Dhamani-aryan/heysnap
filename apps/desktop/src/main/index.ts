@@ -2,11 +2,8 @@ import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { join } from "node:path";
 
 import { DesktopUpdateController } from "./desktop-updates.js";
-import { LocalMachineController, type SyncCloudSessionInput } from "./local-machine.js";
 
-const localMachine = new LocalMachineController(app);
 let desktopUpdates: DesktopUpdateController | null = null;
-let isQuitInProgress = false;
 const desktopTitle = "HeySnap";
 const titleBarBackgroundByTheme = {
   light: "#ffffff",
@@ -54,17 +51,6 @@ void app.whenReady().then(() => {
   desktopUpdates = new DesktopUpdateController(app);
   desktopUpdates.start();
 
-  void localMachine.start().catch((error) => {
-    console.error("failed to start local machine server", error);
-  });
-
-  ipcMain.handle("local-machine:get-status", () => localMachine.getStatus());
-  ipcMain.handle("local-machine:get-registration-preview", async () =>
-    await localMachine.getRegistrationPreview()
-  );
-  ipcMain.handle("local-machine:sync-cloud-session", async (_event, input: SyncCloudSessionInput) =>
-    await localMachine.syncCloudSession(input)
-  );
   ipcMain.handle("desktop-updates:get-status", async () => await getDesktopUpdates().getStatus());
   ipcMain.handle("desktop-updates:check", async () => await getDesktopUpdates().checkForUpdates());
   ipcMain.handle("desktop-updates:download-install", async () => await getDesktopUpdates().downloadAndInstallUpdate());
@@ -113,21 +99,8 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", (event) => {
-  if (isQuitInProgress) {
-    return;
-  }
-
-  event.preventDefault();
+app.on("before-quit", () => {
   desktopUpdates?.stop();
-  void localMachine.stop()
-    .catch((error) => {
-      console.error("failed to stop local machine server", error);
-    })
-    .finally(() => {
-      isQuitInProgress = true;
-      app.quit();
-    });
 });
 
 const getDesktopUpdates = (): DesktopUpdateController => {

@@ -7,7 +7,6 @@ import "./style.css";
 import { DesktopUpdatePrompt } from "./update-prompt";
 
 const cloudServerUrl = import.meta.env.VITE_CLOUD_SERVER_URL || "https://api.heysnap.xyz";
-const localMachineBridge = window.ank1015LocalMachine;
 
 function DesktopTitleBar(): React.ReactElement {
   return (
@@ -28,8 +27,6 @@ createRoot(document.getElementById("root")!).render(
       <DesktopTitleBar />
       <CloudApp
         cloudServerUrl={cloudServerUrl}
-        includeLocalMachine
-        localMachineBridge={localMachineBridge}
         storageKey="ank1015:desktop-session-token"
       />
       <DesktopUpdatePrompt />
