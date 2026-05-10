@@ -610,6 +610,7 @@ const createTestApp = async (configOverrides: Partial<CloudServerConfig> = {}): 
   const app = createApp({ config, store });
   const user = await store.createUser({
     email: "owner@example.com",
+    username: "owner",
     passwordHash: "hash",
   });
   const computer = await store.createComputer({

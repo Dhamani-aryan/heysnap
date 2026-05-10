@@ -101,7 +101,7 @@ export const adminApi = {
   authCheck: (token: string) => request<{ readonly ok: true }>("/admin/auth-check", { token }),
   getOverview: () => request<AdminOverview>("/admin/overview"),
   listUsers: () => request<{ readonly users: AdminUserSummary[] }>("/admin/users"),
-  createUser: (input: { readonly email: string; readonly password: string }) =>
+  createUser: (input: { readonly email: string; readonly username: string; readonly password: string }) =>
     request<{ readonly user: AdminUser }>("/admin/users", { method: "POST", body: input }),
   getUserDetail: (userId: string) => request<AdminUserDetail>(`/admin/users/${encodeURIComponent(userId)}`),
   deleteUser: (userId: string) =>

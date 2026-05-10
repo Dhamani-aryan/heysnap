@@ -23,6 +23,7 @@ export const createAuthRoutes = (
       user: serializeUser({
         id: result.user.id,
         email: result.user.email,
+        username: result.user.username,
         createdAt: result.user.createdAt,
         updatedAt: result.user.updatedAt,
       }),

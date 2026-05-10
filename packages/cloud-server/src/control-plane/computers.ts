@@ -9,7 +9,7 @@ import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
 import { getDev8gbPreset } from "../provisioning/presets.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
 import type { AppVariables } from "../shared/context.js";
-import { HttpError, notFound } from "../shared/errors.js";
+import { conflict, HttpError, notFound } from "../shared/errors.js";
 import {
   serializeComputer,
   serializeComputerAccessSession,
@@ -39,10 +39,19 @@ export const createComputerRoutes = (
   });
 
   app.post("/", async (context) => {
+    const user = context.get("currentUser");
+    const existingCloudComputer = (await store.listComputersForUser(user.id)).find((computer) =>
+      computer.kind === "cloud"
+    );
+
+    if (existingCloudComputer !== undefined) {
+      throw conflict("CLOUD_MACHINE_LIMIT_REACHED", "Only one cloud machine is allowed per user");
+    }
+
     const body = await readJsonBody(context.req.raw);
     const name = stringField(body, "name", { required: true, maxLength: 120 }) ?? "";
     const computer = await store.createComputer({
-      ownerUserId: context.get("currentUser").id,
+      ownerUserId: user.id,
       name,
       kind: "cloud",
       status: "creating",
@@ -58,7 +67,7 @@ export const createComputerRoutes = (
     try {
       const result = await provisioner.provisionComputer({ computer, bootstrapToken, config });
       const updated = await store.updateComputerForUser({
-        userId: context.get("currentUser").id,
+        userId: user.id,
         computerId: computer.id,
         providerMetadata: result.providerMetadata,
       });
@@ -67,7 +76,7 @@ export const createComputerRoutes = (
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to provision computer";
       await store.updateComputerForUser({
-        userId: context.get("currentUser").id,
+        userId: user.id,
         computerId: computer.id,
         status: "failed",
         providerMetadata: {

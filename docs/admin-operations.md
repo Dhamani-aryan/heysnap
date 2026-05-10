@@ -54,7 +54,7 @@ ADMIN_TOKEN="$(cat .secrets/cloud-server-admin-token)"
 curl -X POST https://api.heysnap.xyz/admin/users \
   -H "authorization: Bearer $ADMIN_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"email":"user@example.com","password":"change-me"}'
+  -d '{"email":"user@example.com","username":"user","password":"change-me"}'
 ```
 
 ## Inspect Admin Overview

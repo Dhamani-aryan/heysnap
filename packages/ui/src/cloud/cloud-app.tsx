@@ -330,7 +330,7 @@ function CloudAppContent({
         <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
-  } else if (activeRoute.view === "machine-create") {
+  } else if (activeRoute.view === "machine-create" && user !== null) {
     screenKey = "remote-machine-create";
     screenContent = (
       <RemoteMachineCreateScreen
@@ -340,6 +340,7 @@ function CloudAppContent({
         onCreateMachine={createMachine}
         onLogout={logout}
         showBackButton={!shouldShowFirstRemoteMachineCreate}
+        user={user}
       />
     );
   } else if (selectedComputerId !== null) {

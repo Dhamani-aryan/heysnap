@@ -2,11 +2,12 @@
 
 import { ArrowLeft01Icon, Settings03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import macLightImageUrl from "../../../../apps/assets/mac-light.png";
 import macImageUrl from "../../../../apps/assets/mac.png";
 import { ThemeToggle } from "../filesystem/theme-toggle";
+import type { CloudUser } from "./cloud-client";
 
 type ImageAsset = string | { readonly src: string };
 
@@ -21,6 +22,7 @@ export interface RemoteMachineCreateScreenProps {
   readonly onCreateMachine: (input: { readonly name: string }) => Promise<void>;
   readonly onLogout: () => Promise<void>;
   readonly showBackButton?: boolean;
+  readonly user: CloudUser;
 }
 
 export function RemoteMachineCreateScreen({
@@ -30,9 +32,9 @@ export function RemoteMachineCreateScreen({
   onCreateMachine,
   onLogout,
   showBackButton = true,
+  user,
 }: RemoteMachineCreateScreenProps): React.ReactElement {
-  const [name, setName] = useState("");
-  const trimmedName = name.trim();
+  const machineName = createDefaultMachineName(user.username);
 
   useEffect(() => {
     document.documentElement.dataset.cloudScreen = "machines";
@@ -76,11 +78,11 @@ export function RemoteMachineCreateScreen({
           onSubmit={(event) => {
             event.preventDefault();
 
-            if (trimmedName.length === 0 || isSubmitting) {
+            if (machineName.length === 0 || isSubmitting) {
               return;
             }
 
-            void onCreateMachine({ name: trimmedName });
+            void onCreateMachine({ name: machineName });
           }}
         >
           <h1 id="cloud-remote-create-title">Create Remote Machine</h1>
@@ -96,18 +98,10 @@ export function RemoteMachineCreateScreen({
               alt=""
             />
           </div>
-          <label className="cloud-field cloud-remote-create-field">
+          <div className="cloud-remote-create-machine-name" aria-label="Machine name">
             <span>Machine name</span>
-            <input
-              autoFocus
-              disabled={isSubmitting}
-              maxLength={120}
-              required
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.currentTarget.value)}
-            />
-          </label>
+            <strong>{machineName}</strong>
+          </div>
           {error !== null ? (
             <div className="cloud-local-onboarding-error" role="alert">
               {error}
@@ -116,7 +110,7 @@ export function RemoteMachineCreateScreen({
           <button
             aria-label={isSubmitting ? "Creating remote machine" : undefined}
             className="cloud-local-onboarding-button"
-            disabled={isSubmitting || trimmedName.length === 0}
+            disabled={isSubmitting || machineName.length === 0}
             type="submit"
           >
             {isSubmitting ? (
@@ -130,3 +124,13 @@ export function RemoteMachineCreateScreen({
     </main>
   );
 }
+
+const createDefaultMachineName = (username: string): string => {
+  const trimmed = username.trim();
+
+  if (trimmed.length === 0) {
+    return "";
+  }
+
+  return `${trimmed[0]!.toUpperCase()}${trimmed.slice(1)}'s Computer`;
+};

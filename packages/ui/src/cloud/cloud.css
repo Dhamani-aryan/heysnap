@@ -94,12 +94,10 @@ button {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  transition: opacity 820ms ease;
 }
 
-.cloud-auth-shell[data-success-phase="exiting"] {
-  opacity: 0;
-}
+/* Exit fade is driven inline by motion in login-screen.tsx so it stays in
+   lock-step with the panel and text springs — no CSS transition needed. */
 
 .cloud-floating-actions {
   position: fixed;
@@ -997,6 +995,29 @@ button {
   max-width: 280px;
   margin-top: -4px;
   text-align: left;
+}
+
+.cloud-remote-create-machine-name {
+  display: grid;
+  width: 100%;
+  max-width: 280px;
+  gap: 8px;
+  margin-top: -4px;
+  text-align: center;
+}
+
+.cloud-remote-create-machine-name span {
+  color: var(--cloud-muted);
+  font-size: 13px;
+}
+
+.cloud-remote-create-machine-name strong {
+  overflow-wrap: anywhere;
+  color: var(--cloud-text);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.2;
 }
 
 @media (max-width: 680px) {

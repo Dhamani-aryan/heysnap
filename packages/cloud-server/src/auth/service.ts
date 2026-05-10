@@ -1,7 +1,7 @@
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, SessionRecord, UserRecord } from "../db/types.js";
 import { conflict, notFound, unauthorized } from "../shared/errors.js";
-import { normalizeEmail, requirePassword } from "../shared/validation.js";
+import { normalizeEmail, normalizeUsername, requirePassword } from "../shared/validation.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { createOpaqueToken, hashToken } from "./tokens.js";
 
@@ -17,16 +17,26 @@ export class AuthService {
     private readonly config: CloudServerConfig,
   ) {}
 
-  async createUser(input: { readonly email: string; readonly password: string }): Promise<UserRecord> {
+  async createUser(input: {
+    readonly email: string;
+    readonly username: string;
+    readonly password: string;
+  }): Promise<UserRecord> {
     const email = normalizeEmail(input.email);
+    const username = normalizeUsername(input.username);
     requirePassword(input.password);
 
     if (await this.store.getUserByEmail(email)) {
       throw conflict("EMAIL_ALREADY_REGISTERED", "Email is already registered");
     }
 
+    if (await this.store.getUserByUsername(username)) {
+      throw conflict("USERNAME_ALREADY_REGISTERED", "Username is already registered");
+    }
+
     const user = await this.store.createUser({
       email,
+      username,
       passwordHash: await hashPassword(input.password),
     });
 

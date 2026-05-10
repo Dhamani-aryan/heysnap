@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, type Transition } from "motion/react";
 
 import darkLogoUrl from "../../../../apps/assets/heysnap-dark-logo.gif";
 import lightLogoUrl from "../../../../apps/assets/heysnap-light-logo.gif";
@@ -10,12 +10,16 @@ import { ThemeToggle } from "../filesystem/theme-toggle";
 type LogoAsset = string | { readonly src: string };
 type SuccessPhase = "idle" | "welcome" | "tagline" | "exiting";
 
-const TAGLINE_PHASE_DELAY_MS = 1600;
+const TAGLINE_PHASE_DELAY_MS = 1700;
 const EXIT_PHASE_DELAY_MS = 5000;
-const EXIT_DURATION_MS = 820;
-const PANEL_EASE = [0.2, 0.8, 0.2, 1] as const;
-const PANEL_TRANSITION = { duration: 0.72, ease: PANEL_EASE };
-const TEXT_TRANSITION = { duration: 0.92, ease: PANEL_EASE };
+const EXIT_DURATION_MS = 900;
+// easeOutExpo-style curve: confident takeoff, gentle settle. Used everywhere we
+// don't reach for spring physics so the panel and text never fight each other.
+const SMOOTH_EASE = [0.22, 1, 0.36, 1] as const;
+const PANEL_TRANSITION: Transition = { duration: 0.85, ease: SMOOTH_EASE };
+const SHELL_EXIT_TRANSITION: Transition = { duration: 0.9, ease: SMOOTH_EASE };
+const BRAND_SPRING: Transition = { type: "spring", stiffness: 140, damping: 22, mass: 1 };
+const TEXT_SPRING: Transition = { type: "spring", stiffness: 200, damping: 26, mass: 0.85 };
 
 const getLogoSrc = (asset: LogoAsset): string => {
   return typeof asset === "string" ? asset : asset.src;
@@ -41,7 +45,7 @@ export function LoginScreen({
   const isSuccessAnimating = successPhase !== "idle";
   const successCopy = successPhase === "tagline" || successPhase === "exiting"
     ? "Get your work done in a snap!"
-    : "Welcome to Heysnap!";
+    : "Welcome to Snap!";
   const successCopyKey = successPhase === "tagline" || successPhase === "exiting" ? "tagline" : "welcome";
 
   useEffect(() => {
@@ -88,7 +92,13 @@ export function LoginScreen({
   }, [isSuccessAnimating, onSuccessComplete]);
 
   return (
-    <main className="cloud-auth-shell" data-success-phase={successPhase}>
+    <motion.main
+      className="cloud-auth-shell"
+      data-success-phase={successPhase}
+      initial={false}
+      animate={{ opacity: successPhase === "exiting" ? 0 : 1 }}
+      transition={SHELL_EXIT_TRANSITION}
+    >
       <div className="cloud-floating-actions">
         <ThemeToggle />
       </div>
@@ -118,7 +128,7 @@ export function LoginScreen({
           aria-label="Heysnap"
           initial={false}
           animate={{ scale: isSuccessAnimating ? 1.08 : 1 }}
-          transition={PANEL_TRANSITION}
+          transition={BRAND_SPRING}
         >
           <img
             className="cloud-auth-logo cloud-auth-logo-light"
@@ -135,12 +145,12 @@ export function LoginScreen({
               <motion.span
                 key={successCopyKey}
                 className="cloud-auth-wordmark-text"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
+                initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -10, filter: "blur(6px)" }}
                 transition={{
-                  ...TEXT_TRANSITION,
-                  delay: successCopyKey === "tagline" ? 0.3 : 0,
+                  ...TEXT_SPRING,
+                  delay: successCopyKey === "tagline" ? 0.22 : 0,
                 }}
               >
                 {successCopy}
@@ -188,6 +198,6 @@ export function LoginScreen({
           </button>
         </div>
       </motion.form>
-    </main>
+    </motion.main>
   );
 }

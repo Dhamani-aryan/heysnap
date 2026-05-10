@@ -80,6 +80,7 @@ describe("cloud server auth", () => {
     const created = await createUserAsAdmin(app, "USER@example.com", "password123");
 
     expect(created.user.email).toBe("user@example.com");
+    expect(created.user.username).toBe("user");
 
     const login = await loginUser(app, "user@example.com", "password123");
 
@@ -109,7 +110,7 @@ describe("cloud server auth", () => {
 
     const duplicate = await app.request("/admin/users", {
       method: "POST",
-      body: JSON.stringify({ email: "USER@example.com", password: "password123" }),
+      body: JSON.stringify({ email: "USER@example.com", username: "user-duplicate", password: "password123" }),
       headers: adminHeaders(),
     });
 
@@ -119,12 +120,37 @@ describe("cloud server auth", () => {
     });
   });
 
+  it("requires unique usernames for admin-created users", async () => {
+    const { app } = createTestApp();
+    await createUserAsAdmin(app, "first@example.com");
+
+    const missing = await app.request("/admin/users", {
+      method: "POST",
+      body: JSON.stringify({ email: "missing@example.com", password: "password123" }),
+      headers: adminHeaders(),
+    });
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({
+      error: { code: "INVALID_BODY" },
+    });
+
+    const duplicate = await app.request("/admin/users", {
+      method: "POST",
+      body: JSON.stringify({ email: "second@example.com", username: "first", password: "password123" }),
+      headers: adminHeaders(),
+    });
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toMatchObject({
+      error: { code: "USERNAME_ALREADY_REGISTERED" },
+    });
+  });
+
   it("rejects invalid admin-created email addresses", async () => {
     const { app } = createTestApp();
 
     const response = await app.request("/admin/users", {
       method: "POST",
-      body: JSON.stringify({ email: "not-an-email", password: "password123" }),
+      body: JSON.stringify({ email: "not-an-email", username: "bad-email", password: "password123" }),
       headers: adminHeaders(),
     });
 
@@ -325,6 +351,29 @@ describe("cloud server computer inventory", () => {
     expect((await app.request(`/computers/${createdBody.computer.id}`, {
       headers: authHeaders(auth.token),
     })).status).toBe(404);
+  });
+
+  it("allows only one cloud computer per user", async () => {
+    const { app } = createTestApp();
+    const auth = await registerUser(app, "limit@example.com");
+
+    const first = await app.request("/computers", {
+      method: "POST",
+      body: JSON.stringify({ name: "First VM" }),
+      headers: authHeaders(auth.token),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await app.request("/computers", {
+      method: "POST",
+      body: JSON.stringify({ name: "Second VM" }),
+      headers: authHeaders(auth.token),
+    });
+
+    expect(second.status).toBe(409);
+    expect(await second.json()).toMatchObject({
+      error: { code: "CLOUD_MACHINE_LIMIT_REACHED" },
+    });
   });
 
   it("exposes live tunnel state on user computer payloads", async () => {
@@ -988,7 +1037,7 @@ const createUserAsAdmin = async (
 ): Promise<{ readonly user: AuthResponse["user"] }> => {
   const response = await app.request("/admin/users", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, username: usernameFromEmail(email), password }),
     headers: adminHeaders(),
   });
   return await response.json() as { readonly user: AuthResponse["user"] };
@@ -1041,12 +1090,15 @@ interface AuthResponse {
   readonly user: {
     readonly id: string;
     readonly email: string;
+    readonly username: string;
   };
   readonly session: {
     readonly token: string;
     readonly expiresAt: string;
   };
 }
+
+const usernameFromEmail = (email: string): string => email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 
 interface ComputerResponse {
   readonly computer: {

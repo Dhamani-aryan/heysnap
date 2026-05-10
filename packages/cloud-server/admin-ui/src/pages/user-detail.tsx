@@ -105,13 +105,15 @@ export const UserDetailPage = () => {
           detail.loading || user === undefined ? (
             <Skeleton className="h-7 w-56" />
           ) : (
-            user.email
+            user.username
           )
         }
         description={
           user !== undefined ? (
-            <span className="flex items-center gap-2 font-mono text-xs">
-              {user.id} <CopyButton value={user.id} label="Copy id" />
+            <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>{user.email}</span>
+              <span className="font-mono">{user.id}</span>
+              <CopyButton value={user.id} label="Copy id" />
             </span>
           ) : null
         }
@@ -328,8 +330,8 @@ export const UserDetailPage = () => {
         description={
           user !== undefined ? (
             <>
-              <strong>{user.email}</strong> and all of their machines will be deleted. Cloud EC2 instances are
-              terminated. This cannot be undone.
+              <strong>{user.username}</strong> ({user.email}) and all of their machines will be deleted. Cloud EC2
+              instances are terminated. This cannot be undone.
             </>
           ) : null
         }
@@ -342,7 +344,7 @@ export const UserDetailPage = () => {
 
       <ResetPasswordPopover
         userId={userId}
-        userEmail={user?.email}
+        username={user?.username}
         open={resetOpen}
         onClose={() => setResetOpen(false)}
       />
@@ -352,12 +354,12 @@ export const UserDetailPage = () => {
 
 const ResetPasswordPopover = ({
   userId,
-  userEmail,
+  username,
   open,
   onClose,
 }: {
   readonly userId: string;
-  readonly userEmail: string | undefined;
+  readonly username: string | undefined;
   readonly open: boolean;
   readonly onClose: () => void;
 }) => {
@@ -376,7 +378,7 @@ const ResetPasswordPopover = ({
     setSubmitting(true);
     try {
       await adminApi.setUserPassword(userId, password);
-      toast.success(`Password reset${userEmail !== undefined ? ` for ${userEmail}` : ""}`);
+      toast.success(`Password reset${username !== undefined ? ` for ${username}` : ""}`);
       onClose();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "Could not reset password");
@@ -391,8 +393,8 @@ const ResetPasswordPopover = ({
         <DialogHeader>
           <DialogTitle>Reset password</DialogTitle>
           <DialogDescription>
-            {userEmail !== undefined ? (
-              <>Set a new password for <strong>{userEmail}</strong>.</>
+            {username !== undefined ? (
+              <>Set a new password for <strong>{username}</strong>.</>
             ) : (
               "Set a new password."
             )}

@@ -202,7 +202,7 @@ describe("gateway tunnel", () => {
 
   it("returns null for HTTP proxy requests without a connected tunnel", async () => {
     const { server, store, registry } = await startTunnelServer();
-    const user = await store.createUser({ email: "user@example.com", passwordHash: "hash" });
+    const user = await store.createUser({ email: "user@example.com", username: "user", passwordHash: "hash" });
     const computer = await store.createComputer({
       ownerUserId: user.id,
       name: "VM",
@@ -218,7 +218,7 @@ describe("gateway tunnel", () => {
 
   it("rejects gateway connections without a valid access token", async () => {
     const { server, baseUrl, store } = await startTunnelServer();
-    const user = await store.createUser({ email: "user@example.com", passwordHash: "hash" });
+    const user = await store.createUser({ email: "user@example.com", username: "user", passwordHash: "hash" });
     const computer = await store.createComputer({
       ownerUserId: user.id,
       name: "VM",
@@ -302,7 +302,7 @@ const startConnectedTunnel = async (): Promise<{
   readonly registry: MachineTunnelRegistry;
 }> => {
   const { server, baseUrl, store, registry } = await startTunnelServer();
-  const user = await store.createUser({ email: "user@example.com", passwordHash: "hash" });
+  const user = await store.createUser({ email: "user@example.com", username: "user", passwordHash: "hash" });
   const computer = await store.createComputer({
     ownerUserId: user.id,
     name: "VM",

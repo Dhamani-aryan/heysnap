@@ -51,7 +51,9 @@ export const UsersListPage = () => {
     if (term.length === 0) {
       return users.data ?? [];
     }
-    return (users.data ?? []).filter((user) => user.email.toLowerCase().includes(term));
+    return (users.data ?? []).filter((user) =>
+      user.email.toLowerCase().includes(term) || user.username.toLowerCase().includes(term)
+    );
   }, [users.data, filter]);
 
   const closeAction = () => {
@@ -101,7 +103,7 @@ export const UsersListPage = () => {
         <Input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
-          placeholder="Filter by email…"
+          placeholder="Filter by username or email..."
           className="max-w-xs"
         />
         <span className="text-xs text-muted-foreground">{filtered.length} of {users.data?.length ?? 0}</span>
@@ -114,6 +116,7 @@ export const UsersListPage = () => {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Username</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead className="w-40">User ID</TableHead>
                 <TableHead className="w-24">Machines</TableHead>
@@ -125,7 +128,7 @@ export const UsersListPage = () => {
               {users.loading ? (
                 Array.from({ length: 4 }).map((_, index) => (
                   <TableRow key={index}>
-                    {Array.from({ length: 5 }).map((__, cellIndex) => (
+                    {Array.from({ length: 6 }).map((__, cellIndex) => (
                       <TableCell key={cellIndex}>
                         <Skeleton className="h-4" />
                       </TableCell>
@@ -134,7 +137,7 @@ export const UsersListPage = () => {
                 ))
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                     No users found
                   </TableCell>
                 </TableRow>
@@ -143,9 +146,10 @@ export const UsersListPage = () => {
                   <TableRow key={user.id}>
                     <TableCell>
                       <Link to={`/users/${user.id}`} className="font-medium hover:underline">
-                        {user.email}
+                        {user.username}
                       </Link>
                     </TableCell>
+                    <TableCell>{user.email}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{user.id}</TableCell>
                     <TableCell>{user.computerCount ?? user.computers?.length ?? 0}</TableCell>
                     <TableCell>
@@ -207,8 +211,8 @@ export const UsersListPage = () => {
         description={
           actionUser !== null ? (
             <>
-              <strong>{actionUser.email}</strong> and all of their machines will be deleted. Cloud EC2 instances are
-              terminated. This cannot be undone.
+              <strong>{actionUser.username}</strong> ({actionUser.email}) and all of their machines will be deleted.
+              Cloud EC2 instances are terminated. This cannot be undone.
             </>
           ) : null
         }
@@ -237,12 +241,14 @@ const CreateUserDialog = ({
   readonly onCreated: () => void;
 }) => {
   const [email, setEmail] = React.useState("");
+  const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) {
       setEmail("");
+      setUsername("");
       setPassword("");
       setSubmitting(false);
     }
@@ -252,8 +258,8 @@ const CreateUserDialog = ({
     event.preventDefault();
     setSubmitting(true);
     try {
-      const result = await adminApi.createUser({ email: email.trim(), password });
-      toast.success(`Created ${result.user.email}`);
+      const result = await adminApi.createUser({ email: email.trim(), username: username.trim(), password });
+      toast.success(`Created ${result.user.username}`);
       onCreated();
       onOpenChange(false);
     } catch (cause) {
@@ -288,6 +294,22 @@ const CreateUserDialog = ({
               required
               disabled={submitting}
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-user-username">Username</Label>
+            <Input
+              id="new-user-username"
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="off"
+              required
+              minLength={3}
+              maxLength={40}
+              pattern="[A-Za-z0-9_-]+"
+              disabled={submitting}
+            />
+            <p className="text-xs text-muted-foreground">Use 3-40 letters, numbers, underscores, or hyphens.</p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="new-user-password">Password</Label>
@@ -342,7 +364,7 @@ const ResetPasswordDialog = ({
     setSubmitting(true);
     try {
       await adminApi.setUserPassword(user.id, password);
-      toast.success(`Password reset for ${user.email}`);
+      toast.success(`Password reset for ${user.username}`);
       onClose();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "Could not reset password");
@@ -357,7 +379,7 @@ const ResetPasswordDialog = ({
         <DialogHeader>
           <DialogTitle>Reset password</DialogTitle>
           <DialogDescription>
-            {user !== null && <>Set a new password for <strong>{user.email}</strong>.</>}
+            {user !== null && <>Set a new password for <strong>{user.username}</strong>.</>}
           </DialogDescription>
         </DialogHeader>
         <form className="grid gap-4" onSubmit={handleSubmit}>
