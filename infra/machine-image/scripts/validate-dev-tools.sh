@@ -2,26 +2,34 @@
 set -euo pipefail
 
 export PATH="/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export NODE_PATH="$(npm root -g):${NODE_PATH:-}"
 
 node --version
 npm --version
 npx --version
 pnpm --version
+node -e "require('docx'); require('pptxgenjs'); require('react'); require('react-dom/server'); require('react-icons/fa'); require('sharp')"
 
 python --version
 uv --version
 
 python - <<'PY'
 import bs4
+import defusedxml.minidom
 import duckdb
 import httpx
+import lxml.etree
+from markitdown import MarkItDown
 import matplotlib
 import numpy
 import openpyxl
 import pandas
+from PIL import Image
 import pdfplumber
 import pypdf
+import reportlab
 import requests
+import xlrd
 import xlsxwriter
 import docx
 import pptx
@@ -35,11 +43,14 @@ codex --version
 image-gen --version
 
 ffmpeg -version
+gcc --version
 libreoffice --headless --version
+soffice --headless --version
 psql --version
 ngrok version
 magick -version
 pandoc --version
+pdftoppm -v >/dev/null 2>&1
 jq --version
 yq --version
 rg --version

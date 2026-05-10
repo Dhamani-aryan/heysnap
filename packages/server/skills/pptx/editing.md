@@ -112,9 +112,9 @@ Slide order is in `ppt/presentation.xml` → `<p:sldIdLst>`.
 
 ## Editing Content
 
-**Subagents:** If available, use them here (after completing step 4). Each slide is a separate XML file, so subagents can edit in parallel. In your prompt to subagents, include:
+Each slide is a separate XML file, so independent slide edits can be done in parallel after completing step 4. For any delegated slide edit, include:
 - The slide file path(s) to edit
-- **"Use the Edit tool for all changes"**
+- A request to make precise patch/edit changes only
 - The formatting rules and common pitfalls below
 
 For each slide:
@@ -122,7 +122,7 @@ For each slide:
 2. Identify ALL placeholder content—text, images, charts, icons, captions
 3. Replace each placeholder with final content
 
-**Use the Edit tool, not sed or Python scripts.** The Edit tool forces specificity about what to replace and where, yielding better reliability.
+Use precise patch/edit changes, not broad `sed` replacements or one-off Python scripts. Specific edits make replacements auditable and reduce accidental XML damage.
 
 ### Formatting Rules
 

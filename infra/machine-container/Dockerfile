@@ -5,12 +5,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     bash \
+    build-essential \
     ca-certificates \
     curl \
     gh \
     git \
     gzip \
     jq \
+    libreoffice \
+    pandoc \
+    poppler-utils \
     python-is-python3 \
     python3 \
     python3-pip \
@@ -26,24 +30,30 @@ RUN apt-get update \
 RUN ln -sf /usr/local/bin/node /usr/bin/node \
   && corepack enable \
   && corepack prepare pnpm@9.15.2 --activate \
-  && npm install -g @openai/codex vercel@latest heysnap-image-gen@0.1.1
+  && npm install -g @openai/codex vercel@latest heysnap-image-gen@0.1.1 docx pptxgenjs react-icons react react-dom sharp
 
 RUN install -d -m 0755 /opt/ank1015/venvs \
   && python -m venv /opt/ank1015/venvs/default \
   && /opt/ank1015/venvs/default/bin/python -m pip install --upgrade pip setuptools wheel \
   && /opt/ank1015/venvs/default/bin/python -m pip install --no-cache-dir --timeout 120 --resume-retries 20 \
     beautifulsoup4 \
+    defusedxml \
     duckdb \
     httpx \
+    lxml \
+    "markitdown[pptx]" \
     matplotlib \
     numpy \
     openpyxl \
     pandas \
+    Pillow \
     pdfplumber \
     pypdf \
+    reportlab \
     python-docx \
     python-pptx \
     requests \
+    xlrd \
     xlsxwriter
 
 RUN curl --fail --location --silent --show-error https://astral.sh/uv/install.sh \
@@ -64,6 +74,7 @@ RUN curl --fail --location --silent --show-error https://astral.sh/uv/install.sh
   && install -m 0755 "$temp_dir/supabase" /usr/local/bin/supabase \
   && rm -rf "$temp_dir"
 
+ENV NODE_PATH="/usr/local/lib/node_modules"
 ENV PATH="/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 COPY packages/machine-bootstrap/scripts/ank1015-machine-bootstrap /usr/local/bin/ank1015-machine-bootstrap
