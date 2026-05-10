@@ -67,7 +67,7 @@ Create users with the admin token:
 curl -X POST https://api.heysnap.xyz/admin/users \
   -H "authorization: Bearer $CLOUD_SERVER_ADMIN_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"email":"user@example.com","password":"change-me"}'
+  -d '{"email":"user@example.com","username":"user","password":"change-me"}'
 ```
 
 EC2 instances should not expose the machine server publicly. Provisioned
