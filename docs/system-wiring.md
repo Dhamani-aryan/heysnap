@@ -81,30 +81,12 @@ UI
 The gateway verifies the access token, checks the selected computer, and routes
 traffic through the machine's outbound tunnel.
 
-## Local Machine Flow
+## Desktop App Flow
 
-Electron main owns local machine lifecycle.
-
-```text
-Electron starts
-  -> starts packages/server in-process from Electron main
-  -> local server exposes /filesystem and /agent on 127.0.0.1
-
-User logs in
-  -> renderer sends cloud session to Electron main
-  -> Electron main calls POST /computers/local
-  -> cloud server upserts one local computer for this device
-  -> Electron main sends /machines/heartbeat with machine token
-```
-
-When the user opens the local machine, the UI uses direct local URLs:
-
-```text
-ws://127.0.0.1:<port>/filesystem
-ws://127.0.0.1:<port>/agent
-```
-
-The local machine is not exposed through the cloud gateway yet.
+Electron renders the same hosted cloud-machine UI as the web app. It does not
+embed `packages/server`, register the local device, or open direct
+`127.0.0.1` workspace URLs. Workspace traffic goes through hosted gateway
+access sessions.
 
 ## Machine Server Protocols
 

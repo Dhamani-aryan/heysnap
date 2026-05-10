@@ -1,8 +1,8 @@
 # Architecture
 
 This application is a multi-device coding-agent platform. A device is any
-computer that can run the machine server: a cloud VM/EC2 instance or the user's
-local machine through the Electron app.
+computer that can run the machine server, primarily cloud VM/EC2 instances
+created by the control plane.
 
 The UI should not care whether the selected computer is local or remote. It
 selects a computer, receives an authenticated connection for that computer, and
@@ -29,16 +29,15 @@ logical responsibilities:
 - **Gateway:** authenticated routing from clients to machine servers, including
   WebSocket proxying and tunnel management.
 
-The machine server is the same server on every computer. It runs on cloud VMs
-as a host systemd service and is embedded in Electron main for local desktop
-work.
+The machine server is the same server on every provisioned computer. It runs on
+cloud VMs as a host systemd service.
 
 ## Packages
 
 The intended repo boundaries are:
 
 - `apps/web`: browser UI for cloud computers.
-- `apps/desktop`: Electron UI for cloud computers and the local machine.
+- `apps/desktop`: Electron UI for the same cloud-computer workflow.
 - `packages/ui`: shared React UI and client-side filesystem/agent protocol
   clients.
 - `packages/server`: machine server that runs on each computer.
@@ -53,12 +52,7 @@ A computer is a persistent environment owned by a user.
 
 Cloud computers are VMs/EC2 instances created by the control plane. They have
 persistent disk, a machine identity, a machine server, and an agent harness.
-
-The local computer is the user's own machine. It is available in the Electron
-app by starting the same machine server in-process from Electron main. Electron
-registers the local machine in cloud inventory, but local workspace traffic
-still uses direct `127.0.0.1` WebSocket URLs. A future tunnel can expose the
-local machine to the web app or mobile clients.
+Both web and desktop clients open them through hosted gateway access sessions.
 
 Example computer states:
 

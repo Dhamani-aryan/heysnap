@@ -2,18 +2,14 @@
 
 Electron desktop app for HeySnap.
 
-The desktop app renders the same shared cloud UI as the web app, but also owns
-the local machine integration. Electron main starts the machine server
-in-process for local desktop work, so users do not need Docker installed.
+The desktop app renders the same shared cloud UI as the web app inside an
+Electron shell.
 
 ## Responsibilities
 
 - Desktop shell for macOS and Windows.
 - Logs in to the configured cloud server and shows cloud machines.
-- Registers the local machine as a cloud inventory record.
-- Starts/stops the embedded local machine server.
-- Opens local workspaces through direct `ws://127.0.0.1:<port>` URLs.
-- Opens cloud workspaces through hosted gateway access sessions.
+- Opens workspaces through hosted gateway access sessions.
 - Checks desktop app updates through cloud release manifests and `electron-updater`.
 
 ## Local Development

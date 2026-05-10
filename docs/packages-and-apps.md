@@ -20,10 +20,8 @@ Next.js app for the hosted browser product.
 Electron app for desktop users.
 
 - Renders the same shared `CloudApp` from `packages/ui`.
-- Supports cloud machines plus the local machine.
-- Starts the embedded local machine server from Electron main.
-- Opens local workspaces through direct `127.0.0.1` WebSocket URLs.
-- Opens remote workspaces through the hosted gateway.
+- Supports the same hosted cloud-machine workflow as `apps/web`.
+- Opens workspaces through hosted gateway access sessions.
 - Checks desktop app updates with `electron-updater` and cloud release manifests.
 - Released through `.github/workflows/release-desktop.yml`.
 
@@ -37,7 +35,7 @@ Shared React UI package.
 - Machine workspace layout.
 - Filesystem browser and agent UI.
 - Cloud API client.
-- Runtime-specific behavior is injected by apps, such as the Electron local-machine bridge.
+- Runtime-specific behavior is injected by apps.
 
 ### `packages/server`
 
@@ -73,5 +71,5 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm dev` starts only `apps/web` and `apps/desktop`. The desktop app embeds
-the local machine server, so Docker is not required for local desktop work.
+`pnpm dev` starts only `apps/web` and `apps/desktop`. The machine runtime and
+hosted backend services run separately when needed.
