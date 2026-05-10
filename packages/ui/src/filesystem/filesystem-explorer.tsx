@@ -2,25 +2,28 @@
 
 import {
   Add01Icon,
+  ArrowRight01Icon,
   ArrowLeft02Icon,
   Download05Icon,
   FileUploadIcon,
   FolderAddIcon,
+  Folder01Icon,
   FolderUploadIcon,
   Moon02Icon,
   PlugSocketIcon,
+  PowerIcon,
+  Search01Icon,
+  SidebarRightIcon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
-import { ThreadHistoryButton } from "../agent/thread-history";
-import type { AgentThreadSummary } from "../agent/types";
-import { CapabilitiesPanel } from "../cloud/capabilities-panel";
+import { retrieveAgentThreadGroups } from "../agent/agent-client";
+import type { AgentThreadGroup, AgentThreadSummary } from "../agent/types";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
-import { ThemeToggle } from "./theme-toggle";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
 type DocxPreviewModule = typeof import("docx-preview");
@@ -31,6 +34,7 @@ const DEFAULT_LEFT_PANE_RATIO = 0.5;
 const MIN_PANE_RATIO = 0.25;
 const MAX_PANE_RATIO = 0.75;
 const LEFT_PANE_RATIO_STORAGE_KEY = "filesystem-explorer:left-pane-ratio";
+const RIGHT_SIDEBAR_OPEN_STORAGE_KEY = "filesystem-explorer:right-sidebar-open";
 const CONTEXT_MENU_WIDTH = 200;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 const BACKGROUND_CONTEXT_MENU_HEIGHT = 148;
@@ -134,6 +138,14 @@ const getInitialLeftPaneRatio = (): number => {
   return Number.isFinite(stored) ? clampPaneRatio(stored) : DEFAULT_LEFT_PANE_RATIO;
 };
 
+const getInitialRightSidebarOpen = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY) === "true";
+};
+
 const normalizeInitialFilesystemPath = (path: string | undefined): string | undefined => {
   if (path === undefined) {
     return undefined;
@@ -179,7 +191,6 @@ export interface FilesystemExplorerProps {
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentBaseUrl = "http://localhost:4000/agent",
-  capabilitiesWebsocketUrl,
   selectedThreadId = null,
   initialPath,
   machineName = "Machine",
@@ -205,7 +216,7 @@ export function FilesystemExplorer({
   const [isFetching, setIsFetching] = useState(true);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
-  const [workspaceView, setWorkspaceView] = useState<"files" | "connectors">("files");
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(getInitialRightSidebarOpen);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -227,6 +238,10 @@ export function FilesystemExplorer({
     onPathChangeRef.current = onPathChange;
     onInitialPathInvalidRef.current = onInitialPathInvalid;
   }, [onFilesystemOpen, onInitialPathInvalid, onPathChange]);
+
+  useEffect(() => {
+    window.localStorage.setItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY, isRightSidebarOpen ? "true" : "false");
+  }, [isRightSidebarOpen]);
 
   useEffect(() => {
     const initialPathForConnection = normalizeInitialFilesystemPath(initialPath);
@@ -704,7 +719,7 @@ export function FilesystemExplorer({
   );
 
   return (
-    <main className="finder-shell">
+    <main className="finder-shell" data-right-sidebar-open={isRightSidebarOpen ? "true" : undefined}>
       <input
         ref={uploadFilesInputRef}
         type="file"
@@ -737,13 +752,9 @@ export function FilesystemExplorer({
         onForward={onForward}
         title={listing?.name ?? "Desktop"}
         isFetching={isFetching}
-        agentBaseUrl={agentBaseUrl}
-        capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
-        isConnectorsOpen={workspaceView === "connectors"}
-        selectedThreadId={selectedThreadId}
-        onSelectThread={onSelectThread}
         onNewThread={onNewThread}
-        onToggleConnectors={() => setWorkspaceView((current) => current === "connectors" ? "files" : "connectors")}
+        isRightSidebarOpen={isRightSidebarOpen}
+        onToggleRightSidebar={() => setIsRightSidebarOpen((current) => !current)}
         openFileTabs={openFileTabs}
         activeFilePath={activeFileTab?.path ?? null}
         onShowDirectory={() => setActiveFilePath(null)}
@@ -751,71 +762,86 @@ export function FilesystemExplorer({
         onCloseFileTab={closeFileTab}
       />
 
-      {workspaceView === "connectors" ? (
-        <CapabilitiesPanel websocketUrl={capabilitiesWebsocketUrl} />
-      ) : (
-        <DesktopSplitPane
-          leftPaneRatio={leftPaneRatio}
-          onLeftPaneRatioChange={handleLeftPaneRatioChange}
-          agentBaseUrl={agentBaseUrl}
-          selectedThreadId={selectedThreadId}
-          currentPath={currentPath}
-          onOpenFilePath={openFilePath}
-          onSelectThread={onSelectThread}
-          onThreadResolved={onThreadResolved}
-        >
-          <div className="left-pane-surface-stack">
-            <div
-              className={activeFileTab === null ? "left-pane-surface active" : "left-pane-surface inactive"}
-              aria-hidden={activeFileTab !== null}
-            >
-              <FinderBody
-                error={listingError}
-                isLoading={isFetching && listing === null}
-                entries={listing?.entries ?? []}
-                selectedPaths={selectedPaths}
-                renamingPath={renamingPath}
-                onSelect={selectEntry}
-                onSelectionChange={(paths) => {
-                  setSelectedPaths(paths);
-                  setSelectionAnchorPath(paths[0] ?? null);
-                }}
-                onActivate={handleEntryDoubleClick}
-                onBackgroundClick={() => {
-                  setSelectedPaths([]);
-                  setSelectionAnchorPath(null);
-                }}
-                onCreateNewFolder={() => void createNewFolder()}
-                onUploadFiles={() => uploadFilesInputRef.current?.click()}
-                onUploadFolder={chooseUploadFolder}
-                onRenameStart={(entry) => {
-                  setSelectedPaths([entry.path]);
-                  setSelectionAnchorPath(entry.path);
-                  setRenamingPath(entry.path);
-                }}
-                onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
-                onRenameCancel={() => setRenamingPath(null)}
-                onOpenEntry={openEntry}
-                onGetInfo={showEntryInfo}
-                onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
-                onDownloadEntries={downloadEntries}
-              />
-            </div>
-            <FileViewerStack
-              openFileTabs={openFileTabs}
-              activeFilePath={activeFileTab?.path ?? null}
-              websocketUrl={websocketUrl}
+      <DesktopSplitPane
+        leftPaneRatio={leftPaneRatio}
+        onLeftPaneRatioChange={handleLeftPaneRatioChange}
+        agentBaseUrl={agentBaseUrl}
+        selectedThreadId={selectedThreadId}
+        currentPath={currentPath}
+        onOpenFilePath={openFilePath}
+        onSelectThread={onSelectThread}
+        onThreadResolved={onThreadResolved}
+      >
+        <div className="left-pane-surface-stack">
+          <div
+            className={activeFileTab === null ? "left-pane-surface active" : "left-pane-surface inactive"}
+            aria-hidden={activeFileTab !== null}
+          >
+            <FinderBody
+              error={listingError}
+              isLoading={isFetching && listing === null}
+              entries={listing?.entries ?? []}
+              selectedPaths={selectedPaths}
+              renamingPath={renamingPath}
+              onSelect={selectEntry}
+              onSelectionChange={(paths) => {
+                setSelectedPaths(paths);
+                setSelectionAnchorPath(paths[0] ?? null);
+              }}
+              onActivate={handleEntryDoubleClick}
+              onBackgroundClick={() => {
+                setSelectedPaths([]);
+                setSelectionAnchorPath(null);
+              }}
+              onCreateNewFolder={() => void createNewFolder()}
+              onUploadFiles={() => uploadFilesInputRef.current?.click()}
+              onUploadFolder={chooseUploadFolder}
+              onRenameStart={(entry) => {
+                setSelectedPaths([entry.path]);
+                setSelectionAnchorPath(entry.path);
+                setRenamingPath(entry.path);
+              }}
+              onRenameCommit={(entry, nextName) => void commitRename(entry, nextName)}
+              onRenameCancel={() => setRenamingPath(null)}
+              onOpenEntry={openEntry}
+              onGetInfo={showEntryInfo}
+              onTrashEntries={(entriesToTrash) => void moveEntryToTrash(entriesToTrash)}
+              onDownloadEntries={downloadEntries}
             />
           </div>
-          <MachineStatusControl
-            canSleepMachine={canSleepMachine}
-            machineName={machineName}
-            status={connectionStatus}
-            onBack={onBackToMachines}
-            onSleep={onSleepMachine}
+          <FileViewerStack
+            openFileTabs={openFileTabs}
+            activeFilePath={activeFileTab?.path ?? null}
+            websocketUrl={websocketUrl}
           />
-        </DesktopSplitPane>
-      )}
+        </div>
+        <MachineStatusControl
+          canSleepMachine={canSleepMachine}
+          machineName={machineName}
+          status={connectionStatus}
+          onBack={onBackToMachines}
+          onSleep={onSleepMachine}
+        />
+      </DesktopSplitPane>
+      <aside className="split-right-sidebar" aria-label="Right sidebar" aria-hidden={!isRightSidebarOpen}>
+        <div className="split-right-sidebar-actions">
+          <RightSidebarAction
+            icon={Add01Icon}
+            label="New Chat"
+            onClick={() => {
+              onNewThread?.();
+            }}
+          />
+          <RightSidebarAction icon={Search01Icon} label="Search" />
+          <RightSidebarAction icon={PlugSocketIcon} label="Connectors" />
+        </div>
+        <RightSidebarChats
+          agentBaseUrl={agentBaseUrl}
+          isOpen={isRightSidebarOpen}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={onSelectThread}
+        />
+      </aside>
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
     </main>
   );
@@ -861,6 +887,239 @@ const UploadProgressDialog = ({
       </div>
     </div>
   );
+};
+
+const RightSidebarAction = ({
+  icon,
+  label,
+  onClick,
+}: {
+  readonly icon: IconSvgElement;
+  readonly label: string;
+  readonly onClick?: () => void;
+}): React.ReactElement => (
+  <button className="split-right-sidebar-action" type="button" onClick={onClick}>
+    <HugeiconsIcon icon={icon} size={16} color="currentColor" strokeWidth={1.8} />
+    <span>{label}</span>
+  </button>
+);
+
+const RightSidebarChats = ({
+  agentBaseUrl,
+  isOpen,
+  selectedThreadId,
+  onSelectThread,
+}: {
+  readonly agentBaseUrl: string;
+  readonly isOpen: boolean;
+  readonly selectedThreadId: string | null;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+}): React.ReactElement => {
+  const [groups, setGroups] = useState<AgentThreadGroup[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const hasThreads = groups.some((group) => group.threads.length > 0);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    let isCurrent = true;
+    setIsLoading(true);
+    setError(null);
+
+    void retrieveAgentThreadGroups(agentBaseUrl)
+      .then((nextGroups) => {
+        if (isCurrent) {
+          setGroups(nextGroups);
+          setHasLoaded(true);
+        }
+      })
+      .catch((reason) => {
+        if (isCurrent) {
+          setError(reason instanceof Error ? reason.message : "Failed to load chats.");
+          setHasLoaded(true);
+        }
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [agentBaseUrl, isOpen]);
+
+  return (
+    <section className="split-right-sidebar-chats" aria-label="Chats">
+      <h2>Chats</h2>
+      {error !== null ? (
+        <p className="split-right-sidebar-state error">{error}</p>
+      ) : (!hasLoaded || isLoading) && !hasThreads ? (
+        <p className="split-right-sidebar-state">Loading chats...</p>
+      ) : hasThreads ? (
+        <div className="split-right-sidebar-chat-groups">
+          {groups.map((group) =>
+            group.threads.length === 0 ? null : (
+              <RightSidebarChatGroup
+                key={group.path}
+                group={group}
+                selectedThreadId={selectedThreadId}
+                onSelectThread={onSelectThread}
+              />
+            ),
+          )}
+        </div>
+      ) : (
+        <p className="split-right-sidebar-state">No previous chats.</p>
+      )}
+    </section>
+  );
+};
+
+const RightSidebarChatGroup = ({
+  group,
+  selectedThreadId,
+  onSelectThread,
+}: {
+  readonly group: AgentThreadGroup;
+  readonly selectedThreadId: string | null;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+}): React.ReactElement => {
+  const label = group.path.trim().length === 0 ? "Desktop" : group.path;
+  const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
+  const [isExpanded, setIsExpanded] = useState(hasSelectedThread);
+  const [isShowingAll, setIsShowingAll] = useState(false);
+  const visibleThreads = isShowingAll ? group.threads : group.threads.slice(0, 5);
+  const hasMoreThreads = group.threads.length > visibleThreads.length;
+
+  useEffect(() => {
+    if (hasSelectedThread) {
+      setIsExpanded(true);
+    }
+  }, [hasSelectedThread]);
+
+  return (
+    <section className="split-right-sidebar-chat-group">
+      <button
+        type="button"
+        className={isExpanded ? "split-right-sidebar-chat-folder expanded" : "split-right-sidebar-chat-folder"}
+        title={label}
+        aria-expanded={isExpanded}
+        onClick={() => setIsExpanded((current) => !current)}
+      >
+        <HugeiconsIcon
+          icon={Folder01Icon}
+          size={15}
+          color="currentColor"
+          strokeWidth={1.8}
+          className="split-right-sidebar-folder-icon"
+        />
+        <span>{getSidebarFolderLabel(label)}</span>
+        <HugeiconsIcon
+          icon={ArrowRight01Icon}
+          size={12}
+          color="currentColor"
+          strokeWidth={1.8}
+          className="split-right-sidebar-folder-chevron"
+        />
+      </button>
+      <div
+        className={isExpanded ? "split-right-sidebar-chat-collapse open" : "split-right-sidebar-chat-collapse"}
+        aria-hidden={!isExpanded}
+      >
+        <div className="split-right-sidebar-chat-collapse-inner">
+          <div className="split-right-sidebar-chat-list">
+            {visibleThreads.map((thread) => (
+              <RightSidebarChatItem
+                key={thread.id}
+                thread={thread}
+                isSelected={thread.id === selectedThreadId}
+                onSelectThread={onSelectThread}
+              />
+            ))}
+            {hasMoreThreads ? (
+              <button
+                className="split-right-sidebar-show-more"
+                type="button"
+                onClick={() => setIsShowingAll(true)}
+                tabIndex={isExpanded ? 0 : -1}
+              >
+                Show more
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const RightSidebarChatItem = ({
+  thread,
+  isSelected,
+  onSelectThread,
+}: {
+  readonly thread: AgentThreadSummary;
+  readonly isSelected: boolean;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+}): React.ReactElement => {
+  const updatedLabel = useMemo(() => formatSidebarChatDate(thread.updatedAt), [thread.updatedAt]);
+
+  return (
+    <button
+      className={isSelected ? "split-right-sidebar-chat selected" : "split-right-sidebar-chat"}
+      title={thread.title}
+      type="button"
+      onClick={() => onSelectThread?.(thread)}
+    >
+      <span className="split-right-sidebar-chat-title">{thread.title}</span>
+      <span className="split-right-sidebar-chat-meta">{updatedLabel}</span>
+    </button>
+  );
+};
+
+const getSidebarFolderLabel = (path: string): string => {
+  const segments = path.split("/").filter((segment) => segment.length > 0);
+  return segments.at(-1) ?? path;
+};
+
+const formatSidebarChatDate = (timestamp: number): string => {
+  if (!Number.isFinite(timestamp)) {
+    return "";
+  }
+
+  const elapsedMs = Date.now() - timestamp;
+  const elapsedMinutes = Math.max(0, Math.floor(elapsedMs / 60_000));
+
+  if (elapsedMinutes < 1) {
+    return "now";
+  }
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+
+  if (elapsedDays < 7) {
+    return `${elapsedDays}d`;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(timestamp));
 };
 
 const MachineStatusControl = ({
@@ -934,9 +1193,6 @@ const MachineStatusControl = ({
     <div ref={containerRef} className="machine-status-control">
       {isOpen ? (
         <div className="machine-status-popover" role="dialog" aria-label="Machine actions">
-          <div className="machine-status-popover-header">
-            <span title={machineName}>{machineName}</span>
-          </div>
           <button
             type="button"
             className="machine-status-action"
@@ -978,8 +1234,9 @@ const MachineStatusControl = ({
           setIsOpen((current) => !current);
         }}
       >
+        <HugeiconsIcon icon={PowerIcon} size={14} color="currentColor" strokeWidth={1.8} />
+        <span className="machine-status-label">{machineName}</span>
         <ConnectionStatusIndicator status={status} />
-        <span>{machineName}</span>
       </button>
     </div>
   );
@@ -1015,13 +1272,9 @@ const FinderToolbar = ({
   onForward,
   title,
   isFetching,
-  agentBaseUrl,
-  capabilitiesWebsocketUrl,
-  isConnectorsOpen,
-  selectedThreadId,
-  onSelectThread,
   onNewThread,
-  onToggleConnectors,
+  isRightSidebarOpen,
+  onToggleRightSidebar,
   openFileTabs,
   activeFilePath,
   onShowDirectory,
@@ -1034,13 +1287,9 @@ const FinderToolbar = ({
   readonly onForward: () => void;
   readonly title: string;
   readonly isFetching: boolean;
-  readonly agentBaseUrl: string;
-  readonly capabilitiesWebsocketUrl?: string;
-  readonly isConnectorsOpen: boolean;
-  readonly selectedThreadId: string | null;
-  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onNewThread?: () => void;
-  readonly onToggleConnectors: () => void;
+  readonly isRightSidebarOpen: boolean;
+  readonly onToggleRightSidebar: () => void;
   readonly openFileTabs: OpenFileTab[];
   readonly activeFilePath: string | null;
   readonly onShowDirectory: () => void;
@@ -1082,31 +1331,25 @@ const FinderToolbar = ({
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
-      <button
-        type="button"
-        className="new-thread-button"
-        aria-label="New chat"
-        title="New chat"
-        onClick={onNewThread}
-      >
-        <HugeiconsIcon icon={Add01Icon} size={18} color="currentColor" strokeWidth={1.8} />
-      </button>
-      <ThreadHistoryButton
-        agentBaseUrl={agentBaseUrl}
-        selectedThreadId={selectedThreadId}
-        onSelectThread={onSelectThread}
-      />
-      {capabilitiesWebsocketUrl === undefined ? null : (
-        <ToolbarButton
-          onClick={onToggleConnectors}
-          ariaLabel={isConnectorsOpen ? "Close connectors" : "Connectors"}
-          title={isConnectorsOpen ? "Close connectors" : "Connectors"}
-          active={isConnectorsOpen}
+      {!isRightSidebarOpen ? (
+        <button
+          type="button"
+          className="new-thread-button"
+          aria-label="New chat"
+          title="New chat"
+          onClick={onNewThread}
         >
-          <HugeiconsIcon icon={PlugSocketIcon} size={18} color="currentColor" strokeWidth={1.8} />
-        </ToolbarButton>
-      )}
-      <ThemeToggle />
+          <HugeiconsIcon icon={Add01Icon} size={18} color="currentColor" strokeWidth={1.8} />
+        </button>
+      ) : null}
+      <ToolbarButton
+        onClick={onToggleRightSidebar}
+        ariaLabel={isRightSidebarOpen ? "Close right sidebar" : "Open right sidebar"}
+        title={isRightSidebarOpen ? "Close right sidebar" : "Open right sidebar"}
+        pressed={isRightSidebarOpen}
+      >
+        <HugeiconsIcon icon={SidebarRightIcon} size={18} color="currentColor" strokeWidth={1.8} />
+      </ToolbarButton>
     </div>
   </div>
 );
@@ -1154,6 +1397,7 @@ const ToolbarButton = ({
   ariaLabel,
   title,
   active,
+  pressed,
 }: {
   readonly children: React.ReactNode;
   readonly disabled?: boolean;
@@ -1161,12 +1405,14 @@ const ToolbarButton = ({
   readonly ariaLabel: string;
   readonly title?: string;
   readonly active?: boolean;
+  readonly pressed?: boolean;
 }): React.ReactElement => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
     aria-label={ariaLabel}
+    aria-pressed={pressed}
     title={title ?? ariaLabel}
     className={active === true ? "toolbar-button active" : "toolbar-button"}
   >
@@ -1952,7 +2198,10 @@ const DesktopSplitPane = ({
       }
 
       const rect = container.getBoundingClientRect();
-      const nextRatio = (event.clientX - rect.left) / rect.width;
+      const styles = window.getComputedStyle(container);
+      const paddingRight = Number.parseFloat(styles.paddingRight);
+      const resizableWidth = rect.width - (Number.isFinite(paddingRight) ? paddingRight : 0);
+      const nextRatio = (event.clientX - rect.left) / resizableWidth;
       onLeftPaneRatioChange(nextRatio);
     };
 
@@ -1974,38 +2223,44 @@ const DesktopSplitPane = ({
   }, [isResizing, onLeftPaneRatioChange]);
 
   return (
-    <div ref={containerRef} className="split-pane">
-      <section className="split-left" style={{ flexBasis: `${leftPaneRatio * 100}%` }}>
-        {children}
-      </section>
-
+    <div className="split-pane">
       <div
-        role="separator"
-        aria-label="Resize desktop panels"
-        aria-orientation="vertical"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(leftPaneRatio * 100)}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          setIsResizing(true);
-        }}
-        className="split-resizer"
+        ref={containerRef}
+        className="split-main"
+        data-resizing={isResizing ? "true" : undefined}
       >
-        <div className="split-resizer-line" />
-        <div className="split-resizer-handle" />
-      </div>
+        <section className="split-left" style={{ flexBasis: `${leftPaneRatio * 100}%` }}>
+          {children}
+        </section>
 
-      <aside className="split-preview" aria-label="Preview panel">
-        <AgentPanel
-          agentBaseUrl={agentBaseUrl}
-          selectedThreadId={selectedThreadId}
-          currentPath={currentPath}
-          onOpenFilePath={onOpenFilePath}
-          onSelectThread={onSelectThread}
-          onThreadResolved={onThreadResolved}
-        />
-      </aside>
+        <div
+          role="separator"
+          aria-label="Resize desktop panels"
+          aria-orientation="vertical"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(leftPaneRatio * 100)}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setIsResizing(true);
+          }}
+          className="split-resizer"
+        >
+          <div className="split-resizer-line" />
+          <div className="split-resizer-handle" />
+        </div>
+
+        <aside className="split-preview" aria-label="Preview panel">
+          <AgentPanel
+            agentBaseUrl={agentBaseUrl}
+            selectedThreadId={selectedThreadId}
+            currentPath={currentPath}
+            onOpenFilePath={onOpenFilePath}
+            onSelectThread={onSelectThread}
+            onThreadResolved={onThreadResolved}
+          />
+        </aside>
+      </div>
     </div>
   );
 };
