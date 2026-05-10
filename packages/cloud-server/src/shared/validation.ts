@@ -58,6 +58,24 @@ export const normalizeEmail = (email: string): string => {
   return normalized;
 };
 
+export const normalizeUsername = (username: string): string => {
+  const normalized = username.trim().toLowerCase();
+
+  if (normalized.length < 3) {
+    throw badRequest("INVALID_USERNAME", "Username must be at least 3 characters");
+  }
+
+  if (normalized.length > 40) {
+    throw badRequest("INVALID_USERNAME", "Username must be at most 40 characters");
+  }
+
+  if (!/^[a-z0-9_-]+$/.test(normalized)) {
+    throw badRequest("INVALID_USERNAME", "Username may only contain letters, numbers, underscores, and hyphens");
+  }
+
+  return normalized;
+};
+
 export const requirePassword = (password: string): void => {
   if (password.length < 6) {
     throw badRequest("WEAK_PASSWORD", "Password must be at least 6 characters");

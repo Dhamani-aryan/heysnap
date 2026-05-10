@@ -233,6 +233,7 @@ export const createAdminRoutes = (
     const body = await readJsonBody(context.req.raw);
     const user = await authService.createUser({
       email: stringField(body, "email", { required: true, maxLength: 320 }) ?? "",
+      username: stringField(body, "username", { required: true, maxLength: 40 }) ?? "",
       password: stringField(body, "password", { required: true, maxLength: 1024 }) ?? "",
     });
 
