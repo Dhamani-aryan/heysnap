@@ -11,6 +11,7 @@ import {
 import { runLocalReleasePublisher } from "./release-machine-server.mjs";
 
 const DEV_EMAIL = process.env.LOCAL_DEV_EMAIL || "dev@example.com";
+const DEV_USERNAME = "dev";
 const DEV_PASSWORD = process.env.LOCAL_DEV_PASSWORD || "dev123";
 const children = [];
 
@@ -77,19 +78,41 @@ const ensureDevUser = async () => {
   }
 
   const usersBody = await usersResponse.json();
-  const existing = usersBody.users?.find((user) => user.email === DEV_EMAIL);
+  const users = usersBody.users ?? [];
+  const existing = users.find((user) => user.email === DEV_EMAIL);
+  const usernameConflict = users.find((user) => user.username === DEV_USERNAME && user.email !== DEV_EMAIL);
+
+  if (usernameConflict) {
+    const deleteResponse = await fetch(`${localCloudUrl}/admin/users/${usernameConflict.id}`, {
+      method: "DELETE",
+      headers: adminHeaders(),
+    });
+    if (!deleteResponse.ok) {
+      throw new Error(`Could not clear local dev username: ${deleteResponse.status} ${await deleteResponse.text()}`);
+    }
+  }
 
   if (existing) {
-    const passwordResponse = await fetch(`${localCloudUrl}/admin/users/${existing.id}/password`, {
-      method: "POST",
-      headers: adminHeaders(),
-      body: JSON.stringify({ password: DEV_PASSWORD }),
-    });
-    if (!passwordResponse.ok) {
-      throw new Error(`Could not reset local dev user password: ${passwordResponse.status} ${await passwordResponse.text()}`);
+    if (existing.username !== DEV_USERNAME) {
+      const deleteResponse = await fetch(`${localCloudUrl}/admin/users/${existing.id}`, {
+        method: "DELETE",
+        headers: adminHeaders(),
+      });
+      if (!deleteResponse.ok) {
+        throw new Error(`Could not recreate local dev user: ${deleteResponse.status} ${await deleteResponse.text()}`);
+      }
+    } else {
+      const passwordResponse = await fetch(`${localCloudUrl}/admin/users/${existing.id}/password`, {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ password: DEV_PASSWORD }),
+      });
+      if (!passwordResponse.ok) {
+        throw new Error(`Could not reset local dev user password: ${passwordResponse.status} ${await passwordResponse.text()}`);
+      }
+      console.log(`Local dev user ready: ${DEV_EMAIL} / ${DEV_PASSWORD}`);
+      return;
     }
-    console.log(`Local dev user ready: ${DEV_EMAIL} / ${DEV_PASSWORD}`);
-    return;
   }
 
   const createResponse = await fetch(`${localCloudUrl}/admin/users`, {
@@ -97,6 +120,7 @@ const ensureDevUser = async () => {
     headers: adminHeaders(),
     body: JSON.stringify({
       email: DEV_EMAIL,
+      username: DEV_USERNAME,
       password: DEV_PASSWORD,
     }),
   });
