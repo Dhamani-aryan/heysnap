@@ -36,7 +36,6 @@ export function WebCloudApp({
   return (
     <CloudApp
       cloudServerUrl={cloudServerUrl}
-      includeLocalMachine={false}
       initialComputerId={routeComputerId}
       initialThreadId={routeThreadId}
       onWorkspaceRouteChange={handleWorkspaceRouteChange}
