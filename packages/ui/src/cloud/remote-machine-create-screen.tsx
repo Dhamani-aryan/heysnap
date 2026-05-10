@@ -85,7 +85,7 @@ export function RemoteMachineCreateScreen({
             void onCreateMachine({ name: machineName });
           }}
         >
-          <h1 id="cloud-remote-create-title">Create Remote Machine</h1>
+          <h1 id="cloud-remote-create-title">Your personal, private, AI computer</h1>
           <div className="cloud-local-onboarding-art" aria-hidden="true">
             <img
               className="cloud-local-onboarding-image cloud-local-onboarding-image-light"
@@ -99,7 +99,6 @@ export function RemoteMachineCreateScreen({
             />
           </div>
           <div className="cloud-remote-create-machine-name" aria-label="Machine name">
-            <span>Machine name</span>
             <strong>{machineName}</strong>
           </div>
           {error !== null ? (
@@ -116,7 +115,7 @@ export function RemoteMachineCreateScreen({
             {isSubmitting ? (
               <span className="cloud-local-onboarding-loader" aria-hidden="true" />
             ) : (
-              "Create remote machine"
+              "Create"
             )}
           </button>
         </form>

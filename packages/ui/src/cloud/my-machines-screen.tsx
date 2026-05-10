@@ -26,6 +26,7 @@ export interface MyMachinesScreenProps {
   readonly isLoading: boolean;
   readonly showOnboardingModal: boolean;
   readonly onDismissOnboarding: () => void;
+  readonly onShowOnboarding: () => void;
   readonly onOpenMachine: (computer: CloudComputer) => void;
   readonly onLogout: () => Promise<void>;
   readonly onRefresh: () => Promise<void>;
@@ -37,6 +38,7 @@ export function MyMachinesScreen({
   computers,
   showOnboardingModal,
   onDismissOnboarding,
+  onShowOnboarding,
   onLogout,
   onOpenMachine,
   onStartCreateMachine,
@@ -71,9 +73,12 @@ export function MyMachinesScreen({
 
       <section className="cloud-machines-page">
         <div className="cloud-machines-page-inner">
-          <h1 className="cloud-machines-title">Machines</h1>
+          <h1 className="cloud-machines-title">Computers</h1>
           <p className="cloud-machines-subtitle">
-            Your machines. <span>Learn more</span>
+            Your personal, private, AI computers.{" "}
+            <button className="cloud-machines-subtitle-link" type="button" onClick={onShowOnboarding}>
+              Learn More.
+            </button>
           </p>
 
           <div className="cloud-machines-grid">
@@ -101,15 +106,22 @@ export function MyMachinesScreen({
       </section>
 
       {showOnboardingModal ? (
-        <div className="cloud-modal-backdrop cloud-machines-onboarding-backdrop" role="presentation">
+        <div
+          className="cloud-modal-backdrop cloud-machines-onboarding-backdrop"
+          role="presentation"
+          onClick={onDismissOnboarding}
+        >
           <section
             aria-label="Machines onboarding"
             aria-modal="true"
             className="cloud-modal cloud-machines-onboarding-modal"
             role="dialog"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
           >
             <h2 className="cloud-machines-title cloud-machines-onboarding-title">
-              <span>Welcome</span>
+              <span>Welcome to Snap</span>
               <img
                 className="cloud-machines-onboarding-logo cloud-machines-onboarding-logo-light"
                 src={getImageSrc(lightLogoUrl)}
@@ -135,24 +147,13 @@ export function MyMachinesScreen({
                   src={getImageSrc(macImageUrl)}
                   alt=""
                 />
-                <p className="cloud-machines-onboarding-caption">These represent remote machines.</p>
-              </div>
-              <div className="cloud-machines-onboarding-image-frame">
-                <img
-                  className="cloud-machines-onboarding-image cloud-machines-onboarding-image-light"
-                  src={getImageSrc(newMacLightImageUrl)}
-                  alt=""
-                />
-                <img
-                  className="cloud-machines-onboarding-image cloud-machines-onboarding-image-dark"
-                  src={getImageSrc(newMacImageUrl)}
-                  alt=""
-                />
-                <p className="cloud-machines-onboarding-caption">Open connected machines from one place.</p>
               </div>
             </div>
             <p className="cloud-machines-onboarding-copy">
-              HeySnap creates a 24*7 dedicated cloud machine for your workspace.
+              Snap is your very own private computer with an AI agent. You use it like any other computer. It has a
+              desktop where you can create folder and work in them. Just go to the folder and ask snap what you want
+              to do. You can easily upload and download files and folders. There are also connectors availble through
+              which Snap can access those applications during your work!
             </p>
             <button
               className="cloud-primary-button cloud-machines-onboarding-action"

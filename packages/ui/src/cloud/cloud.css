@@ -736,8 +736,21 @@ button {
   color: #737375;
 }
 
-.cloud-machines-subtitle span {
+.cloud-machines-subtitle-link {
+  border: 0;
+  background: transparent;
   color: #999fde;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: 0;
+  padding: 0;
+}
+
+.cloud-machines-subtitle-link:hover,
+.cloud-machines-subtitle-link:focus-visible {
+  color: #7d85d9;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .cloud-machines-grid {
@@ -1001,14 +1014,8 @@ button {
   display: grid;
   width: 100%;
   max-width: 280px;
-  gap: 8px;
   margin-top: -4px;
   text-align: center;
-}
-
-.cloud-remote-create-machine-name span {
-  color: var(--cloud-muted);
-  font-size: 13px;
 }
 
 .cloud-remote-create-machine-name strong {
@@ -1137,6 +1144,7 @@ button {
   justify-content: center;
   background: rgba(0, 0, 0, 0.16);
   padding: 18px;
+  animation: cloud-modal-backdrop-enter 180ms ease-out both;
 }
 
 :root.dark .cloud-modal-backdrop {
@@ -1152,6 +1160,27 @@ button {
   background: var(--cloud-surface);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.14);
   padding: 18px;
+  animation: cloud-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes cloud-modal-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cloud-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-modal-backdrop,
+  .cloud-modal {
+    animation: none;
+  }
 }
 
 .cloud-machines-onboarding-backdrop {
@@ -1212,7 +1241,7 @@ button {
 .cloud-machines-onboarding-image-row {
   display: grid;
   width: 100%;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   margin-top: 24px;
 }
@@ -1220,7 +1249,8 @@ button {
 .cloud-machines-onboarding-image-frame {
   position: relative;
   display: grid;
-  min-height: 160px;
+  height: 150px;
+  overflow: hidden;
   align-content: start;
   justify-items: center;
 }
@@ -1258,7 +1288,7 @@ button {
 
 .cloud-machines-onboarding-copy {
   width: 100%;
-  margin: 26px 0 0;
+  margin: 10px 0 0;
   color: var(--cloud-muted);
   font-size: 14px;
   font-weight: 400;
