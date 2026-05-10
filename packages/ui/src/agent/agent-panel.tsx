@@ -256,7 +256,6 @@ export const AgentPanel = ({
   return (
     <div className="right-prompt-surface">
       <div className="agent-thread-scroll">
-        {isLoading ? <AgentPanelState label="Loading thread..." /> : null}
         {loadError !== null ? <AgentPanelState label={loadError} variant="error" /> : null}
         {!isLoading && loadError === null ? (
           <AgentTimeline
