@@ -143,6 +143,18 @@ const normalizeInitialFilesystemPath = (path: string | undefined): string | unde
   return normalizedPath.length === 0 ? "" : normalizedPath;
 };
 
+const createInitialNavigationHistory = (path: string): string[] => {
+  const segments = path.trim().split("/").filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
+    return [];
+  }
+
+  return [
+    "",
+    ...segments.map((_, index) => segments.slice(0, index + 1).join("/")),
+  ];
+};
+
 const isInvalidInitialFilesystemPathError = (message: string): boolean =>
   /path (?:is not a directory|not found)/iu.test(message);
 
@@ -223,8 +235,14 @@ export function FilesystemExplorer({
     const client = new FilesystemClient(websocketUrl, {
       initialPath: initialPathForConnection,
       onListing: (nextListing) => {
+        const isInitialListing = !hasReceivedListing;
         hasReceivedListing = true;
         setListing(nextListing);
+        if (isInitialListing) {
+          const initialHistory = createInitialNavigationHistory(nextListing.path);
+          setHistory(initialHistory);
+          setHistoryIndex(initialHistory.length - 1);
+        }
         onPathChangeRef.current?.(nextListing.path);
       },
       onFileUpdates: ({ entries }) => {
