@@ -4,7 +4,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ensureCodexUserConfig, renderCodexUserConfig } from "../src/agent/harnesses/codex/config.js";
+import {
+  CODEX_USER_INSTRUCTIONS,
+  ensureCodexUserConfig,
+  renderCodexUserConfig,
+} from "../src/agent/harnesses/codex/config.js";
 
 const tempRoots: string[] = [];
 
@@ -20,6 +24,7 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 include_permissions_instructions = false
 include_apps_instructions = false
+instructions = ${JSON.stringify(CODEX_USER_INSTRUCTIONS)}
 
 [features]
 # Disable plugin system and plugin cache/sync behavior.
