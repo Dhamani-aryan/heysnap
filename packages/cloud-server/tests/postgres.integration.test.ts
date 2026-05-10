@@ -28,9 +28,10 @@ describePostgres("cloud server postgres integration", () => {
 
   it("creates a user as admin and creates a computer through the real Drizzle store", async () => {
     const email = `postgres-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
+    const username = email.split("@")[0]!.replace(/[^a-z0-9_-]/g, "-").slice(0, 40);
     const createdUser = await app.request("/admin/users", {
       method: "POST",
-      body: JSON.stringify({ email, password: "password123" }),
+      body: JSON.stringify({ email, username, password: "password123" }),
       headers: {
         authorization: `Bearer ${config.adminToken}`,
         "content-type": "application/json",

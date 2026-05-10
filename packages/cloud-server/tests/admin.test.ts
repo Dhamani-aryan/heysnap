@@ -58,7 +58,7 @@ describe("admin user management", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      user: { id: owner.userId, email: "detail@example.com" },
+      user: { id: owner.userId, email: "detail@example.com", username: "detail" },
       computers: [{ id: computer.id, name: "Detail VM", tunnelConnected: false }],
       sessions: [{ userId: owner.userId, revokedAt: null }],
     });
@@ -73,10 +73,17 @@ describe("admin user management", () => {
   });
 
   it("deletes a user and terminates their cloud computers", async () => {
-    const { app, provisioner } = createTestApp();
+    const { app, store, provisioner } = createTestApp();
     const owner = await registerUser(app, "deleteme@example.com");
     const first = await createComputer(app, owner.token, "VM A");
-    const second = await createComputer(app, owner.token, "VM B");
+    const second = await store.createComputer({
+      ownerUserId: owner.userId,
+      name: "VM B",
+      kind: "cloud",
+      status: "creating",
+      providerMetadata: {},
+      capabilities: [],
+    });
 
     const deleted = await app.request(`/admin/users/${owner.userId}`, {
       method: "DELETE",
@@ -762,7 +769,7 @@ const registerUser = async (
 ): Promise<{ readonly userId: string; readonly token: string }> => {
   await app.request("/admin/users", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, username: usernameFromEmail(email), password }),
     headers: adminHeaders(),
   });
   const login = await app.request("/auth/login", {
@@ -777,6 +784,8 @@ const registerUser = async (
 
   return { userId: body.user.id, token: body.session.token };
 };
+
+const usernameFromEmail = (email: string): string => email.split("@")[0]!.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 
 const createComputer = async (
   app: ReturnType<typeof createApp>,
