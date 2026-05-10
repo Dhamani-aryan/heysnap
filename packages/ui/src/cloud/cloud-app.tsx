@@ -25,27 +25,39 @@ const CLOUD_SCREEN_TRANSITION = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as co
 
 export interface CloudAppProps {
   readonly cloudServerUrl?: string;
-  readonly initialComputerId?: string;
-  readonly initialThreadId?: string;
-  readonly machineRouteBasePath?: string;
-  readonly onWorkspaceRouteChange?: (
-    route: { readonly computerId: string | null; readonly threadId: string | null },
-    options?: { readonly replace?: boolean },
-  ) => void;
+  readonly route?: CloudAppRoute;
+  readonly onRouteChange?: (route: CloudAppRoute, options?: CloudRouteChangeOptions) => void;
   readonly storageKey?: string;
+}
+
+export type CloudAppRoute =
+  | { readonly view: "home" }
+  | { readonly view: "login" }
+  | { readonly view: "machines" }
+  | { readonly view: "machine-create" }
+  | {
+    readonly view: "workspace";
+    readonly computerId: string;
+    readonly threadId?: string | null;
+  };
+
+export interface CloudRouteChangeOptions {
+  readonly replace?: boolean;
 }
 
 export function CloudApp({
   cloudServerUrl = DEFAULT_CLOUD_SERVER_URL,
-  initialComputerId,
-  initialThreadId,
-  machineRouteBasePath,
-  onWorkspaceRouteChange,
+  route,
+  onRouteChange,
   storageKey = DEFAULT_STORAGE_KEY,
 }: CloudAppProps): React.ReactElement {
   const client = useMemo(() => new CloudClient(cloudServerUrl), [cloudServerUrl]);
   const machinesOnboardingStorageKey = `${storageKey}${MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX}`;
-  const routeComputerIdRef = useRef<string | null>(initialComputerId ?? null);
+  const [internalRoute, setInternalRoute] = useState<CloudAppRoute>({ view: "home" });
+  const activeRoute = route ?? internalRoute;
+  const routeComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
+  const routeThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
+  const routeComputerIdRef = useRef<string | null>(routeComputerId);
   const startingComputerIdsRef = useRef<Set<string>>(new Set());
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<CloudUser | null>(null);
@@ -54,10 +66,8 @@ export function CloudApp({
   );
   const [computers, setComputers] = useState<CloudComputer[]>([]);
   const [hasLoadedMachines, setHasLoadedMachines] = useState(false);
-  const [selectedComputerId, setSelectedComputerId] = useState<string | null>(initialComputerId ?? null);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
-    initialComputerId === undefined ? null : initialThreadId ?? null,
-  );
+  const [selectedComputerId, setSelectedComputerId] = useState<string | null>(routeComputerId);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(routeThreadId);
   const [accessSession, setAccessSession] = useState<ComputerAccessSessionResponse | null>(null);
   const [accessSessionRefreshTick, setAccessSessionRefreshTick] = useState(0);
   const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
@@ -68,7 +78,6 @@ export function CloudApp({
   const [isLoadingMachines, setIsLoadingMachines] = useState(false);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [isCreatingMachine, setIsCreatingMachine] = useState(false);
-  const [isRemoteMachineCreateVisible, setIsRemoteMachineCreateVisible] = useState(false);
   const [workspaceMachineStartup, setWorkspaceMachineStartup] = useState<{
     readonly computerId: string;
     readonly phase: "checking" | "starting";
@@ -90,25 +99,17 @@ export function CloudApp({
     computers.length === 0 &&
     machinesError === null;
 
-  const updateWorkspaceRoute = useCallback((
-    route: { readonly computerId: string | null; readonly threadId: string | null },
-    options: { readonly replace?: boolean } = {},
+  const changeRoute = useCallback((
+    nextRoute: CloudAppRoute,
+    options: CloudRouteChangeOptions = {},
   ): void => {
-    if (onWorkspaceRouteChange !== undefined) {
-      onWorkspaceRouteChange(route, options);
+    if (onRouteChange !== undefined) {
+      onRouteChange(nextRoute, options);
       return;
     }
 
-    if (machineRouteBasePath === undefined) {
-      return;
-    }
-
-    const nextPath = route.computerId === null
-      ? machineRouteBasePath
-      : joinRoute(machineRouteBasePath, route.computerId, route.threadId);
-    const method = options.replace === true ? "replaceState" : "pushState";
-    window.history[method](null, "", nextPath);
-  }, [machineRouteBasePath, onWorkspaceRouteChange]);
+    setInternalRoute(nextRoute);
+  }, [onRouteChange]);
 
   const clearSession = useCallback(() => {
     removeStoredToken(storageKey);
@@ -122,10 +123,10 @@ export function CloudApp({
     setSelectedComputerId(null);
     setSelectedThreadId(null);
     setAccessSession(null);
-    setIsRemoteMachineCreateVisible(false);
     setWorkspaceMachineStartup(null);
     setAuthState("unauthenticated");
-  }, [machinesOnboardingStorageKey, storageKey]);
+    changeRoute({ view: "login" }, { replace: true });
+  }, [changeRoute, machinesOnboardingStorageKey, storageKey]);
 
   const upsertComputer = useCallback((computer: CloudComputer): void => {
     setComputers((currentComputers) => [
@@ -218,8 +219,8 @@ export function CloudApp({
   }, [authState, refreshMachines]);
 
   useEffect(() => {
-    const nextComputerId = initialComputerId ?? null;
-    const nextThreadId = initialComputerId === undefined ? null : initialThreadId ?? null;
+    const nextComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
+    const nextThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
     const didComputerChange = routeComputerIdRef.current !== nextComputerId;
 
     setSelectedComputerId(nextComputerId);
@@ -231,7 +232,49 @@ export function CloudApp({
       setWorkspaceError(null);
       setWorkspaceMachineStartup(null);
     }
-  }, [initialComputerId, initialThreadId]);
+  }, [activeRoute]);
+
+  useEffect(() => {
+    if (authState === "checking") {
+      return;
+    }
+
+    if (authState === "unauthenticated" || user === null) {
+      if (activeRoute.view !== "login") {
+        changeRoute({ view: "login" }, { replace: true });
+      }
+      return;
+    }
+
+    if (authState !== "authenticated") {
+      return;
+    }
+
+    if (activeRoute.view !== "home" && activeRoute.view !== "login" && activeRoute.view !== "machines") {
+      return;
+    }
+
+    if (!hasLoadedMachines) {
+      return;
+    }
+
+    if (activeRoute.view === "home" || activeRoute.view === "login") {
+      changeRoute(getPostAuthRoute(computers), { replace: true });
+      return;
+    }
+
+    if (activeRoute.view === "machines" && shouldShowFirstRemoteMachineCreate) {
+      changeRoute({ view: "machine-create" }, { replace: true });
+    }
+  }, [
+    activeRoute.view,
+    authState,
+    changeRoute,
+    computers,
+    hasLoadedMachines,
+    shouldShowFirstRemoteMachineCreate,
+    user,
+  ]);
 
   useEffect(() => {
     if (accessSession === null) {
@@ -539,13 +582,12 @@ export function CloudApp({
     }
 
     setIsCreatingMachine(true);
-    setIsRemoteMachineCreateVisible(true);
     setMachinesError(null);
 
     try {
       const response = await client.createComputer(token, input);
       upsertComputer(response.computer);
-      setIsRemoteMachineCreateVisible(false);
+      changeRoute({ view: "machines" }, { replace: true });
       void refreshMachines();
     } catch (error) {
       if (isAuthFailure(error)) {
@@ -577,7 +619,7 @@ export function CloudApp({
       setAccessSession(null);
       setWorkspaceError(null);
       setWorkspaceMachineStartup(null);
-      updateWorkspaceRoute({ computerId: null, threadId: null });
+      changeRoute({ view: "machines" });
       void refreshMachines();
     } catch (error) {
       if (isAuthFailure(error)) {
@@ -593,18 +635,17 @@ export function CloudApp({
     refreshMachines,
     selectedComputerId,
     token,
-    updateWorkspaceRoute,
+    changeRoute,
     upsertComputer,
   ]);
 
   const openMachine = (computer: CloudComputer): void => {
-    setIsRemoteMachineCreateVisible(false);
     setSelectedComputerId(computer.id);
     setSelectedThreadId(null);
     setAccessSession(null);
     setWorkspaceError(null);
     setWorkspaceMachineStartup(null);
-    updateWorkspaceRoute({ computerId: computer.id, threadId: null });
+    changeRoute({ view: "workspace", computerId: computer.id, threadId: null });
   };
 
   const closeMachine = (): void => {
@@ -613,7 +654,7 @@ export function CloudApp({
     setAccessSession(null);
     setWorkspaceError(null);
     setWorkspaceMachineStartup(null);
-    updateWorkspaceRoute({ computerId: null, threadId: null });
+    changeRoute({ view: "machines" });
   };
 
   const selectThread = useCallback((thread: AgentThreadSummary): void => {
@@ -622,8 +663,8 @@ export function CloudApp({
     }
 
     setSelectedThreadId(thread.id);
-    updateWorkspaceRoute({ computerId: selectedComputerId, threadId: thread.id });
-  }, [selectedComputerId, updateWorkspaceRoute]);
+    changeRoute({ view: "workspace", computerId: selectedComputerId, threadId: thread.id });
+  }, [changeRoute, selectedComputerId]);
 
   const newThread = useCallback((): void => {
     if (selectedComputerId === null) {
@@ -631,8 +672,8 @@ export function CloudApp({
     }
 
     setSelectedThreadId(null);
-    updateWorkspaceRoute({ computerId: selectedComputerId, threadId: null });
-  }, [selectedComputerId, updateWorkspaceRoute]);
+    changeRoute({ view: "workspace", computerId: selectedComputerId, threadId: null });
+  }, [changeRoute, selectedComputerId]);
 
   const resolveThread = useCallback((threadId: string): void => {
     if (selectedComputerId === null || selectedThreadId === threadId) {
@@ -640,17 +681,17 @@ export function CloudApp({
     }
 
     setSelectedThreadId(threadId);
-    updateWorkspaceRoute({ computerId: selectedComputerId, threadId }, { replace: true });
-  }, [selectedComputerId, selectedThreadId, updateWorkspaceRoute]);
+    changeRoute({ view: "workspace", computerId: selectedComputerId, threadId }, { replace: true });
+  }, [changeRoute, selectedComputerId, selectedThreadId]);
 
   const startRemoteMachineCreate = (): void => {
     setMachinesError(null);
-    setIsRemoteMachineCreateVisible(true);
+    changeRoute({ view: "machine-create" });
   };
 
   const closeRemoteMachineCreate = (): void => {
     setMachinesError(null);
-    setIsRemoteMachineCreateVisible(false);
+    changeRoute({ view: "machines" });
   };
 
   const shouldShowWorkspaceStartup = selectedComputer !== null &&
@@ -659,17 +700,23 @@ export function CloudApp({
       workspaceMachineStartupPhase === "starting" ||
       isRemoteMachinePendingStartup(selectedComputer.status)
     );
+  const shouldShowRouteLoader =
+    activeRoute.view === "home" ||
+    (user === null && activeRoute.view !== "login") ||
+    (authState === "unauthenticated" && activeRoute.view !== "login") ||
+    (authState === "authenticated" && activeRoute.view === "login") ||
+    (activeRoute.view === "machines" && shouldShowFirstRemoteMachineCreate);
   let screenKey: string;
   let screenContent: React.ReactElement;
 
-  if (authState === "checking") {
+  if (authState === "checking" || shouldShowRouteLoader) {
     screenKey = "auth-checking";
     screenContent = (
       <main className="cloud-shell">
         <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
-  } else if (authState === "unauthenticated" || user === null) {
+  } else if ((authState === "unauthenticated" || user === null) && activeRoute.view === "login") {
     screenKey = "login";
     screenContent = (
       <LoginScreen
@@ -686,7 +733,7 @@ export function CloudApp({
         <div className="cloud-loading" role="status" aria-label="Loading" />
       </main>
     );
-  } else if (shouldShowFirstRemoteMachineCreate || isRemoteMachineCreateVisible) {
+  } else if (activeRoute.view === "machine-create") {
     screenKey = "remote-machine-create";
     screenContent = (
       <RemoteMachineCreateScreen
@@ -760,7 +807,7 @@ export function CloudApp({
         />
       );
     }
-  } else {
+  } else if (user !== null) {
     screenKey = "machines";
     screenContent = (
       <MyMachinesScreen
@@ -776,6 +823,13 @@ export function CloudApp({
         showOnboardingModal={!hasSeenMachinesOnboarding}
         user={user}
       />
+    );
+  } else {
+    screenKey = "auth-checking";
+    screenContent = (
+      <main className="cloud-shell">
+        <div className="cloud-loading" role="status" aria-label="Loading" />
+      </main>
     );
   }
 
@@ -946,8 +1000,5 @@ const buildGatewayHttpUrl = (input: {
   return url.toString();
 };
 
-const joinRoute = (basePath: string, computerId: string, threadId: string | null = null): string => {
-  const normalizedBasePath = basePath === "/" ? "" : basePath.replace(/\/+$/, "");
-  const machinePath = `${normalizedBasePath}/${encodeURIComponent(computerId)}`;
-  return threadId === null ? machinePath : `${machinePath}/${encodeURIComponent(threadId)}`;
-};
+const getPostAuthRoute = (computers: readonly CloudComputer[]): CloudAppRoute =>
+  computers.length === 0 ? { view: "machine-create" } : { view: "machines" };
