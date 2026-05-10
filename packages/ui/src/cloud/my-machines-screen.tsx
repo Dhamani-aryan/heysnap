@@ -42,6 +42,7 @@ export function MyMachinesScreen({
   onStartCreateMachine,
 }: MyMachinesScreenProps): React.ReactElement {
   const sortedComputers = [...computers].sort(compareMachinesForDisplay);
+  const canCreateMachine = sortedComputers.length === 0;
 
   useEffect(() => {
     document.documentElement.dataset.cloudScreen = "machines";
@@ -83,16 +84,18 @@ export function MyMachinesScreen({
                 onOpenMachine={onOpenMachine}
               />
             ))}
-            <button
-              aria-label="Create remote machine"
-              className="cloud-machine-card-placeholder cloud-machine-card-placeholder-add"
-              type="button"
-              onClick={onStartCreateMachine}
-            >
-              <div className="cloud-machine-card-add-art">
-                <HugeiconsIcon icon={PlusSignIcon} size={34} color="currentColor" strokeWidth={1.6} />
-              </div>
-            </button>
+            {canCreateMachine ? (
+              <button
+                aria-label="Create remote machine"
+                className="cloud-machine-card-placeholder cloud-machine-card-placeholder-add"
+                type="button"
+                onClick={onStartCreateMachine}
+              >
+                <div className="cloud-machine-card-add-art">
+                  <HugeiconsIcon icon={PlusSignIcon} size={34} color="currentColor" strokeWidth={1.6} />
+                </div>
+              </button>
+            ) : null}
           </div>
         </div>
       </section>
@@ -149,7 +152,7 @@ export function MyMachinesScreen({
               </div>
             </div>
             <p className="cloud-machines-onboarding-copy">
-              HeySnap creates a 24*7 dedicated cloud machine for your workspace. To add a new machine, click the plus box.
+              HeySnap creates a 24*7 dedicated cloud machine for your workspace.
             </p>
             <button
               className="cloud-primary-button cloud-machines-onboarding-action"
