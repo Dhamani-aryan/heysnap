@@ -173,7 +173,7 @@ export const OverviewPage = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Email</TableHead>
+                        <TableHead>User</TableHead>
                         <TableHead className="w-24">Machines</TableHead>
                         <TableHead className="w-32">Created</TableHead>
                       </TableRow>
@@ -183,9 +183,9 @@ export const OverviewPage = () => {
                         <TableRow key={user.id}>
                           <TableCell>
                             <Link to={`/users/${user.id}`} className="font-medium hover:underline">
-                              {user.email}
+                              {user.username}
                             </Link>
-                            <div className="font-mono text-xs text-muted-foreground">{user.id.slice(0, 8)}</div>
+                            <div className="text-xs text-muted-foreground">{user.email}</div>
                           </TableCell>
                           <TableCell>{user.computerCount ?? user.computers?.length ?? 0}</TableCell>
                           <TableCell>
