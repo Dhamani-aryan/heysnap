@@ -85,9 +85,14 @@ function CloudAppContent({
     readStoredBoolean(machinesOnboardingStorageKey),
   );
   const [canShowMissingMachine, setCanShowMissingMachine] = useState(false);
+  const [autoStartSuppressedComputerIds, setAutoStartSuppressedComputerIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const activeRoute = route ?? internalRoute;
   const selectedComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
   const selectedThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
+  const suppressSelectedComputerAutoStart =
+    selectedComputerId !== null && autoStartSuppressedComputerIds.has(selectedComputerId);
   const changeRoute = useCallback((
     nextRoute: CloudAppRoute,
     options: CloudRouteChangeOptions = {},
@@ -111,7 +116,9 @@ function CloudAppContent({
   const hasLoadedMachines = useCloudMachinesStore((state) => state.hasLoaded);
   const machinesError = useCloudMachinesStore((state) => state.error);
   const machinesQuery = useMachinesQuery();
-  const workspaceSession = useMachineWorkspaceSession(selectedComputerId);
+  const workspaceSession = useMachineWorkspaceSession(selectedComputerId, {
+    suppressAutoStart: suppressSelectedComputerAutoStart,
+  });
   const loginMutation = useLoginMutation();
   const logoutMutation = useLogoutMutation({
     onLogout: routeToLogin,
@@ -155,6 +162,14 @@ function CloudAppContent({
       window.clearTimeout(timer);
     };
   }, [hasLoadedMachines, machinesQuery.isFetching, selectedComputer, selectedComputerId]);
+
+  useEffect(() => {
+    if (activeRoute.view === "workspace") {
+      return;
+    }
+
+    setAutoStartSuppressedComputerIds((current) => current.size === 0 ? current : new Set<string>());
+  }, [activeRoute.view]);
 
   useEffect(() => {
     if (authState === "checking") {
@@ -216,6 +231,10 @@ function CloudAppContent({
     setHasSeenMachinesOnboarding(true);
   }, [machinesOnboardingStorageKey]);
 
+  const showMachinesOnboarding = useCallback((): void => {
+    setHasSeenMachinesOnboarding(false);
+  }, []);
+
   const logout = async (): Promise<void> => {
     try {
       await logoutMutation.mutateAsync();
@@ -238,7 +257,20 @@ function CloudAppContent({
       return;
     }
 
-    await stopMachineMutation.mutateAsync(selectedComputerId);
+    const computerId = selectedComputerId;
+    setAutoStartSuppressedComputerIds((current) => new Set(current).add(computerId));
+
+    try {
+      await stopMachineMutation.mutateAsync(computerId);
+    } catch (error) {
+      setAutoStartSuppressedComputerIds((current) => {
+        const next = new Set(current);
+        next.delete(computerId);
+        return next;
+      });
+      throw error;
+    }
+
     changeRoute({ view: "machines" });
   }, [changeRoute, selectedComputerId, stopMachineMutation]);
 
@@ -411,6 +443,7 @@ function CloudAppContent({
         onOpenMachine={openMachine}
         onLogout={logout}
         onDismissOnboarding={dismissMachinesOnboarding}
+        onShowOnboarding={showMachinesOnboarding}
         onRefresh={refreshMachines}
         onStartCreateMachine={startRemoteMachineCreate}
         showOnboardingModal={!hasSeenMachinesOnboarding}

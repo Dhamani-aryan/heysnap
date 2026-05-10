@@ -159,8 +159,12 @@ export const useStopMachineMutation = () => {
   });
 };
 
-export const useMachineWorkspaceSession = (computerId: string | null): MachineWorkspaceSessionState => {
+export const useMachineWorkspaceSession = (
+  computerId: string | null,
+  options: { readonly suppressAutoStart?: boolean } = {},
+): MachineWorkspaceSessionState => {
   const { accessStore, client, machinesStore } = useCloudRuntime();
+  const suppressAutoStart = options.suppressAutoStart === true;
   const authStatus = useCloudAuthStore((state) => state.status);
   const token = useCloudAuthStore((state) => state.token);
   const computer = useCloudMachinesStore((state) =>
@@ -230,6 +234,7 @@ export const useMachineWorkspaceSession = (computerId: string | null): MachineWo
       computerId === null ||
       computer === null ||
       computer.kind === "local" ||
+      suppressAutoStart ||
       computer.status !== "sleeping" ||
       startRequested ||
       startError !== null
@@ -239,7 +244,7 @@ export const useMachineWorkspaceSession = (computerId: string | null): MachineWo
 
     accessStore.getState().clearSession(computerId);
     startMutation.mutate(computerId);
-  }, [accessStore, authStatus, computer, computerId, startError, startMutation, startRequested]);
+  }, [accessStore, authStatus, computer, computerId, startError, startMutation, startRequested, suppressAutoStart]);
 
   useEffect(() => {
     if (
@@ -313,6 +318,15 @@ export const useMachineWorkspaceSession = (computerId: string | null): MachineWo
     return {
       accessSession: null,
       error: "Machine not found.",
+      isLoading: false,
+      startupPhase: null,
+    };
+  }
+
+  if (computer.kind !== "local" && computer.status === "sleeping" && suppressAutoStart) {
+    return {
+      accessSession: null,
+      error: getRemoteMachineUnavailableMessage(computer.status),
       isLoading: false,
       startupPhase: null,
     };
