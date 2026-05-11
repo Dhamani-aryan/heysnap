@@ -34,7 +34,11 @@ export const defaultCapabilitiesCatalog: CapabilitiesCatalog = {
       installStrategy: { type: "existing" },
       versionCommand: { command: "gh", args: ["--version"] },
       status: { command: "gh", args: ["auth", "status"] },
-      connect: { command: "gh", args: ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"] },
+      connect: {
+        command: "gh",
+        args: ["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
+        interactive: "tty",
+      },
       disconnect: { command: "gh", args: ["auth", "logout", "--hostname", "github.com"] },
     },
     {
@@ -50,7 +54,12 @@ export const defaultCapabilitiesCatalog: CapabilitiesCatalog = {
       },
       versionCommand: { command: "vercel", args: ["--version"] },
       status: { command: "vercel", args: ["whoami"] },
-      connect: { command: "vercel", args: ["login", "--no-color"], env: { CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } },
+      connect: {
+        command: "vercel",
+        args: ["login", "--no-color"],
+        env: { NO_COLOR: "1", FORCE_COLOR: "0" },
+        interactive: "tty",
+      },
       disconnect: { command: "vercel", args: ["logout", "--non-interactive", "--no-color"], env: { CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } },
     },
     {

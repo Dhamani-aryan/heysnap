@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { defaultCapabilitiesCatalog } from "../src/capabilities/catalog.js";
 import { AgentCapabilitiesService } from "../src/capabilities/service.js";
 import type { CapabilitiesCatalog, CapabilityPaths } from "../src/capabilities/types.js";
 
@@ -14,6 +15,20 @@ afterEach(async () => {
 });
 
 describe("agent capabilities service", () => {
+  it("treats browser login connectors as interactive device flows", () => {
+    const github = defaultCapabilitiesCatalog.tools.find((tool) => tool.id === "github");
+    const vercel = defaultCapabilitiesCatalog.tools.find((tool) => tool.id === "vercel");
+
+    expect(github?.connect).toMatchObject({
+      command: "gh",
+      interactive: "tty",
+    });
+    expect(vercel?.connect).toMatchObject({
+      command: "vercel",
+      interactive: "tty",
+    });
+  });
+
   it("installs bundled skills and mirrors connected tool skills", async () => {
     const { root, paths } = await createTempPaths();
     const toolBin = join(root, "bin", "fake-tool");
