@@ -4,7 +4,9 @@ import { WorkHistoryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { retrieveAgentThreadGroups } from "./agent-client";
+import { useAgentThreadGroupsQuery } from "./agent-queries";
+import { AgentRuntimeProvider, useAgentThreadListStore, useOptionalAgentRuntime } from "./agent-runtime";
+import { selectHasThreads } from "./agent-thread-list-store";
 import type { AgentThreadGroup, AgentThreadSummary } from "./types";
 
 export interface ThreadHistoryButtonProps {
@@ -18,12 +20,42 @@ export const ThreadHistoryButton = ({
   selectedThreadId = null,
   onSelectThread,
 }: ThreadHistoryButtonProps): React.ReactElement => {
+  const runtime = useOptionalAgentRuntime();
+
+  if (runtime === null) {
+    return (
+      <AgentRuntimeProvider agentBaseUrl={agentBaseUrl}>
+        <ThreadHistoryButton
+          agentBaseUrl={agentBaseUrl}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={onSelectThread}
+        />
+      </AgentRuntimeProvider>
+    );
+  }
+
+  return (
+    <ThreadHistoryButtonContent
+      selectedThreadId={selectedThreadId}
+      onSelectThread={onSelectThread}
+    />
+  );
+};
+
+const ThreadHistoryButtonContent = ({
+  selectedThreadId,
+  onSelectThread,
+}: {
+  readonly selectedThreadId: string | null;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+}): React.ReactElement => {
   const [isOpen, setIsOpen] = useState(false);
-  const [groups, setGroups] = useState<AgentThreadGroup[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const hasThreads = groups.some((group) => group.threads.length > 0);
+  useAgentThreadGroupsQuery({ enabled: isOpen });
+  const groups = useAgentThreadListStore((state) => state.groups);
+  const isLoading = useAgentThreadListStore((state) => state.isLoading);
+  const error = useAgentThreadListStore((state) => state.error);
+  const hasThreads = useAgentThreadListStore(selectHasThreads);
 
   useEffect(() => {
     if (!isOpen) {
@@ -53,37 +85,6 @@ export const ThreadHistoryButton = ({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    let isCurrent = true;
-    setIsLoading(true);
-    setError(null);
-
-    void retrieveAgentThreadGroups(agentBaseUrl)
-      .then((nextGroups) => {
-        if (isCurrent) {
-          setGroups(nextGroups);
-        }
-      })
-      .catch((reason) => {
-        if (isCurrent) {
-          setError(reason instanceof Error ? reason.message : "Failed to load thread history.");
-        }
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [agentBaseUrl, isOpen]);
 
   return (
     <div ref={containerRef} className="thread-history">

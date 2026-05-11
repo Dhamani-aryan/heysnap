@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowUp02Icon, Pdf02Icon, PlusSignIcon, StopIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp02Icon, Pdf02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AgentContent } from "./types";
 
@@ -21,6 +21,7 @@ export type PromptAttachment = {
 
 export interface RightPromptComposerProps {
   readonly isRunning?: boolean;
+  readonly draftSeed?: { readonly id: number; readonly text: string } | null;
   readonly onCancel?: () => void;
   readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void;
 }
@@ -111,6 +112,7 @@ const toAgentContent = (text: string, attachments: readonly PromptAttachment[]):
 
 export const RightPromptComposer = ({
   isRunning = false,
+  draftSeed = null,
   onCancel,
   onSubmit,
 }: RightPromptComposerProps): React.ReactElement => {
@@ -133,6 +135,16 @@ export const RightPromptComposer = ({
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, PROMPT_MAX_HEIGHT)}px`;
   }, [draft]);
+
+  useEffect(() => {
+    if (draftSeed === null) {
+      return;
+    }
+
+    setDraft(draftSeed.text);
+    setAttachmentError(null);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [draftSeed]);
 
   const handleAttachmentFiles = async (files: FileList | File[]): Promise<void> => {
     const nextFiles = Array.from(files);
@@ -316,12 +328,16 @@ export const RightPromptComposer = ({
           aria-label={isRunning ? "Stop response" : "Send prompt"}
           title={isRunning ? "Stop response" : "Send prompt"}
         >
-          <HugeiconsIcon
-            icon={isRunning ? StopIcon : ArrowUp02Icon}
-            size={isRunning ? 13 : 16}
-            color="currentColor"
-            strokeWidth={1.9}
-          />
+          {isRunning ? (
+            <span className="prompt-stop-square" aria-hidden="true" />
+          ) : (
+            <HugeiconsIcon
+              icon={ArrowUp02Icon}
+              size={16}
+              color="currentColor"
+              strokeWidth={1.9}
+            />
+          )}
         </button>
       </div>
 

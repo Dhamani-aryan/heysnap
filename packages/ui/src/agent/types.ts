@@ -122,6 +122,7 @@ export interface AgentThreadSummary {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageCount: number;
+  readonly isStreaming?: boolean;
 }
 
 export interface AgentThreadGroup {
