@@ -189,7 +189,7 @@ export const toThreadSummary = (
   messageCount = estimateMessageCount(thread),
 ): AgentThreadSummary => {
   const path = toHarnessPath(thread.cwd, filesystemRoot);
-  const title = thread.name?.trim() || thread.preview?.trim() || "Untitled thread";
+  const title = cleanThreadTitle(thread.name) ?? cleanThreadTitle(thread.preview) ?? "Untitled thread";
 
   return {
     id: thread.id,
@@ -201,6 +201,15 @@ export const toThreadSummary = (
     messageCount,
     ...(thread.status?.type === "active" ? { isStreaming: true } : {}),
   };
+};
+
+const cleanThreadTitle = (value: string | null | undefined): string | undefined => {
+  const title = value
+    ?.replace(NAVIGATED_DIRECTORY_PATTERN, "")
+    .replace(HEYSNAP_CONTEXT_PATTERN, "")
+    .trim();
+
+  return title === undefined || title.length === 0 ? undefined : title;
 };
 
 export const countUserMessages = (thread: CodexThread): number => {

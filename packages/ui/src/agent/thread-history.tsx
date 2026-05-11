@@ -144,7 +144,7 @@ const ThreadHistoryGroup = ({
   readonly selectedThreadId: string | null;
   readonly onSelectThread: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
-  const label = group.path.trim().length === 0 ? "Desktop" : group.path;
+  const label = group.path.trim().length === 0 ? "workspace" : group.path;
 
   return (
     <section className="thread-history-group">

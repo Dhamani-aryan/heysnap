@@ -279,6 +279,41 @@ describe("codex agent harness", () => {
     ]);
   });
 
+  it("strips hidden HeySnap context from Codex thread preview titles", async () => {
+    const codexThread = createCodexThread({
+      id: "thread-context-preview",
+      preview: [
+        "Hello",
+        "<heysnap_context>",
+        "  <current_ui_navigated_directory>/workspace/Desktop</current_ui_navigated_directory>",
+        "  <current_ui_open_files>[]</current_ui_open_files>",
+        "  <user_attached_files_with_message>[]</user_attached_files_with_message>",
+        "</heysnap_context>",
+      ].join("\n"),
+      cwd: "/workspace/Desktop",
+      updatedAt: 20,
+    });
+    const client = new FakeCodexClient((method) => {
+      if (method === "thread/list") {
+        return { data: [codexThread] };
+      }
+
+      if (method === "thread/read") {
+        return { thread: codexThread };
+      }
+
+      throw new Error(`Unexpected method ${method}`);
+    });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    const result = await harness.retrieveThreads({ limit: 10 });
+
+    expect(result.groups[0]?.threads[0]?.title).toBe("Hello");
+  });
+
   it("keeps only ank1015 app originator threads from the Codex app-server history candidates", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "ank1015-codex-history-"));
 

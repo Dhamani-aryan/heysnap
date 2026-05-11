@@ -242,7 +242,7 @@ export function FilesystemExplorer({
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>("connecting");
   const currentPath = listing?.path ?? "";
-  const currentDirectoryName = listing?.name ?? "Desktop";
+  const currentDirectoryName = listing?.name ?? "workspace";
   const activeFileTab = activeFilePath === null
     ? null
     : openFileTabs.find((tab) => tab.path === activeFilePath) ?? null;
@@ -1032,7 +1032,7 @@ const RightSidebarChatGroup = ({
   readonly activeStreamingThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
-  const label = group.path.trim().length === 0 ? "Desktop" : group.path;
+  const label = group.path.trim().length === 0 ? "workspace" : group.path;
   const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
   const [isExpanded, setIsExpanded] = useState(hasSelectedThread);
   const [isShowingAll, setIsShowingAll] = useState(false);
