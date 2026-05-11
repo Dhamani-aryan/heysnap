@@ -15,10 +15,19 @@ export interface ImageContent {
 
 export interface FileContent {
   readonly type: "file";
-  readonly data: string;
+  readonly data?: string;
   readonly mimeType: string;
   readonly filename: string;
   readonly metadata?: Record<string, unknown>;
+}
+
+export interface AgentUiContext {
+  readonly openFiles: readonly AgentUiOpenFile[];
+}
+
+export interface AgentUiOpenFile {
+  readonly path: string;
+  readonly isFocused: boolean;
 }
 
 export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomMessage;

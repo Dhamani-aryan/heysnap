@@ -27,7 +27,7 @@ import {
   useOptionalAgentRuntime,
 } from "../agent/agent-runtime";
 import { selectHasThreads } from "../agent/agent-thread-list-store";
-import type { AgentThreadGroup, AgentThreadSummary } from "../agent/types";
+import type { AgentThreadGroup, AgentThreadSummary, AgentUiContext } from "../agent/types";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
@@ -250,6 +250,12 @@ export function FilesystemExplorer({
     () => openFileTabs.map((tab) => tab.path).sort((left, right) => left.localeCompare(right)).join("\0"),
     [openFileTabs],
   );
+  const agentUiContext = useMemo<AgentUiContext>(() => ({
+    openFiles: openFileTabs.map((tab) => ({
+      path: tab.path,
+      isFocused: tab.path === activeFilePath,
+    })),
+  }), [activeFilePath, openFileTabs]);
   const onFilesystemOpenRef = useRef(onFilesystemOpen);
   const onPathChangeRef = useRef(onPathChange);
   const onInitialPathInvalidRef = useRef(onInitialPathInvalid);
@@ -790,6 +796,7 @@ export function FilesystemExplorer({
         selectedThreadId={selectedThreadId}
         currentPath={currentPath}
         currentDirectoryName={currentDirectoryName}
+        uiContext={agentUiContext}
         onOpenFilePath={openFilePath}
         onSelectThread={onSelectThread}
         onThreadResolved={onThreadResolved}
@@ -2207,6 +2214,7 @@ const DesktopSplitPane = ({
   selectedThreadId,
   currentPath,
   currentDirectoryName,
+  uiContext,
   onOpenFilePath,
   onSelectThread,
   onThreadResolved,
@@ -2218,6 +2226,7 @@ const DesktopSplitPane = ({
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly currentDirectoryName: string;
+  readonly uiContext: AgentUiContext;
   readonly onOpenFilePath: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
@@ -2296,6 +2305,7 @@ const DesktopSplitPane = ({
             selectedThreadId={selectedThreadId}
             currentPath={currentPath}
             currentDirectoryName={currentDirectoryName}
+            uiContext={uiContext}
             onOpenFilePath={onOpenFilePath}
             onSelectThread={onSelectThread}
             onThreadResolved={onThreadResolved}

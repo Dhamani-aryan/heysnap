@@ -20,6 +20,7 @@ import type {
   AgentRunEvent,
   AgentThreadGroup,
   AgentThreadSummary,
+  AgentUiContext,
   UserMessage,
 } from "./types";
 
@@ -192,11 +193,13 @@ export const useAgentThreadGroupsQuery = (
 
 export const useAgentRunMutation = ({
   currentPath,
+  uiContext,
   selectedThreadId,
   onSelectThread,
   onThreadResolved,
 }: {
   readonly currentPath: string;
+  readonly uiContext?: AgentUiContext;
   readonly selectedThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
@@ -229,6 +232,7 @@ export const useAgentRunMutation = ({
         threadId: selectedThreadId ?? undefined,
         path: currentPath,
         content,
+        uiContext,
       }, {
         onRunStart: ({ runId, threadId }) => {
           runtime.chatStore.getState().markRunStarted({ runId, threadId });
@@ -309,7 +313,9 @@ export const useAgentRunMutation = ({
       await steerAgentRun(runtime.agentBaseUrl, {
         threadId: activeRun.threadId,
         runId: activeRun.runId,
+        path: currentPath,
         content: input.content,
+        uiContext,
       });
       return true;
     } catch (error) {
@@ -318,7 +324,7 @@ export const useAgentRunMutation = ({
       );
       return false;
     }
-  }, [runtime.activeRunHandleRef, runtime.agentBaseUrl, runtime.chatStore]);
+  }, [currentPath, runtime.activeRunHandleRef, runtime.agentBaseUrl, runtime.chatStore, uiContext]);
 
   return useMemo(() => ({
     cancel,
@@ -330,11 +336,13 @@ export const useAgentRunMutation = ({
 
 export const useAgentEditUserMessageMutation = ({
   currentPath,
+  uiContext,
   selectedThreadId,
   onSelectThread,
   onThreadResolved,
 }: {
   readonly currentPath: string;
+  readonly uiContext?: AgentUiContext;
   readonly selectedThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
@@ -374,6 +382,7 @@ export const useAgentEditUserMessageMutation = ({
         threadId: selectedThreadId,
         path: currentPath,
         content,
+        uiContext,
       }, {
         onRunStart: ({ runId, threadId }) => {
           runtime.chatStore.getState().markRunStarted({ runId, threadId });

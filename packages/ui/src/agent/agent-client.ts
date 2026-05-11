@@ -3,6 +3,7 @@ import type {
   AgentRunEvent,
   AgentThread,
   AgentThreadGroup,
+  AgentUiContext,
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 5000;
@@ -48,12 +49,15 @@ export interface StartAgentRunInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
 }
 
 export interface SteerAgentRunInput {
   readonly threadId: string;
   readonly runId: string;
+  readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
 }
 
 export interface SteerAgentRunResult {
@@ -106,6 +110,7 @@ export const editAgentThreadUserMessage = (
     body: JSON.stringify({
       path: input.path,
       content: input.content,
+      uiContext: input.uiContext,
       numTurns: 1,
       clientRunId,
     }),
@@ -151,7 +156,11 @@ export const steerAgentRun = async (
     ),
     {
       method: "POST",
-      body: JSON.stringify({ content: input.content }),
+      body: JSON.stringify({
+        path: input.path,
+        content: input.content,
+        uiContext: input.uiContext,
+      }),
     },
   );
 };

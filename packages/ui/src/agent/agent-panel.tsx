@@ -14,13 +14,14 @@ import {
 import { AgentEmptyThread } from "./empty-thread";
 import { RightPromptComposer } from "./prompt-composer";
 import { AgentTimeline } from "./timeline";
-import type { AgentThreadSummary } from "./types";
+import type { AgentThreadSummary, AgentUiContext } from "./types";
 
 export interface AgentPanelProps {
   readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly currentDirectoryName: string;
+  readonly uiContext?: AgentUiContext;
   readonly workspaceRoot?: string;
   readonly onOpenFilePath?: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
@@ -45,6 +46,7 @@ const AgentPanelContent = ({
   selectedThreadId,
   currentPath,
   currentDirectoryName,
+  uiContext,
   workspaceRoot,
   onOpenFilePath,
   onSelectThread,
@@ -61,12 +63,14 @@ const AgentPanelContent = ({
   const isRunning = activeRun !== null;
   const { cancel, steer, submit } = useAgentRunMutation({
     currentPath,
+    uiContext,
     selectedThreadId,
     onSelectThread,
     onThreadResolved,
   });
   const { submit: submitEditedUserMessage } = useAgentEditUserMessageMutation({
     currentPath,
+    uiContext,
     selectedThreadId,
     onSelectThread,
     onThreadResolved,
