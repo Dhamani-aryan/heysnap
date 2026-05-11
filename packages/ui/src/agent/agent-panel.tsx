@@ -59,7 +59,7 @@ const AgentPanelContent = ({
   const loadError = useAgentChatStore((state) => state.loadError);
   const runError = useAgentChatStore((state) => state.runError ?? state.error);
   const isRunning = activeRun !== null;
-  const { cancel, submit } = useAgentRunMutation({
+  const { cancel, steer, submit } = useAgentRunMutation({
     currentPath,
     selectedThreadId,
     onSelectThread,
@@ -74,7 +74,7 @@ const AgentPanelContent = ({
   const composerProps = {
     isRunning,
     onCancel: cancel,
-    onSubmit: submit,
+    onSubmit: isRunning ? steer : submit,
   };
 
   if (selectedThreadId === null && !hasMessages && !isRunning && runError === null) {

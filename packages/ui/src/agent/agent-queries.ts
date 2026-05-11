@@ -10,6 +10,7 @@ import {
   resumeAgentRun,
   retrieveAgentThreadGroups,
   startAgentRun,
+  steerAgentRun,
 } from "./agent-client";
 import type { ActiveRunState } from "./agent-store";
 import { useAgentRuntime } from "./agent-runtime";
@@ -290,11 +291,41 @@ export const useAgentRunMutation = ({
     runtime.activeRunHandleRef.current?.cancel();
   }, [runtime.activeRunHandleRef]);
 
+  const steer = useCallback(async (input: { readonly content: AgentContent }): Promise<boolean> => {
+    const activeRun = runtime.chatStore.getState().activeRun;
+
+    if (
+      runtime.activeRunHandleRef.current === null ||
+      activeRun?.threadId === undefined ||
+      activeRun.threadId === null ||
+      activeRun.runId === null
+    ) {
+      runtime.chatStore.getState().setRunError("The active turn is not ready for steering yet.");
+      return false;
+    }
+
+    try {
+      runtime.chatStore.getState().setRunError(null);
+      await steerAgentRun(runtime.agentBaseUrl, {
+        threadId: activeRun.threadId,
+        runId: activeRun.runId,
+        content: input.content,
+      });
+      return true;
+    } catch (error) {
+      runtime.chatStore.getState().setRunError(
+        error instanceof Error ? error.message : "Failed to steer the active turn.",
+      );
+      return false;
+    }
+  }, [runtime.activeRunHandleRef, runtime.agentBaseUrl, runtime.chatStore]);
+
   return useMemo(() => ({
     cancel,
     submit,
+    steer,
     mutation,
-  }), [cancel, mutation, submit]);
+  }), [cancel, mutation, steer, submit]);
 };
 
 export const useAgentEditUserMessageMutation = ({

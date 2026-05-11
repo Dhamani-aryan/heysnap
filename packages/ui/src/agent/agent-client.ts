@@ -50,6 +50,16 @@ export interface StartAgentRunInput {
   readonly content: AgentContent;
 }
 
+export interface SteerAgentRunInput {
+  readonly threadId: string;
+  readonly runId: string;
+  readonly content: AgentContent;
+}
+
+export interface SteerAgentRunResult {
+  readonly turnId: string;
+}
+
 export interface AgentRunCallbacks {
   readonly onRunStart?: (input: { readonly requestId: string; readonly runId: string; readonly threadId: string }) => void;
   readonly onEvent?: (event: AgentRunEvent) => void;
@@ -128,6 +138,22 @@ export const resumeAgentRun = (
   });
 
   return createRunHandle(state);
+};
+
+export const steerAgentRun = async (
+  agentBaseUrl: string,
+  input: SteerAgentRunInput,
+): Promise<SteerAgentRunResult> => {
+  return fetchJson<SteerAgentRunResult>(
+    buildAgentUrl(
+      agentBaseUrl,
+      `/threads/${encodeURIComponent(input.threadId)}/runs/${encodeURIComponent(input.runId)}/steer`,
+    ),
+    {
+      method: "POST",
+      body: JSON.stringify({ content: input.content }),
+    },
+  );
 };
 
 interface RunStreamState {
@@ -356,12 +382,24 @@ const settleRun = (state: RunStreamState, error?: Error): void => {
   state.rejectDone(error);
 };
 
-const fetchJson = async <TResponse>(url: URL): Promise<TResponse> => {
+const fetchJson = async <TResponse>(
+  url: URL,
+  init: RequestInit = {},
+): Promise<TResponse> => {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const headers = new Headers(init.headers);
+    if (init.body !== undefined && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+
+    const response = await fetch(url, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
 
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));
