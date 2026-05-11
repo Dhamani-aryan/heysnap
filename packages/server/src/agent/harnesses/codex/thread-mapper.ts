@@ -43,6 +43,10 @@ type CodexThreadStatus =
   | { readonly type: "systemError" }
   | { readonly type: "active"; readonly activeFlags?: readonly unknown[] };
 const NAVIGATED_DIRECTORY_PATTERN = /\s*<navigated_directory>[\s\S]*?<\/navigated_directory>\s*/gu;
+const HEYSNAP_CONTEXT_PATTERN = /\s*<heysnap_context>[\s\S]*?<\/heysnap_context>\s*/gu;
+const HEYSNAP_CONTEXT_CAPTURE_PATTERN = /<heysnap_context>([\s\S]*?)<\/heysnap_context>/u;
+const USER_ATTACHED_FILES_CAPTURE_PATTERN =
+  /<user_attached_files_with_message>([\s\S]*?)<\/user_attached_files_with_message>/u;
 
 export interface CodexTurn {
   readonly id: string;
@@ -494,12 +498,17 @@ const codexUserInputsToAgentContent = (inputs: readonly CodexUserInput[]): Agent
   const content = inputs.flatMap((input): TextContent[] => {
     switch (input.type) {
       case "text": {
-        const text = input.text.replace(NAVIGATED_DIRECTORY_PATTERN, "").trim();
+        const heysnapContext = extractHeySnapContext(input.text);
+        const text = input.text
+          .replace(NAVIGATED_DIRECTORY_PATTERN, "")
+          .replace(HEYSNAP_CONTEXT_PATTERN, "")
+          .trim();
         return text.length === 0 ? [] : [{
           type: "text",
           content: text,
           metadata: compactRecord({
             textElements: input.textElements,
+            heysnapContext,
           }),
         }];
       }
@@ -532,6 +541,38 @@ const codexUserInputsToAgentContent = (inputs: readonly CodexUserInput[]): Agent
 
   return content.length > 0 ? content : [{ type: "text", content: "" }];
 };
+
+const extractHeySnapContext = (text: string): Record<string, unknown> | undefined => {
+  const contextText = HEYSNAP_CONTEXT_CAPTURE_PATTERN.exec(text)?.[1];
+
+  if (contextText === undefined) {
+    return undefined;
+  }
+
+  const attachedFilesText = USER_ATTACHED_FILES_CAPTURE_PATTERN.exec(contextText)?.[1];
+
+  if (attachedFilesText === undefined) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(unescapeXmlText(attachedFilesText.trim()));
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    const userAttachedFilePaths = parsed.filter((path): path is string => typeof path === "string" && path.length > 0);
+    return userAttachedFilePaths.length > 0 ? { userAttachedFilePaths } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const unescapeXmlText = (text: string): string =>
+  text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 
 const toToolResultMessage = (
   item: CodexThreadItem,

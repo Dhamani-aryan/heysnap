@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -659,6 +659,103 @@ describe("codex agent harness", () => {
     ]));
   });
 
+  it("hydrates sent attachment previews from hidden HeySnap context", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ank1015-codex-preview-"));
+
+    try {
+      const uploadDir = join(root, "Projects", "app", ".codex", "user_uploads");
+      const imagePath = join(uploadDir, "screenshot.png");
+      const filePath = join(uploadDir, "notes.pdf");
+      const missingPath = join(uploadDir, "missing.png");
+      const outsidePath = join(tmpdir(), "outside.png");
+      await mkdir(uploadDir, { recursive: true });
+      await writeFile(imagePath, "image");
+      await writeFile(filePath, "pdf");
+
+      const codexThread = createCodexThread({
+        id: "thread-attachments",
+        preview: "Attachments",
+        cwd: join(root, "Projects", "app"),
+        createdAt: 10,
+        updatedAt: 20,
+        turns: [
+          {
+            id: "turn-attachments",
+            status: "completed",
+            startedAt: 11,
+            completedAt: 12,
+            items: [
+              {
+                type: "userMessage",
+                id: "user-attachments",
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      "Review these attachments",
+                      "<heysnap_context>",
+                      `  <current_ui_navigated_directory>${root}/Projects/app</current_ui_navigated_directory>`,
+                      "  <current_ui_open_files>",
+                      "[]",
+                      "  </current_ui_open_files>",
+                      "  <user_attached_files_with_message>",
+                      JSON.stringify([imagePath, filePath, missingPath, outsidePath], null, 2),
+                      "  </user_attached_files_with_message>",
+                      "</heysnap_context>",
+                    ].join("\n"),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const client = new FakeCodexClient({ thread: codexThread });
+      const harness = new CodexAgentHarness({
+        filesystemRoot: root,
+        client,
+      });
+
+      const thread = await harness.getThread({ threadId: "thread-attachments" });
+      const message = thread.messages[0];
+
+      expect(message).toMatchObject({
+        role: "user",
+        id: "user-attachments",
+        path: "Projects/app",
+      });
+      expect(message?.content[0]).toEqual({
+        type: "text",
+        content: "Review these attachments",
+      });
+      expect(message?.content.slice(1)).toEqual([
+        {
+          type: "image",
+          data: "aW1hZ2U=",
+          mimeType: "image/png",
+          metadata: {
+            filename: "screenshot.png",
+            savedPath: imagePath,
+            size: 5,
+          },
+        },
+        {
+          type: "file",
+          filename: "notes.pdf",
+          mimeType: "application/pdf",
+          metadata: {
+            filename: "notes.pdf",
+            savedPath: filePath,
+            size: 3,
+          },
+        },
+      ]);
+      expect("data" in (message?.content[2] ?? {})).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("starts a new Codex thread and streams turn events", async () => {
     let client: FakeCodexClient;
     client = new FakeCodexClient((method) => {
@@ -771,6 +868,12 @@ describe("codex agent harness", () => {
     const events = await collectAsyncIterable(harness.sendMessage({
       path: "Projects/app",
       content: [{ type: "text", content: "Hello Codex" }],
+      uiContext: {
+        openFiles: [
+          { path: "Projects/app/src/App.tsx", isFocused: true },
+          { path: "Projects/app/src/index.tsx", isFocused: false },
+        ],
+      },
     }));
 
     expect(client.requests.slice(0, 2)).toEqual([
@@ -789,7 +892,26 @@ describe("codex agent harness", () => {
             { type: "text", text: "Hello Codex" },
             {
               type: "text",
-              text: "<navigated_directory>/workspace/Desktop/Projects/app</navigated_directory>",
+              text: [
+                "<heysnap_context>",
+                "  <current_ui_navigated_directory>/workspace/Desktop/Projects/app</current_ui_navigated_directory>",
+                "  <current_ui_open_files>",
+                "[",
+                "  {",
+                "    \"filepath\": \"/workspace/Desktop/Projects/app/src/App.tsx\",",
+                "    \"isFocused\": true",
+                "  },",
+                "  {",
+                "    \"filepath\": \"/workspace/Desktop/Projects/app/src/index.tsx\",",
+                "    \"isFocused\": false",
+                "  }",
+                "]",
+                "  </current_ui_open_files>",
+                "  <user_attached_files_with_message>",
+                "[]",
+                "  </user_attached_files_with_message>",
+                "</heysnap_context>",
+              ].join("\n"),
             },
           ],
         },
@@ -882,6 +1004,7 @@ describe("codex agent harness", () => {
       threadId: "thread-old",
       path: "Projects/ignored",
       content: [{ type: "text", content: "Continue" }],
+      uiContext: { openFiles: [] },
     }));
 
     expect(client.requests.slice(0, 2)).toEqual([
@@ -897,7 +1020,17 @@ describe("codex agent harness", () => {
             { type: "text", text: "Continue" },
             {
               type: "text",
-              text: "<navigated_directory>/workspace/Desktop/Projects/ignored</navigated_directory>",
+              text: [
+                "<heysnap_context>",
+                "  <current_ui_navigated_directory>/workspace/Desktop/Projects/ignored</current_ui_navigated_directory>",
+                "  <current_ui_open_files>",
+                "[]",
+                "  </current_ui_open_files>",
+                "  <user_attached_files_with_message>",
+                "[]",
+                "  </user_attached_files_with_message>",
+                "</heysnap_context>",
+              ].join("\n"),
             },
           ],
         },
@@ -981,6 +1114,20 @@ describe("codex agent harness", () => {
           threadId: "thread-edit",
           input: [
             { type: "text", text: "Edited user message" },
+            {
+              type: "text",
+              text: [
+                "<heysnap_context>",
+                "  <current_ui_navigated_directory>/workspace/Desktop/Projects/app</current_ui_navigated_directory>",
+                "  <current_ui_open_files>",
+                "[]",
+                "  </current_ui_open_files>",
+                "  <user_attached_files_with_message>",
+                "[]",
+                "  </user_attached_files_with_message>",
+                "</heysnap_context>",
+              ].join("\n"),
+            },
           ],
         },
       },
@@ -1018,7 +1165,20 @@ describe("codex agent harness", () => {
               id: "live-user-directory-context",
               content: [
                 { type: "text", text: "Where am I?" },
-                { type: "text", text: "<navigated_directory>/workspace/Desktop/Projects/app</navigated_directory>" },
+                {
+                  type: "text",
+                  text: [
+                    "<heysnap_context>",
+                    "  <current_ui_navigated_directory>/workspace/Desktop/Projects/app</current_ui_navigated_directory>",
+                    "  <current_ui_open_files>",
+                    "[]",
+                    "  </current_ui_open_files>",
+                    "  <user_attached_files_with_message>",
+                    "[]",
+                    "  </user_attached_files_with_message>",
+                    "</heysnap_context>",
+                  ].join("\n"),
+                },
               ],
             },
           }));
@@ -1049,7 +1209,18 @@ describe("codex agent harness", () => {
                     content: [
                       {
                         type: "text",
-                        text: "Where am I?\n<navigated_directory>/workspace/Desktop/Projects/app</navigated_directory>",
+                        text: [
+                          "Where am I?",
+                          "<heysnap_context>",
+                          "  <current_ui_navigated_directory>/workspace/Desktop/Projects/app</current_ui_navigated_directory>",
+                          "  <current_ui_open_files>",
+                          "[]",
+                          "  </current_ui_open_files>",
+                          "  <user_attached_files_with_message>",
+                          "[]",
+                          "  </user_attached_files_with_message>",
+                          "</heysnap_context>",
+                        ].join("\n"),
                       },
                     ],
                   },
@@ -1373,46 +1544,70 @@ describe("codex agent harness", () => {
   });
 
   it("steers Codex turns with the active run id as expected turn id", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ank1015-codex-uploads-"));
     const client = new FakeCodexClient({ turnId: "turn-1" });
     const harness = new CodexAgentHarness({
-      filesystemRoot: "/workspace/Desktop",
+      filesystemRoot: root,
       client,
     });
 
-    await expect(harness.steerRun({
-      threadId: "thread-1",
-      runId: "turn-1",
-      content: [
-        { type: "text", content: "Focus on tests first" },
-        {
-          type: "image",
-          data: "aW1hZ2U=",
-          mimeType: "image/png",
-          metadata: { filename: "screenshot.png" },
-        },
-        {
-          type: "file",
-          data: "cGRm",
-          mimeType: "application/pdf",
-          filename: "notes.pdf",
-        },
-      ],
-    })).resolves.toEqual({ turnId: "turn-1" });
+    try {
+      await mkdir(join(root, "Projects", "app"), { recursive: true });
 
-    expect(client.requests).toEqual([
-      {
+      await expect(harness.steerRun({
+        threadId: "thread-1",
+        runId: "turn-1",
+        path: "Projects/app",
+        content: [
+          { type: "text", content: "Focus on tests first" },
+          {
+            type: "image",
+            data: "aW1hZ2U=",
+            mimeType: "image/png",
+            metadata: { filename: "screenshot.png" },
+          },
+          {
+            type: "file",
+            data: "cGRm",
+            mimeType: "application/pdf",
+            filename: "notes.pdf",
+          },
+        ],
+        uiContext: {
+          openFiles: [
+            { path: "Projects/app/src/App.tsx", isFocused: false },
+            { path: "Projects/app/src/Test.ts", isFocused: true },
+          ],
+        },
+      })).resolves.toEqual({ turnId: "turn-1" });
+
+      expect(client.requests[0]).toMatchObject({
         method: "turn/steer",
         params: {
           threadId: "thread-1",
           expectedTurnId: "turn-1",
-          input: [
-            { type: "text", text: "Focus on tests first" },
-            { type: "text", text: "[Image attachment: image/png]" },
-            { type: "text", text: "[File attachment: notes.pdf (application/pdf)]" },
-          ],
         },
-      },
-    ]);
+      });
+      const turnRequest = client.requests[0] as {
+        readonly params: { readonly input: readonly Array<{ readonly type: string; readonly text?: string }> };
+      };
+      const contextText = turnRequest.params.input[1]?.text ?? "";
+      const attachedFilesJson = /<user_attached_files_with_message>\n([\s\S]*?)\n  <\/user_attached_files_with_message>/u.exec(contextText)?.[1] ?? "[]";
+      const attachedFiles = JSON.parse(attachedFilesJson) as string[];
+
+      expect(turnRequest.params.input).toHaveLength(2);
+      expect(turnRequest.params.input[0]).toEqual({ type: "text", text: "Focus on tests first" });
+      expect(contextText).toContain(`<current_ui_navigated_directory>${root}/Projects/app</current_ui_navigated_directory>`);
+      expect(contextText).toContain(`"filepath": "${root}/Projects/app/src/Test.ts"`);
+      expect(attachedFiles).toHaveLength(2);
+      expect(attachedFiles[0]).toContain(`${root}/Projects/app/.codex/user_uploads/`);
+      expect(attachedFiles[0]).toContain("screenshot.png");
+      expect(attachedFiles[1]).toContain("notes.pdf");
+      await expect(readFile(attachedFiles[0] ?? "", "utf8")).resolves.toBe("image");
+      await expect(readFile(attachedFiles[1] ?? "", "utf8")).resolves.toBe("pdf");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("rejects Codex steer responses that return another turn id", async () => {
@@ -1425,6 +1620,7 @@ describe("codex agent harness", () => {
     await expect(harness.steerRun({
       threadId: "thread-1",
       runId: "turn-1",
+      path: "Projects/app",
       content: [{ type: "text", content: "Focus on tests first" }],
     })).rejects.toThrow("different turn id");
   });

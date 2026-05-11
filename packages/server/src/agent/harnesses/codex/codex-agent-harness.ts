@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import type {
@@ -14,6 +17,7 @@ import type {
   AgentThread,
   AgentThreadGroup,
   AgentThreadSummary,
+  AgentUiContext,
   AssistantMessage,
   CancelRunInput,
   CustomMessage,
@@ -52,6 +56,8 @@ const SERVICE_NAME = "ank1015_app";
 const DEFAULT_CODEX_PACKAGE = "@openai/codex";
 const DEFAULT_AZURE_API_VERSION = "2025-04-01-preview";
 const DEFAULT_AZURE_ENV_KEY = "AZURE_OPENAI_API_KEY";
+const USER_UPLOADS_DIRECTORY = ".codex/user_uploads";
+const MAX_IMAGE_PREVIEW_BYTES = 5 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 
 export interface CodexAgentHarnessOptions {
@@ -184,16 +190,22 @@ export class CodexAgentHarness implements IAgentHarness {
     });
 
     const thread = mapCodexThreadToAgentThread(response.thread, this.filesystemRoot);
-    return thread;
+    return hydrateThreadAttachmentPreviews(thread, this.filesystemRoot);
   }
 
   async *sendMessage(_input: SendMessageInput): AsyncIterable<AgentRunEvent> {
     const isNewThread = _input.threadId === undefined;
     const thread = isNewThread ? await this.startThread(_input.path) : await this.resumeThread(_input.threadId);
     const path = isNewThread ? _input.path : toThreadSummary(thread, this.filesystemRoot).lastPath;
+    const userAttachedFilePaths = await saveUserAttachments(_input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: _input.path,
+    });
     const codexInput = agentContentToCodexInput(_input.content, {
       filesystemRoot: this.filesystemRoot,
       path: _input.path,
+      uiContext: _input.uiContext,
+      userAttachedFilePaths,
     });
 
     yield* this.startTurn({
@@ -213,11 +225,21 @@ export class CodexAgentHarness implements IAgentHarness {
       numTurns: input.numTurns,
     });
 
+    const userAttachedFilePaths = await saveUserAttachments(input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: input.path,
+    });
+
     yield* this.startTurn({
       thread,
       path: input.path,
       content: input.content,
-      codexInput: agentContentToCodexInput(input.content),
+      codexInput: agentContentToCodexInput(input.content, {
+        filesystemRoot: this.filesystemRoot,
+        path: input.path,
+        uiContext: input.uiContext,
+        userAttachedFilePaths,
+      }),
       emitThreadCreated: false,
     });
   }
@@ -342,10 +364,19 @@ export class CodexAgentHarness implements IAgentHarness {
   }
 
   async steerRun(input: SteerRunInput): Promise<SteerRunResult> {
+    const userAttachedFilePaths = await saveUserAttachments(input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: input.path,
+    });
     const result = await this.client.request<CodexTurnSteerResponse>("turn/steer", {
       threadId: input.threadId,
       expectedTurnId: input.runId,
-      input: agentContentToCodexInput(input.content),
+      input: agentContentToCodexInput(input.content, {
+        filesystemRoot: this.filesystemRoot,
+        path: input.path,
+        uiContext: input.uiContext,
+        userAttachedFilePaths,
+      }),
     });
 
     if (result.turnId !== input.runId) {
@@ -461,7 +492,7 @@ class CodexLiveTurnMapper {
   async handle(notification: CodexAppServerNotification): Promise<CodexLiveTurnMapperResult> {
     switch (notification.method) {
       case "item/started":
-        return { events: this.handleItemStarted(notification.params), done: false };
+        return { events: await this.handleItemStarted(notification.params), done: false };
       case "item/agentMessage/delta":
         return { events: this.handleAgentMessageDelta(notification.params), done: false };
       case "item/commandExecution/outputDelta":
@@ -476,7 +507,7 @@ class CodexLiveTurnMapper {
       case "item/fileChange/requestApproval/resolved":
         return { events: this.handleRequestResolved(notification.method, notification.params), done: false };
       case "item/completed":
-        return { events: this.handleItemCompleted(notification.params), done: false };
+        return { events: await this.handleItemCompleted(notification.params), done: false };
       case "turn/completed":
         return this.handleTurnCompleted(notification.params);
       case "error":
@@ -489,7 +520,7 @@ class CodexLiveTurnMapper {
     }
   }
 
-  private handleItemStarted(params: unknown): AgentRunEvent[] {
+  private async handleItemStarted(params: unknown): Promise<AgentRunEvent[]> {
     const item = notificationItem(params);
 
     if (item === undefined) {
@@ -499,7 +530,10 @@ class CodexLiveTurnMapper {
     this.startedItemIds.add(item.id);
 
     if (item.type === "userMessage") {
-      const messages = mapCodexThreadItemToAgentMessages(item, this.turn, this.thread, this.path, false);
+      const messages = await hydrateMessagesAttachmentPreviews(
+        mapCodexThreadItemToAgentMessages(item, this.turn, this.thread, this.path, false),
+        this.filesystemRoot,
+      );
       this.messages.push(...messages);
       return messages.flatMap((message) => this.messageStartEndEvents(message));
     }
@@ -661,7 +695,7 @@ class CodexLiveTurnMapper {
     ];
   }
 
-  private handleItemCompleted(params: unknown): AgentRunEvent[] {
+  private async handleItemCompleted(params: unknown): Promise<AgentRunEvent[]> {
     const item = notificationItem(params);
 
     if (item === undefined) {
@@ -674,7 +708,10 @@ class CodexLiveTurnMapper {
 
     if (item.type === "agentMessage") {
       const hadStart = this.assistantMessages.has(item.id);
-      const messages = mapCodexThreadItemToAgentMessages(item, this.turn, this.thread, this.path, false);
+      const messages = await hydrateMessagesAttachmentPreviews(
+        mapCodexThreadItemToAgentMessages(item, this.turn, this.thread, this.path, false),
+        this.filesystemRoot,
+      );
       const message = messages.find((candidate): candidate is AssistantMessage => candidate.role === "assistant");
 
       if (message === undefined) {
@@ -711,7 +748,10 @@ class CodexLiveTurnMapper {
       return events;
     }
 
-    const messages = mapCodexThreadItemToAgentMessages(item, this.turn, this.thread, this.path, false);
+    const messages = await hydrateMessagesAttachmentPreviews(
+      mapCodexThreadItemToAgentMessages(item, this.turn, this.thread, this.path, false),
+      this.filesystemRoot,
+    );
     this.messages.push(...messages);
     const events: AgentRunEvent[] = [];
 
@@ -949,38 +989,270 @@ class AsyncQueue<T> {
 
 const agentContentToCodexInput = (
   content: AgentContent,
-  navigatedDirectory?: {
+  heysnapContext?: {
     readonly filesystemRoot: string;
     readonly path: string;
+    readonly uiContext?: AgentUiContext;
+    readonly userAttachedFilePaths?: readonly string[];
   },
 ): CodexUserInput[] => {
-  const inputs = content.map((block): CodexUserInput => {
-    switch (block.type) {
-      case "text":
-        return { type: "text", text: block.content };
-      case "image":
-        return { type: "text", text: `[Image attachment: ${block.mimeType}]` };
-      case "file":
-        return { type: "text", text: `[File attachment: ${block.filename} (${block.mimeType})]` };
-    }
-  });
+  const inputs = content.flatMap((block): CodexUserInput[] =>
+    block.type === "text" ? [{ type: "text", text: block.content }] : [],
+  );
 
   const userInputs: CodexUserInput[] = inputs.length > 0 ? inputs : [{ type: "text", text: "" }];
 
-  if (navigatedDirectory === undefined) {
+  if (heysnapContext === undefined) {
     return userInputs;
   }
 
-  const absolutePath = resolveClientPath(navigatedDirectory.filesystemRoot, navigatedDirectory.path);
-  const directoryInput: CodexUserInput = {
+  const contextInput: CodexUserInput = {
     type: "text",
-    text: `<navigated_directory>${escapeXmlText(absolutePath)}</navigated_directory>`,
+    text: formatHeySnapContext(heysnapContext),
   };
 
   return [
     ...userInputs,
-    directoryInput,
+    contextInput,
   ];
+};
+
+const formatHeySnapContext = (input: {
+  readonly filesystemRoot: string;
+  readonly path: string;
+  readonly uiContext?: AgentUiContext;
+  readonly userAttachedFilePaths?: readonly string[];
+}): string => {
+  const absolutePath = resolveClientPath(input.filesystemRoot, input.path);
+  const openFiles = (input.uiContext?.openFiles ?? []).map((file) => ({
+    filepath: resolveClientPath(input.filesystemRoot, file.path),
+    isFocused: file.isFocused,
+  }));
+  const openFilesJson = JSON.stringify(openFiles, null, 2);
+  const attachedFilesJson = JSON.stringify(input.userAttachedFilePaths ?? [], null, 2);
+
+  return [
+    "<heysnap_context>",
+    `  <current_ui_navigated_directory>${escapeXmlText(absolutePath)}</current_ui_navigated_directory>`,
+    "  <current_ui_open_files>",
+    escapeXmlText(openFilesJson),
+    "  </current_ui_open_files>",
+    "  <user_attached_files_with_message>",
+    escapeXmlText(attachedFilesJson),
+    "  </user_attached_files_with_message>",
+    "</heysnap_context>",
+  ].join("\n");
+};
+
+const saveUserAttachments = async (
+  content: AgentContent,
+  input: {
+    readonly filesystemRoot: string;
+    readonly path: string;
+  },
+): Promise<string[]> => {
+  const attachments = content.flatMap((block) =>
+    (block.type === "image" || block.type === "file") && typeof block.data === "string"
+      ? [{ ...block, data: block.data }]
+      : []
+  );
+
+  if (attachments.length === 0) {
+    return [];
+  }
+
+  const uploadDirectory = join(resolveClientPath(input.filesystemRoot, input.path), USER_UPLOADS_DIRECTORY);
+  await mkdir(uploadDirectory, { recursive: true });
+
+  return Promise.all(attachments.map(async (block, index) => {
+    const filename = sanitizeUploadFilename(block.type === "file"
+      ? block.filename
+      : typeof block.metadata?.["filename"] === "string"
+        ? block.metadata["filename"]
+        : `image-${String(index + 1)}`);
+    const uploadPath = join(uploadDirectory, `${Date.now().toString(36)}-${randomUUID()}-${filename}`);
+
+    await writeFile(uploadPath, Buffer.from(block.data, "base64"), { flag: "wx" });
+    return uploadPath;
+  }));
+};
+
+const sanitizeUploadFilename = (rawFilename: string): string => {
+  const name = basename(rawFilename).replaceAll(/[^a-zA-Z0-9._-]+/gu, "_").replace(/^_+|_+$/gu, "");
+  return name.length > 0 ? name.slice(0, 160) : "upload";
+};
+
+const hydrateThreadAttachmentPreviews = async (
+  thread: AgentThread,
+  filesystemRoot: string,
+): Promise<AgentThread> => ({
+  ...thread,
+  messages: await hydrateMessagesAttachmentPreviews(thread.messages, filesystemRoot),
+});
+
+const hydrateMessagesAttachmentPreviews = async (
+  messages: readonly AgentMessage[],
+  filesystemRoot: string,
+): Promise<AgentMessage[]> => Promise.all(messages.map(async (message) => {
+  if (message.role !== "user") {
+    return message;
+  }
+
+  const attachedFilePaths = userAttachedFilePathsFromContent(message.content);
+  const contentWithoutContext = stripHeySnapContextMetadata(message.content);
+
+  if (attachedFilePaths.length === 0) {
+    return contentWithoutContext === message.content ? message : { ...message, content: contentWithoutContext };
+  }
+
+  const attachmentPreviews = (
+    await Promise.all(attachedFilePaths.map((filePath) => hydrateAttachmentPreview(filePath, filesystemRoot)))
+  ).filter((block): block is AgentContent[number] => block !== undefined);
+
+  if (attachmentPreviews.length === 0) {
+    return contentWithoutContext === message.content ? message : { ...message, content: contentWithoutContext };
+  }
+
+  return {
+    ...message,
+    content: [...contentWithoutContext, ...attachmentPreviews],
+  };
+}));
+
+const userAttachedFilePathsFromContent = (content: AgentContent): string[] => {
+  const paths: string[] = [];
+
+  for (const block of content) {
+    if (block.type !== "text") {
+      continue;
+    }
+
+    const context = asRecord(block.metadata?.["heysnapContext"]);
+    const userAttachedFilePaths = context?.["userAttachedFilePaths"];
+
+    if (!Array.isArray(userAttachedFilePaths)) {
+      continue;
+    }
+
+    for (const path of userAttachedFilePaths) {
+      if (typeof path === "string" && path.length > 0) {
+        paths.push(path);
+      }
+    }
+  }
+
+  return paths;
+};
+
+const stripHeySnapContextMetadata = (content: AgentContent): AgentContent => {
+  let changed = false;
+
+  const nextContent = content.map((block) => {
+    if (block.type !== "text" || block.metadata?.["heysnapContext"] === undefined) {
+      return block;
+    }
+
+    const { heysnapContext: _heysnapContext, ...metadata } = block.metadata;
+    changed = true;
+    return {
+      ...block,
+      ...(Object.keys(metadata).length > 0 ? { metadata } : { metadata: undefined }),
+    };
+  });
+
+  return changed ? nextContent : content;
+};
+
+const hydrateAttachmentPreview = async (
+  uploadPath: string,
+  filesystemRoot: string,
+): Promise<AgentContent[number] | undefined> => {
+  const safePath = safeUserUploadPath(uploadPath, filesystemRoot);
+
+  if (safePath === undefined) {
+    return undefined;
+  }
+
+  try {
+    const fileStat = await stat(safePath);
+
+    if (!fileStat.isFile()) {
+      return undefined;
+    }
+
+    const filename = basename(safePath);
+    const mimeType = mimeTypeForPath(safePath);
+    const metadata = { filename, savedPath: safePath, size: fileStat.size };
+
+    if (mimeType.startsWith("image/") && fileStat.size <= MAX_IMAGE_PREVIEW_BYTES) {
+      const data = await readFile(safePath, "base64");
+      return {
+        type: "image",
+        data,
+        mimeType,
+        metadata,
+      };
+    }
+
+    return {
+      type: "file",
+      filename,
+      mimeType,
+      metadata,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const safeUserUploadPath = (uploadPath: string, filesystemRoot: string): string | undefined => {
+  if (!isAbsolute(uploadPath)) {
+    return undefined;
+  }
+
+  const root = resolve(filesystemRoot);
+  const candidate = resolve(uploadPath);
+  const relativePath = relative(root, candidate);
+
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    return undefined;
+  }
+
+  if (!candidate.includes(`${sep}.codex${sep}user_uploads${sep}`)) {
+    return undefined;
+  }
+
+  return candidate;
+};
+
+const mimeTypeForPath = (filePath: string): string => {
+  switch (extname(filePath).toLowerCase()) {
+    case ".apng":
+      return "image/apng";
+    case ".avif":
+      return "image/avif";
+    case ".gif":
+      return "image/gif";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    case ".pdf":
+      return "application/pdf";
+    case ".txt":
+      return "text/plain";
+    case ".csv":
+      return "text/csv";
+    case ".json":
+      return "application/json";
+    default:
+      return "application/octet-stream";
+  }
 };
 
 const escapeXmlText = (text: string): string =>
