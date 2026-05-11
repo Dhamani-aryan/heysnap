@@ -1,22 +1,33 @@
 "use client";
 
-import { Cancel01Icon, Copy01Icon, CopyCheckIcon, RefreshIcon, Search01Icon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon, CopyIcon, RefreshIcon, Search01Icon, Share04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
-  CapabilitiesClient,
-  type AgentSkillSnapshot,
+  isCapabilityOperationResponse,
   type AgentToolSnapshot,
-  type CapabilitiesSnapshot,
-  type CapabilityServerMessage,
+  type CapabilityOperationName,
+  type CapabilityOperationSnapshot,
 } from "./capabilities-client";
+import {
+  setCapabilitiesQueryData,
+  useCancelCapabilityOperationMutation,
+  useCapabilitiesQuery,
+  useCapabilityOperationQuery,
+  useConnectToolMutation,
+  useDisconnectToolMutation,
+  useInstallToolMutation,
+  useSendCapabilityOperationInputMutation,
+} from "./queries/use-capabilities-queries";
 
 const GITHUB_DEVICE_URL = "https://github.com/login/device";
 const DEVICE_FLOW_TOOL_IDS = new Set(["github", "vercel", "supabase"]);
 
 export interface CapabilitiesPanelProps {
-  readonly websocketUrl?: string;
+  readonly capabilitiesBaseUrl?: string;
+  readonly showTopbar?: boolean;
 }
 
 interface ConnectionDialogState {
@@ -28,25 +39,29 @@ interface ConnectionDialogState {
   readonly isSubmitting: boolean;
 }
 
-type ConnectionDialogUpdater = (
-  updater: ConnectionDialogState | null | ((current: ConnectionDialogState | null) => ConnectionDialogState | null),
-) => void;
+interface ActiveOperationState {
+  readonly operationId: string;
+  readonly operation: CapabilityOperationName;
+  readonly toolId: string;
+}
 
-export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): React.ReactElement {
-  const clientRef = useRef<CapabilitiesClient | null>(null);
-  const didRefreshStatusRef = useRef(false);
-  const connectionDialogRef = useRef<ConnectionDialogState | null>(null);
-  const [capabilities, setCapabilities] = useState<CapabilitiesSnapshot | null>(null);
+export function CapabilitiesPanel({
+  capabilitiesBaseUrl,
+  showTopbar = true,
+}: CapabilitiesPanelProps): React.ReactElement {
+  const queryClient = useQueryClient();
+  const capabilitiesQuery = useCapabilitiesQuery(capabilitiesBaseUrl);
+  const installMutation = useInstallToolMutation(capabilitiesBaseUrl);
+  const connectMutation = useConnectToolMutation(capabilitiesBaseUrl);
+  const disconnectMutation = useDisconnectToolMutation(capabilitiesBaseUrl);
+  const sendInputMutation = useSendCapabilityOperationInputMutation(capabilitiesBaseUrl);
+  const cancelOperationMutation = useCancelCapabilityOperationMutation(capabilitiesBaseUrl);
   const [search, setSearch] = useState("");
+  const [activeOperation, setActiveOperation] = useState<ActiveOperationState | null>(null);
   const [connectionDialog, setConnectionDialog] = useState<ConnectionDialogState | null>(null);
-  const [pendingSkillIds, setPendingSkillIds] = useState<ReadonlySet<string>>(() => new Set());
-  const updateConnectionDialog = useCallback<ConnectionDialogUpdater>((updater) => {
-    setConnectionDialog((current) => {
-      const next = typeof updater === "function" ? updater(current) : updater;
-      connectionDialogRef.current = next;
-      return next;
-    });
-  }, []);
+  const operationQuery = useCapabilityOperationQuery(capabilitiesBaseUrl, activeOperation?.operationId ?? null);
+  const operation = operationQuery.data;
+  const capabilities = capabilitiesQuery.data?.capabilities ?? null;
   const connectors = useMemo(
     () => (capabilities?.tools ?? []).filter((tool) => tool.canConnect || tool.canDisconnect),
     [capabilities],
@@ -62,145 +77,232 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
       tool.label.toLowerCase().includes(query) || tool.command.toLowerCase().includes(query)
     );
   }, [connectors, search]);
-  const skills = capabilities?.skills ?? [];
-  const visibleSkills = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    if (query.length === 0) {
-      return skills;
-    }
-
-    return skills.filter((skill) =>
-      skill.label.toLowerCase().includes(query) || skill.description.toLowerCase().includes(query)
-    );
-  }, [search, skills]);
 
   useEffect(() => {
-    if (websocketUrl === undefined) {
+    if (capabilitiesBaseUrl === undefined || operation?.capabilities === undefined) {
       return;
     }
 
-    const client = new CapabilitiesClient(websocketUrl);
-    clientRef.current = client;
-    const unsubscribe = client.subscribe((message) => {
-      handleMessage(message, setCapabilities);
-      handleConnectionMessage(message, connectionDialogRef.current, updateConnectionDialog);
-      setPendingSkillIds((current) => clearPendingSkills(current, message));
-    });
-    client.connect();
-
-    window.setTimeout(() => {
-      client.listCapabilities();
-    }, 250);
-
-    return () => {
-      unsubscribe();
-      client.close();
-      clientRef.current = null;
-    };
-  }, [updateConnectionDialog, websocketUrl]);
+    setCapabilitiesQueryData(queryClient, capabilitiesBaseUrl, operation.capabilities);
+  }, [capabilitiesBaseUrl, operation?.capabilities, queryClient]);
 
   useEffect(() => {
-    connectionDialogRef.current = connectionDialog;
-  }, [connectionDialog]);
-
-  useEffect(() => {
-    if (capabilities === null || didRefreshStatusRef.current) {
+    if (operation === undefined) {
       return;
     }
 
-    didRefreshStatusRef.current = true;
-    for (const tool of connectors) {
-      if (tool.canRefreshStatus) {
-        clientRef.current?.refreshToolStatus(tool.id);
+    if (operation.status === "cancelled") {
+      setConnectionDialog((current) => current?.operationId === operation.id ? null : current);
+      setActiveOperation((current) => current?.operationId === operation.id ? null : current);
+      return;
+    }
+
+    if (operation.status === "completed") {
+      const connectedTool = operation.capabilities?.tools.find((tool) => tool.id === activeOperation?.toolId);
+      if (connectedTool?.connectionState === "connected") {
+        setConnectionDialog((current) => current?.operationId === operation.id ? null : current);
+        setActiveOperation((current) => current?.operationId === operation.id ? null : current);
+        return;
       }
     }
-  }, [capabilities, connectors]);
 
-  const refresh = useCallback(() => {
-    didRefreshStatusRef.current = false;
-    clientRef.current?.listCapabilities();
-  }, []);
-  const connectTool = useCallback((tool: AgentToolSnapshot): void => {
-    if (DEVICE_FLOW_TOOL_IDS.has(tool.id)) {
-      const nextDialog = {
-        tool,
-        code: null,
-        url: tool.id === "github" ? GITHUB_DEVICE_URL : null,
-        operationId: null,
-        error: null,
-        isSubmitting: false,
-      };
-      updateConnectionDialog(nextDialog);
-      clientRef.current?.connectTool(tool.id);
+    if (operation.status === "failed") {
+      setConnectionDialog((current) => {
+        if (current === null || current.operationId !== operation.id) {
+          return current;
+        }
+
+        const parsed = parseConnectionMessages(operation.messages, current.tool.id);
+        return updateConnectionDialog(current, {
+          code: parsed.code ?? current.code,
+          url: parsed.url ?? current.url,
+          error: operation.error?.message ?? formatConnectionError(current.tool),
+          isSubmitting: false,
+        });
+      });
+      setActiveOperation((current) => current?.operationId === operation.id ? null : current);
       return;
     }
 
-    clientRef.current?.connectTool(tool.id);
-  }, [updateConnectionDialog]);
-  const setSkillActive = useCallback((skill: AgentSkillSnapshot, active: boolean): void => {
-    setPendingSkillIds((current) => new Set(current).add(skill.id));
-    clientRef.current?.setSkillActive(skill.id, active);
-  }, []);
-  const installSkill = useCallback((skill: AgentSkillSnapshot): void => {
-    setPendingSkillIds((current) => new Set(current).add(skill.id));
-    clientRef.current?.installSkill(skill.id);
-  }, []);
+    setConnectionDialog((current) => {
+      if (current === null || current.operationId !== operation.id) {
+        return current;
+      }
+
+      const parsed = parseConnectionMessages(operation.messages, current.tool.id);
+      return updateConnectionDialog(current, {
+        code: parsed.code ?? current.code,
+        url: parsed.url ?? current.url,
+        error: null,
+        isSubmitting: false,
+      });
+    });
+  }, [activeOperation?.toolId, operation]);
+
+  useEffect(() => {
+    if (operation === undefined || connectionDialog !== null) {
+      return;
+    }
+
+    if (operation.status === "completed" || operation.status === "failed" || operation.status === "cancelled") {
+      setActiveOperation(null);
+    }
+  }, [connectionDialog, operation]);
+
+  const refresh = useCallback(() => {
+    void capabilitiesQuery.refetch();
+  }, [capabilitiesQuery]);
+
+  const installTool = useCallback((tool: AgentToolSnapshot): void => {
+    void installMutation.mutateAsync(tool.id).then((response) => {
+      setActiveOperation({ operationId: response.operation.id, operation: response.operation.operation, toolId: tool.id });
+    });
+  }, [installMutation]);
+
+  const connectTool = useCallback((tool: AgentToolSnapshot): void => {
+    if (DEVICE_FLOW_TOOL_IDS.has(tool.id)) {
+      setConnectionDialog(createConnectionDialogState(tool, null));
+    }
+
+    void connectMutation.mutateAsync(tool.id).then((response) => {
+      if (!isCapabilityOperationResponse(response)) {
+        setConnectionDialog(null);
+        return;
+      }
+
+      setActiveOperation({ operationId: response.operation.id, operation: response.operation.operation, toolId: tool.id });
+      const parsed = parseConnectionMessages(response.operation.messages, tool.id);
+      setConnectionDialog((current) => current === null
+        ? createConnectionDialogState(tool, response.operation, parsed)
+        : {
+            ...current,
+            operationId: response.operation.id,
+            code: parsed.code ?? current.code,
+            url: parsed.url ?? current.url,
+            error: null,
+          });
+    }).catch((error) => {
+      if (!DEVICE_FLOW_TOOL_IDS.has(tool.id)) {
+        return;
+      }
+
+      setConnectionDialog((current) => current === null ? null : {
+        ...current,
+        error: error instanceof Error ? error.message : formatConnectionError(tool),
+        isSubmitting: false,
+      });
+    });
+  }, [connectMutation]);
+
+  const disconnectTool = useCallback((tool: AgentToolSnapshot): void => {
+    disconnectMutation.mutate(tool.id);
+  }, [disconnectMutation]);
+
+  const sendConnectionInput = useCallback((input: string): void => {
+    const dialog = connectionDialog;
+
+    if (dialog === null || dialog.operationId === null) {
+      setConnectionDialog((current) => current === null ? current : {
+        ...current,
+        error: "Connection is still starting. Try again in a moment.",
+      });
+      return;
+    }
+
+    setConnectionDialog((current) => current === null ? null : {
+      ...current,
+      error: null,
+      isSubmitting: true,
+    });
+    void sendInputMutation.mutateAsync({ operationId: dialog.operationId, text: input }).then((operationResponse) => {
+      const nextOperation = operationResponse.operation;
+      if (capabilitiesBaseUrl !== undefined && nextOperation.capabilities !== undefined) {
+        setCapabilitiesQueryData(queryClient, capabilitiesBaseUrl, nextOperation.capabilities);
+      }
+      setConnectionDialog((current) => current === null ? null : {
+        ...current,
+        error: null,
+        isSubmitting: false,
+      });
+    }).catch((error) => {
+      setConnectionDialog((current) => current === null ? null : {
+        ...current,
+        error: error instanceof Error ? error.message : "Connection input failed.",
+        isSubmitting: false,
+      });
+    });
+  }, [capabilitiesBaseUrl, connectionDialog, queryClient, sendInputMutation]);
+
+  const closeConnectionDialog = useCallback((): void => {
+    const operationId = connectionDialog?.operationId;
+    const shouldCancel = operation !== undefined &&
+      operationId === operation.id &&
+      (operation.status === "running" || operation.status === "waiting_for_input");
+
+    if (operationId !== undefined && operationId !== null && shouldCancel) {
+      cancelOperationMutation.mutate(operationId);
+    }
+
+    setConnectionDialog(null);
+    if (shouldCancel) {
+      setActiveOperation(null);
+    }
+  }, [cancelOperationMutation, connectionDialog?.operationId, operation]);
 
   return (
-    <main className="connectors-page">
-      <div className="connectors-page-topbar">
-        <button className="connectors-refresh" type="button" onClick={refresh}>
-          <HugeiconsIcon icon={RefreshIcon} size={16} color="currentColor" strokeWidth={1.8} />
-          Refresh
-        </button>
-        <label className="connectors-search">
-          <HugeiconsIcon icon={Search01Icon} size={16} color="currentColor" strokeWidth={1.8} />
-          <input
-            type="search"
-            placeholder="Search connectors and skills"
-            value={search}
-            onChange={(event) => setSearch(event.currentTarget.value)}
-          />
-        </label>
-      </div>
+    <main className={showTopbar ? "connectors-page" : "connectors-page no-topbar"}>
+      {showTopbar ? (
+        <div className="connectors-page-topbar">
+          <button className="connectors-refresh" type="button" onClick={refresh}>
+            <HugeiconsIcon icon={RefreshIcon} size={16} color="currentColor" strokeWidth={1.8} />
+            Refresh
+          </button>
+          <label className="connectors-search">
+            <HugeiconsIcon icon={Search01Icon} size={16} color="currentColor" strokeWidth={1.8} />
+            <input
+              type="search"
+              placeholder="Search connectors"
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+            />
+          </label>
+        </div>
+      ) : null}
 
       <section className="connectors-page-content">
         <div className="connectors-page-heading">
           <h1>Connectors</h1>
-          <p>Connect external tools Codex can use while working on this machine.</p>
         </div>
 
         <div className="connectors-section-label">Available</div>
         <div className="connectors-grid">
-          {websocketUrl === undefined ? (
+          {capabilitiesBaseUrl === undefined ? (
             <p className="connectors-empty">Connectors are not available for this machine.</p>
+          ) : capabilitiesQuery.isLoading ? (
+            <div className="connectors-loading" role="status" aria-label="Loading connectors">
+              <span />
+            </div>
+          ) : capabilitiesQuery.isError ? (
+            <p className="connectors-error">
+              {capabilitiesQuery.error instanceof Error ? capabilitiesQuery.error.message : "Failed to load connectors."}
+            </p>
           ) : visibleConnectors.length === 0 ? (
             <p className="connectors-empty">No connectors found.</p>
           ) : visibleConnectors.map((tool) => (
-            <ConnectorRow key={tool.id} tool={tool} client={clientRef.current} onConnect={connectTool} />
-          ))}
-        </div>
-
-        <div className="connectors-page-heading connectors-skills-heading">
-          <h1>Skills</h1>
-          <p>Enable task-specific guidance Codex can use while working on this machine.</p>
-        </div>
-
-        <div className="connectors-section-label">Available</div>
-        <div className="connectors-grid">
-          {websocketUrl === undefined ? (
-            <p className="connectors-empty">Skills are not available for this machine.</p>
-          ) : visibleSkills.length === 0 ? (
-            <p className="connectors-empty">No skills found.</p>
-          ) : visibleSkills.map((skill) => (
-            <SkillRow
-              key={skill.id}
-              skill={skill}
-              client={clientRef.current}
-              isPending={pendingSkillIds.has(skill.id)}
-              onInstall={installSkill}
-              onSetActive={setSkillActive}
+            <ConnectorRow
+              key={tool.id}
+              tool={tool}
+              pendingLabel={getPendingLabel({
+                tool,
+                activeOperation,
+                operation,
+                installMutation,
+                connectMutation,
+                disconnectMutation,
+              })}
+              onInstall={installTool}
+              onConnect={connectTool}
+              onDisconnect={disconnectTool}
             />
           ))}
         </div>
@@ -208,28 +310,8 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
       {connectionDialog === null ? null : (
         <DeviceConnectionDialog
           state={connectionDialog}
-          onSubmitInput={(input) => {
-            const activeDialog = connectionDialogRef.current;
-            if (activeDialog === null) {
-              return;
-            }
-
-            if (activeDialog.operationId === null) {
-              updateConnectionDialog((current) => current === null ? current : {
-                ...current,
-                error: "Connection is still starting. Try again in a moment.",
-              });
-              return;
-            }
-
-            updateConnectionDialog((current) => current === null ? current : {
-              ...current,
-              error: null,
-              isSubmitting: true,
-            });
-            clientRef.current?.sendToolInput(activeDialog.operationId, input);
-          }}
-          onClose={() => updateConnectionDialog(null)}
+          onSubmitInput={sendConnectionInput}
+          onClose={closeConnectionDialog}
         />
       )}
     </main>
@@ -238,16 +320,20 @@ export function CapabilitiesPanel({ websocketUrl }: CapabilitiesPanelProps): Rea
 
 function ConnectorRow({
   tool,
-  client,
+  pendingLabel,
+  onInstall,
   onConnect,
+  onDisconnect,
 }: {
   readonly tool: AgentToolSnapshot;
-  readonly client: CapabilitiesClient | null;
+  readonly pendingLabel: string | null;
+  readonly onInstall: (tool: AgentToolSnapshot) => void;
   readonly onConnect: (tool: AgentToolSnapshot) => void;
+  readonly onDisconnect: (tool: AgentToolSnapshot) => void;
 }): React.ReactElement {
   const isConnected = tool.connectionState === "connected";
-  const isUnknown = tool.connectionState === "unknown";
   const isInstalled = tool.installState === "installed";
+  const isPending = pendingLabel !== null;
 
   return (
     <article className="connector-list-item">
@@ -266,66 +352,20 @@ function ConnectorRow({
       </div>
       <div className="connector-actions">
         {!isInstalled ? (
-          <button type="button" onClick={() => client?.installTool(tool.id)}>Install</button>
-        ) : null}
-        {isInstalled && isUnknown && tool.canRefreshStatus ? (
-          <button type="button" onClick={() => client?.refreshToolStatus(tool.id)}>Check</button>
+          <button type="button" disabled={isPending} onClick={() => onInstall(tool)}>
+            {pendingLabel ?? "Install"}
+          </button>
         ) : null}
         {isInstalled && !isConnected && tool.canConnect ? (
-          <button type="button" onClick={() => onConnect(tool)}>Connect</button>
+          <button type="button" disabled={isPending} onClick={() => onConnect(tool)}>
+            {pendingLabel ?? "Connect"}
+          </button>
         ) : null}
         {isInstalled && isConnected && tool.canDisconnect ? (
-          <button type="button" onClick={() => client?.disconnectTool(tool.id)}>Disconnect</button>
+          <button type="button" disabled={isPending} onClick={() => onDisconnect(tool)}>
+            {pendingLabel ?? "Disconnect"}
+          </button>
         ) : null}
-      </div>
-    </article>
-  );
-}
-
-function SkillRow({
-  skill,
-  client,
-  isPending,
-  onInstall,
-  onSetActive,
-}: {
-  readonly skill: AgentSkillSnapshot;
-  readonly client: CapabilitiesClient | null;
-  readonly isPending: boolean;
-  readonly onInstall: (skill: AgentSkillSnapshot) => void;
-  readonly onSetActive: (skill: AgentSkillSnapshot, active: boolean) => void;
-}): React.ReactElement {
-  const isInstalled = skill.installState === "installed";
-  const nextActive = !skill.active;
-
-  return (
-    <article className="connector-list-item skill-list-item">
-      <div className="connector-logo-wrap skill-logo-wrap">
-        <span>{skill.label.slice(0, 1)}</span>
-      </div>
-      <div className="connector-copy">
-        <div>
-          <strong>{skill.label}</strong>
-        </div>
-        <span>{renderSkillStatus(skill)}</span>
-      </div>
-      <div className="connector-actions skill-actions">
-        {!isInstalled ? (
-          <button type="button" disabled={client === null || isPending} onClick={() => onInstall(skill)}>
-            {isPending ? "Installing..." : "Install"}
-          </button>
-        ) : (
-          <button
-            className={`skill-toggle${skill.active ? " is-active" : ""}`}
-            type="button"
-            aria-pressed={skill.active}
-            disabled={client === null || isPending}
-            onClick={() => onSetActive(skill, nextActive)}
-          >
-            <span aria-hidden="true" />
-            {isPending ? "Updating..." : skill.active ? "Active" : "Inactive"}
-          </button>
-        )}
       </div>
     </article>
   );
@@ -344,6 +384,7 @@ function DeviceConnectionDialog({
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [inputCode, setInputCode] = useState("");
   const deviceUrl = state.url ?? (state.tool.id === "github" ? GITHUB_DEVICE_URL : null);
+  const displayUrl = deviceUrl?.toLowerCase() ?? "waiting for link...";
   const toolName = getConnectionToolName(state.tool);
   const flow = getConnectionFlow(state.tool.id);
   const usesReadonlyCode = flow === "readonly-code";
@@ -362,7 +403,7 @@ function DeviceConnectionDialog({
 
     void navigator.clipboard.writeText(state.code).then(() => {
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1_200);
+      window.setTimeout(() => setCopied(false), 1_000);
     });
   };
 
@@ -373,7 +414,7 @@ function DeviceConnectionDialog({
 
     void navigator.clipboard.writeText(deviceUrl).then(() => {
       setCopiedUrl(true);
-      window.setTimeout(() => setCopiedUrl(false), 1_200);
+      window.setTimeout(() => setCopiedUrl(false), 1_000);
     });
   };
 
@@ -388,10 +429,7 @@ function DeviceConnectionDialog({
   };
 
   return (
-    <div
-      className="connector-connect-backdrop"
-      role="presentation"
-    >
+    <div className="connector-connect-backdrop" role="presentation">
       <section
         className="connector-connect-dialog"
         role="dialog"
@@ -406,41 +444,55 @@ function DeviceConnectionDialog({
             {state.tool.logoUrl === undefined ? <span>G</span> : <img src={state.tool.logoUrl} alt="" />}
           </div>
           <div>
-            <h2 id="connector-connect-title">Connect {toolName}</h2>
-            <p>Authorize {toolName} for this machine.</p>
+            <h2 id="connector-connect-title">
+              Connect {toolName}
+              <span className="connector-connect-title-spinner" aria-hidden="true" />
+            </h2>
           </div>
         </div>
         <ol className="connector-connect-steps">
           <li>
             <span>Open the following link.</span>
             <div className="connector-connect-link-row">
-              <button type="button" disabled={deviceUrl === null} onClick={openDevicePage}>
-                {deviceUrl === null ? "Waiting for link..." : `Open ${toolName}`}
+              <button className="connector-connect-link-text" type="button" disabled={deviceUrl === null} onClick={openDevicePage}>
+                {displayUrl}
               </button>
               <button
+                className="connector-connect-icon-button"
                 type="button"
                 aria-label={copiedUrl ? "Copied link" : "Copy link"}
                 title={copiedUrl ? "Copied" : "Copy link"}
                 disabled={deviceUrl === null}
                 onClick={copyUrl}
               >
-                <HugeiconsIcon icon={copiedUrl ? CopyCheckIcon : Copy01Icon} size={16} color="currentColor" strokeWidth={1.8} />
+                <HugeiconsIcon icon={copiedUrl ? Tick02Icon : CopyIcon} size={15} color="currentColor" strokeWidth={1.8} />
+              </button>
+              <button
+                className="connector-connect-icon-button"
+                type="button"
+                aria-label="Open link"
+                title="Open link"
+                disabled={deviceUrl === null}
+                onClick={openDevicePage}
+              >
+                <HugeiconsIcon icon={Share04Icon} size={15} color="currentColor" strokeWidth={1.8} />
               </button>
             </div>
           </li>
           {usesReadonlyCode ? (
             <li>
-              <span>Enter the given code.</span>
+              <span>Enter the following code.</span>
               <div className="connector-connect-code">
                 <strong>{state.code ?? "Waiting for code..."}</strong>
                 <button
+                  className="connector-connect-icon-button"
                   type="button"
                   aria-label={copied ? "Copied code" : "Copy code"}
                   title={copied ? "Copied" : "Copy code"}
                   disabled={state.code === null}
                   onClick={copyCode}
                 >
-                  <HugeiconsIcon icon={copied ? CopyCheckIcon : Copy01Icon} size={16} color="currentColor" strokeWidth={1.8} />
+                  <HugeiconsIcon icon={copied ? Tick02Icon : CopyIcon} size={15} color="currentColor" strokeWidth={1.8} />
                 </button>
               </div>
             </li>
@@ -480,6 +532,30 @@ function DeviceConnectionDialog({
   );
 }
 
+const createConnectionDialogState = (
+  tool: AgentToolSnapshot,
+  operation: CapabilityOperationSnapshot | null,
+  parsed: { readonly code: string | null; readonly url: string | null } = { code: null, url: null },
+): ConnectionDialogState => ({
+  tool,
+  code: parsed.code,
+  url: parsed.url ?? (tool.id === "github" ? GITHUB_DEVICE_URL : null),
+  operationId: operation?.id ?? null,
+  error: null,
+  isSubmitting: false,
+});
+
+const updateConnectionDialog = (
+  current: ConnectionDialogState,
+  patch: Pick<ConnectionDialogState, "code" | "url" | "error" | "isSubmitting">,
+): ConnectionDialogState =>
+  current.code === patch.code &&
+  current.url === patch.url &&
+  current.error === patch.error &&
+  current.isSubmitting === patch.isSubmitting
+    ? current
+    : { ...current, ...patch };
+
 const renderConnectorStatus = (tool: AgentToolSnapshot): string => {
   if (tool.installState !== "installed") {
     return "Not installed";
@@ -499,131 +575,51 @@ const renderConnectorStatus = (tool: AgentToolSnapshot): string => {
   }
 };
 
-const renderSkillStatus = (skill: AgentSkillSnapshot): string => {
-  if (skill.installState === "failed") {
-    return "Install failed";
-  }
-
-  if (skill.installState !== "installed") {
-    return "Not installed";
-  }
-
-  return skill.active ? "Active" : "Inactive";
+type PendingInput = {
+  readonly tool: AgentToolSnapshot;
+  readonly activeOperation: ActiveOperationState | null;
+  readonly operation: CapabilityOperationSnapshot | undefined;
+  readonly installMutation: { readonly isPending: boolean; readonly variables?: string };
+  readonly connectMutation: { readonly isPending: boolean; readonly variables?: string };
+  readonly disconnectMutation: { readonly isPending: boolean; readonly variables?: string };
 };
 
-const handleMessage = (
-  message: CapabilityServerMessage,
-  setCapabilities: React.Dispatch<React.SetStateAction<CapabilitiesSnapshot | null>>,
-): void => {
-  switch (message.type) {
-    case "capabilities":
-    case "operationCompleted":
-      setCapabilities(message.capabilities);
-      break;
-    case "operationStarted":
-    case "operationProgress":
-      break;
-    case "operationFailed":
-    case "error":
-      break;
-    case "toolStatus":
-      setCapabilities((current) => current === null ? current : {
-        ...current,
-        tools: current.tools.map((tool) => tool.id === message.tool.id ? message.tool : tool),
-      });
-      break;
-    case "skillStatus":
-      setCapabilities((current) => current === null ? current : {
-        ...current,
-        skills: current.skills.map((skill) => skill.id === message.skill.id ? message.skill : skill),
-      });
-      break;
-    case "hello":
-    case "pong":
-      break;
-  }
-};
-
-const clearPendingSkills = (
-  current: ReadonlySet<string>,
-  message: CapabilityServerMessage,
-): ReadonlySet<string> => {
-  if (current.size === 0) {
-    return current;
-  }
-
-  if (message.type === "operationCompleted" || message.type === "operationFailed" || message.type === "error") {
-    return new Set();
-  }
-
-  if (message.type !== "skillStatus") {
-    return current;
-  }
-
-  const next = new Set(current);
-  next.delete(message.skill.id);
-  return next;
-};
-
-const handleConnectionMessage = (
-  message: CapabilityServerMessage,
-  currentDialog: ConnectionDialogState | null,
-  updateConnectionDialog: ConnectionDialogUpdater,
-): void => {
-  if (currentDialog === null) {
-    return;
-  }
-
-  if (message.type === "operationStarted" && message.operation === "connectTool" && message.targetId === currentDialog.tool.id) {
-    updateConnectionDialog((current) => current === null ? current : {
-      ...current,
-      operationId: message.operationId,
-    });
-    return;
-  }
-
-  if (message.type === "operationProgress") {
-    const code = extractDeviceCode(message.message);
-    const url = extractDeviceUrl(message.message, currentDialog.tool.id);
-    updateConnectionDialog((current) => current === null ? current : {
-      ...current,
-      code: code ?? current.code,
-      url: url ?? current.url,
-      error: null,
-    });
-    return;
-  }
-
-  if (message.type === "operationFailed") {
-    updateConnectionDialog((current) => current === null ? current : {
-      ...current,
-      error: formatConnectionError(current.tool),
-      isSubmitting: false,
-    });
-    return;
-  }
-
-  if (message.type === "error") {
-    updateConnectionDialog((current) => current === null ? current : {
-      ...current,
-      error: message.message,
-      isSubmitting: false,
-    });
-    return;
-  }
-
-  if (message.type === "operationCompleted") {
-    const connectedTool = message.capabilities.tools.find((tool) => tool.id === currentDialog.tool.id);
-    if (connectedTool?.connectionState === "connected") {
-      updateConnectionDialog(null);
-      return;
+const getPendingLabel = ({
+  tool,
+  activeOperation,
+  operation,
+  installMutation,
+  connectMutation,
+  disconnectMutation,
+}: PendingInput): string | null => {
+  if (
+    activeOperation?.toolId === tool.id &&
+    (operation === undefined || operation.status === "running" || operation.status === "waiting_for_input")
+  ) {
+    switch (operation?.operation ?? activeOperation.operation) {
+      case "connectTool":
+        return "Connecting...";
+      case "updateTool":
+        return "Updating...";
+      case "installTool":
+      case undefined:
+        return "Installing...";
     }
-
-    updateConnectionDialog((current) => current === null ? current : {
-      ...current,
-      isSubmitting: false,
-    });
   }
+
+  if (installMutation.isPending && installMutation.variables === tool.id) {
+    return "Installing...";
+  }
+
+  if (connectMutation.isPending && connectMutation.variables === tool.id) {
+    return "Connecting...";
+  }
+
+  if (disconnectMutation.isPending && disconnectMutation.variables === tool.id) {
+    return "Disconnecting...";
+  }
+
+  return null;
 };
 
 const getConnectionToolName = (tool: AgentToolSnapshot): string =>
@@ -644,6 +640,21 @@ const getConnectionFlow = (toolId: string): ConnectionFlow => {
 
 const formatConnectionError = (tool: AgentToolSnapshot): string =>
   `${getConnectionToolName(tool)} connection could not be completed. Please try again.`;
+
+const parseConnectionMessages = (
+  messages: readonly string[],
+  toolId: string,
+): { readonly code: string | null; readonly url: string | null } => {
+  let code: string | null = null;
+  let url: string | null = null;
+
+  for (const message of messages) {
+    code = extractDeviceCode(message) ?? code;
+    url = extractDeviceUrl(message, toolId) ?? url;
+  }
+
+  return { code, url };
+};
 
 const extractDeviceCode = (message: string): string | null => {
   const withoutUrls = normalizeTerminalText(message).replaceAll(/https?:\/\/\S+/g, " ");
