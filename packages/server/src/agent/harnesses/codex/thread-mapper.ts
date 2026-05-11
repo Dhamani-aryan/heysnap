@@ -29,6 +29,7 @@ export interface CodexThread {
   readonly cwd: string;
   readonly path?: string | null;
   readonly source?: CodexSessionSource;
+  readonly status?: CodexThreadStatus;
   readonly modelProvider?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -36,6 +37,11 @@ export interface CodexThread {
 }
 
 type CodexSessionSource = string | { readonly [key: string]: unknown };
+type CodexThreadStatus =
+  | { readonly type: "notLoaded" }
+  | { readonly type: "idle" }
+  | { readonly type: "systemError" }
+  | { readonly type: "active"; readonly activeFlags?: readonly unknown[] };
 const NAVIGATED_DIRECTORY_PATTERN = /\s*<navigated_directory>[\s\S]*?<\/navigated_directory>\s*/gu;
 
 export interface CodexTurn {
@@ -189,6 +195,7 @@ export const toThreadSummary = (
     createdAt: secondsToMilliseconds(thread.createdAt),
     updatedAt: secondsToMilliseconds(thread.updatedAt),
     messageCount,
+    ...(thread.status?.type === "active" ? { isStreaming: true } : {}),
   };
 };
 

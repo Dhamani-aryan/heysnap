@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { toAgentError } from "./errors.js";
+import { AgentError, toAgentError } from "./errors.js";
 import { isAgentContent } from "./validation.js";
-import type { AgentContent, IAgentHarness } from "./types.js";
+import type { AgentContent, AgentThreadGroup, IAgentHarness } from "./types.js";
 import {
   AgentRunManager,
   type AgentRunRecord,
@@ -65,7 +65,7 @@ const handleAgentHttpRequest = async (
         rootPath: requestUrl.searchParams.get("rootPath") ?? undefined,
         limit: parseLimit(requestUrl.searchParams.get("limit")),
       });
-      sendJson(response, 200, { groups: result.groups });
+      sendJson(response, 200, { groups: withStreamingState(result.groups, runManager) });
       return true;
     }
 
@@ -83,6 +83,27 @@ const handleAgentHttpRequest = async (
 
     if (request.method === "POST" && requestUrl.pathname === "/agent/runs") {
       const input = parseStartRunInput(await readJsonBody(request));
+      const run = runManager.startRun(input);
+      streamRun(response, request, runManager, run, 0);
+      return true;
+    }
+
+    const editMatch = /^\/agent\/threads\/([^/]+)\/edit$/.exec(requestUrl.pathname);
+
+    if (request.method === "POST" && editMatch !== null) {
+      const threadId = decodeURIComponent(editMatch[1] ?? "");
+      const input = parseEditRunInput(threadId, await readJsonBody(request));
+
+      if (runManager.isThreadRunning(threadId)) {
+        throw new AgentError("THREAD_ACTIVE", "Cannot edit a thread while it is running");
+      }
+
+      const thread = await harness.getThread({ threadId });
+
+      if (thread.isStreaming === true) {
+        throw new AgentError("THREAD_ACTIVE", "Cannot edit a thread while it is running");
+      }
+
       const run = runManager.startRun(input);
       streamRun(response, request, runManager, run, 0);
       return true;
@@ -118,7 +139,7 @@ const handleAgentHttpRequest = async (
     return true;
   } catch (error) {
     const agentError = toAgentError(error);
-    sendJson(response, agentError.code === "THREAD_NOT_FOUND" ? 404 : 400, {
+    sendJson(response, getAgentErrorStatus(agentError), {
       code: agentError.code,
       message: agentError.message,
     });
@@ -206,6 +227,46 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
   };
 };
 
+const parseEditRunInput = (threadId: string, body: unknown): StartAgentRunInput => {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("Edit request must be a JSON object");
+  }
+
+  const input = body as Record<string, unknown>;
+  const numTurns = input["numTurns"] === undefined ? 1 : input["numTurns"];
+
+  if (
+    threadId.length === 0 ||
+    typeof input["path"] !== "string" ||
+    !isAgentContent(input["content"]) ||
+    (input["clientRunId"] !== undefined && typeof input["clientRunId"] !== "string") ||
+    !Number.isInteger(numTurns) ||
+    (numTurns as number) <= 0
+  ) {
+    throw new Error("Invalid edit request");
+  }
+
+  return {
+    threadId,
+    path: input["path"],
+    content: input["content"] as AgentContent,
+    clientRunId: input["clientRunId"] as string | undefined,
+    edit: { numTurns: numTurns as number },
+  };
+};
+
+const withStreamingState = (
+  groups: readonly AgentThreadGroup[],
+  runManager: AgentRunManager,
+): AgentThreadGroup[] =>
+  groups.map((group) => ({
+    ...group,
+    threads: group.threads.map((thread) => ({
+      ...thread,
+      isStreaming: thread.isStreaming === true || runManager.isThreadRunning(thread.id),
+    })),
+  }));
+
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
   const chunks: Buffer[] = [];
 
@@ -225,6 +286,18 @@ const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
 const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
   response.writeHead(status, jsonHeaders);
   response.end(JSON.stringify(body));
+};
+
+const getAgentErrorStatus = (error: AgentError): number => {
+  if (error.code === "THREAD_NOT_FOUND" || error.code === "RUN_NOT_FOUND") {
+    return 404;
+  }
+
+  if (error.code === "THREAD_ACTIVE") {
+    return 409;
+  }
+
+  return 400;
 };
 
 const formatSseEnvelope = (envelope: AgentSseEnvelope): string =>
