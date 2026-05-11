@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp02Icon, Pdf02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp02Icon, Folder01Icon, Pdf02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -23,6 +23,7 @@ export type PromptAttachment = {
 export interface RightPromptComposerProps {
   readonly isRunning?: boolean;
   readonly draftSeed?: { readonly id: number; readonly text: string } | null;
+  readonly activeFolderName?: string;
   readonly onCancel?: () => void;
   readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void | Promise<boolean | void>;
 }
@@ -106,6 +107,7 @@ const toAgentContent = (text: string, attachments: readonly PromptAttachment[]):
 export const RightPromptComposer = ({
   isRunning = false,
   draftSeed = null,
+  activeFolderName,
   onCancel,
   onSubmit,
 }: RightPromptComposerProps): React.ReactElement => {
@@ -297,18 +299,27 @@ export const RightPromptComposer = ({
       />
 
       <div className="prompt-actions">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            fileInputRef.current?.click();
-          }}
-          className="prompt-attachment-button"
-          aria-label="Add attachment"
-          title="Add attachment"
-        >
-          <HugeiconsIcon icon={PlusSignIcon} size={18} color="currentColor" strokeWidth={1.9} />
-        </button>
+        <div className="prompt-leading-actions">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            className="prompt-attachment-button"
+            aria-label="Add attachment"
+            title="Add attachment"
+          >
+            <HugeiconsIcon icon={PlusSignIcon} size={18} color="currentColor" strokeWidth={1.9} />
+          </button>
+
+          {activeFolderName === undefined ? null : (
+            <div className="prompt-folder-chip" title={activeFolderName} aria-label={`Current folder: ${activeFolderName}`}>
+              <HugeiconsIcon icon={Folder01Icon} size={14} color="currentColor" strokeWidth={1.9} />
+              <span>{activeFolderName}</span>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"

@@ -12,7 +12,6 @@ const EMPTY_THREAD_MAX_FONT_SIZE = 22;
 const EMPTY_THREAD_MIN_FONT_SIZE = 10;
 
 export const AgentEmptyThread = ({
-  currentDirectoryName,
   ...composerProps
 }: AgentEmptyThreadProps): React.ReactElement => {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -70,8 +69,7 @@ export const AgentEmptyThread = ({
           ref={headingRef}
           style={{ "--right-empty-thread-font-size": `${fontSize}px` } as CSSProperties}
         >
-          <span ref={questionRef} className="right-empty-thread-question">What would you like to do today</span>
-          <span className="right-empty-thread-directory">in {currentDirectoryName}?</span>
+          <span ref={questionRef} className="right-empty-thread-question">What would you like to do today?</span>
         </h1>
       </div>
       <div className="right-prompt-composer-wrap">

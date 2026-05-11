@@ -1814,12 +1814,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.right-empty-thread-directory {
-  max-width: min(100%, 520px);
-  margin: 0 auto;
-  overflow-wrap: anywhere;
-}
-
 .right-prompt-composer-wrap {
   box-sizing: border-box;
   width: 100%;
@@ -2176,8 +2170,8 @@ button:disabled {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  background: rgba(255, 99, 99, 0.12);
-  color: #ff6363;
+  background: rgba(0, 100, 225, 0.14);
+  color: #0064e1;
 }
 
 .agent-user-file-meta {
@@ -2819,8 +2813,8 @@ button:disabled {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  background: rgba(255, 99, 99, 0.12);
-  color: #ff6363;
+  background: rgba(0, 100, 225, 0.14);
+  color: #0064e1;
 }
 
 .prompt-file-meta {
@@ -2914,6 +2908,13 @@ button:disabled {
   padding: 10px 4px 0;
 }
 
+.prompt-leading-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .prompt-attachment-button {
   display: inline-flex;
   width: 28px;
@@ -2933,6 +2934,33 @@ button:disabled {
   color: rgba(0, 0, 0, 0.64);
 }
 
+.prompt-folder-chip {
+  display: inline-flex;
+  max-width: min(220px, 42vw);
+  min-width: 0;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  color: #0064e1;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 28px;
+  transition: background-color 120ms ease;
+}
+
+.prompt-folder-chip:hover {
+  background: rgba(0, 100, 225, 0.1);
+}
+
+.prompt-folder-chip span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .prompt-attachment-button:focus-visible,
 .prompt-send-button:focus-visible {
   outline: 2px solid rgba(0, 0, 0, 0.12);
@@ -2945,6 +2973,14 @@ button:disabled {
 
 :root.dark .prompt-attachment-button:hover {
   color: rgba(255, 255, 255, 0.64);
+}
+
+:root.dark .prompt-folder-chip {
+  color: #5fa2ff;
+}
+
+:root.dark .prompt-folder-chip:hover {
+  background: rgba(0, 100, 225, 0.18);
 }
 
 :root.dark .prompt-attachment-button:focus-visible,

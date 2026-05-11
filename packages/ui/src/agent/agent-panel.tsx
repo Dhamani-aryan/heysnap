@@ -76,6 +76,7 @@ const AgentPanelContent = ({
     onThreadResolved,
   });
   const composerProps = {
+    activeFolderName: currentDirectoryName,
     isRunning,
     onCancel: cancel,
     onSubmit: isRunning ? steer : submit,
