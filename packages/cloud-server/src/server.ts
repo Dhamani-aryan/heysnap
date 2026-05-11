@@ -50,7 +50,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
 
       return options.config.allowedOrigins.includes(origin) ? origin : null;
     },
-    allowHeaders: ["Authorization", "Content-Type"],
+    allowHeaders: ["Authorization", "Content-Type", "Last-Event-ID"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     maxAge: 600,
   }));
@@ -82,6 +82,12 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
       tunnelRegistry,
       "/filesystem/preview",
     );
+  });
+  app.all("/gateway/computers/:computerId/capabilities", async (context) => {
+    return await proxyGatewayCapabilitiesHttpRequest(context, gatewayAccessService, tunnelRegistry);
+  });
+  app.all("/gateway/computers/:computerId/capabilities/*", async (context) => {
+    return await proxyGatewayCapabilitiesHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
   app.all("/gateway/computers/:computerId/agent/*", async (context) => {
     return await proxyGatewayAgentHttpRequest(context, gatewayAccessService, tunnelRegistry);
@@ -208,6 +214,51 @@ const proxyGatewayAgentHttpRequest = async (
   return toGatewayAgentResponse(proxied);
 };
 
+const proxyGatewayCapabilitiesHttpRequest = async (
+  context: Context<{ Variables: AppVariables }>,
+  gatewayAccessService: GatewayAccessService,
+  tunnelRegistry: TunnelStatusRegistry,
+): Promise<Response> => {
+  const computerId = context.req.param("computerId");
+  const requestUrl = new URL(context.req.url);
+
+  if (computerId === undefined || computerId.length === 0) {
+    return context.json({ error: { code: "NOT_FOUND", message: "Computer not found" } }, 404);
+  }
+
+  const token = readBearerToken(context.req.header("authorization"))
+    ?? requestUrl.searchParams.get("accessToken")
+    ?? requestUrl.searchParams.get("token")
+    ?? undefined;
+
+  if (token === undefined || token.length === 0) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Gateway access token is required" } }, 401);
+  }
+
+  const accessSession = await gatewayAccessService.authenticateAccessToken({ token, computerId });
+
+  if (accessSession === null) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
+  }
+
+  if (tunnelRegistry.proxyHttpRequest === undefined) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
+    path: buildCapabilitiesProxyTargetPath(computerId, requestUrl),
+    method: context.req.method,
+    headers: getForwardedCapabilitiesHeaders(context),
+    body: await readProxyRequestBody(context),
+  });
+
+  if (proxied === null) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  return toGatewayCapabilitiesResponse(proxied);
+};
+
 const buildFilesystemProxyTargetPath = (
   requestUrl: URL,
   targetPathname: "/filesystem/download" | "/filesystem/preview",
@@ -233,6 +284,19 @@ const buildAgentProxyTargetPath = (computerId: string, requestUrl: URL): string 
   return `/agent${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
 
+const buildCapabilitiesProxyTargetPath = (computerId: string, requestUrl: URL): string => {
+  const prefix = `/gateway/computers/${encodeURIComponent(computerId)}/capabilities`;
+  const suffix = requestUrl.pathname.startsWith(prefix)
+    ? requestUrl.pathname.slice(prefix.length)
+    : "";
+  const query = new URLSearchParams(requestUrl.searchParams);
+  query.delete("accessToken");
+  query.delete("token");
+  const queryString = query.toString();
+
+  return `/capabilities${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
+};
+
 const getForwardedAgentHeaders = (context: Context<{ Variables: AppVariables }>): Record<string, string> => {
   const headers: Record<string, string> = {};
   const contentType = context.req.header("content-type");
@@ -244,6 +308,17 @@ const getForwardedAgentHeaders = (context: Context<{ Variables: AppVariables }>)
 
   if (lastEventId !== undefined) {
     headers["last-event-id"] = lastEventId;
+  }
+
+  return headers;
+};
+
+const getForwardedCapabilitiesHeaders = (context: Context<{ Variables: AppVariables }>): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  const contentType = context.req.header("content-type");
+
+  if (contentType !== undefined) {
+    headers["content-type"] = contentType;
   }
 
   return headers;
@@ -291,6 +366,21 @@ const toGatewayAgentResponse = (proxied: GatewayHttpStreamResponse): Response =>
   });
 };
 
+const toGatewayCapabilitiesResponse = (proxied: GatewayHttpResponse): Response => {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(proxied.headers)) {
+    if (isForwardedCapabilitiesHeader(name)) {
+      headers.set(name, value);
+    }
+  }
+
+  return new Response(new Uint8Array(proxied.body), {
+    status: proxied.statusCode,
+    headers,
+  });
+};
+
 const isForwardedDownloadHeader = (name: string): boolean => {
   const normalized = name.toLowerCase();
   return normalized === "content-type" ||
@@ -305,6 +395,12 @@ const isForwardedAgentHeader = (name: string): boolean => {
     "content-type",
     "x-accel-buffering",
   ].includes(normalized);
+};
+
+const isForwardedCapabilitiesHeader = (name: string): boolean => {
+  const normalized = name.toLowerCase();
+  return normalized === "content-type" ||
+    normalized === "cache-control";
 };
 
 const readBearerToken = (authorization: string | undefined): string | undefined => {

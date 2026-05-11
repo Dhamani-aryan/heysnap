@@ -1,6 +1,8 @@
 import "./globals.css";
 import "@ank1015-app/ui/filesystem.css";
 import "@ank1015-app/ui/cloud.css";
+import "katex/dist/katex.min.css";
+import "streamdown/styles.css";
 
 import heysnapIcon from "../../assets/heysnap.ico";
 import { WebCloudRuntimeProvider } from "./cloud-runtime-provider";

@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { toAgentError } from "./errors.js";
+import { AgentError, toAgentError } from "./errors.js";
 import { isAgentContent } from "./validation.js";
-import type { AgentContent, IAgentHarness } from "./types.js";
+import type { AgentContent, AgentThreadGroup, AgentUiContext, IAgentHarness } from "./types.js";
 import {
   AgentRunManager,
   type AgentRunRecord,
@@ -65,7 +65,7 @@ const handleAgentHttpRequest = async (
         rootPath: requestUrl.searchParams.get("rootPath") ?? undefined,
         limit: parseLimit(requestUrl.searchParams.get("limit")),
       });
-      sendJson(response, 200, { groups: result.groups });
+      sendJson(response, 200, { groups: withStreamingState(result.groups, runManager) });
       return true;
     }
 
@@ -83,6 +83,27 @@ const handleAgentHttpRequest = async (
 
     if (request.method === "POST" && requestUrl.pathname === "/agent/runs") {
       const input = parseStartRunInput(await readJsonBody(request));
+      const run = runManager.startRun(input);
+      streamRun(response, request, runManager, run, 0);
+      return true;
+    }
+
+    const editMatch = /^\/agent\/threads\/([^/]+)\/edit$/.exec(requestUrl.pathname);
+
+    if (request.method === "POST" && editMatch !== null) {
+      const threadId = decodeURIComponent(editMatch[1] ?? "");
+      const input = parseEditRunInput(threadId, await readJsonBody(request));
+
+      if (runManager.isThreadRunning(threadId)) {
+        throw new AgentError("THREAD_ACTIVE", "Cannot edit a thread while it is running");
+      }
+
+      const thread = await harness.getThread({ threadId });
+
+      if (thread.isStreaming === true) {
+        throw new AgentError("THREAD_ACTIVE", "Cannot edit a thread while it is running");
+      }
+
       const run = runManager.startRun(input);
       streamRun(response, request, runManager, run, 0);
       return true;
@@ -114,11 +135,25 @@ const handleAgentHttpRequest = async (
       return true;
     }
 
+    const steerMatch = /^\/agent\/threads\/([^/]+)\/runs\/([^/]+)\/steer$/.exec(requestUrl.pathname);
+
+    if (request.method === "POST" && steerMatch !== null) {
+      const result = await runManager.steerRun(
+        parseSteerRunInput(
+          decodeURIComponent(steerMatch[1] ?? ""),
+          decodeURIComponent(steerMatch[2] ?? ""),
+          await readJsonBody(request),
+        ),
+      );
+      sendJson(response, 200, result);
+      return true;
+    }
+
     sendJson(response, 404, { code: "NOT_FOUND", message: "Agent endpoint not found" });
     return true;
   } catch (error) {
     const agentError = toAgentError(error);
-    sendJson(response, agentError.code === "THREAD_NOT_FOUND" ? 404 : 400, {
+    sendJson(response, getAgentErrorStatus(agentError), {
       code: agentError.code,
       message: agentError.message,
     });
@@ -202,9 +237,117 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
     threadId: input["threadId"] as string | undefined,
     path: input["path"],
     content: input["content"] as AgentContent,
+    uiContext: parseAgentUiContext(input["uiContext"]),
     clientRunId: input["clientRunId"] as string | undefined,
   };
 };
+
+const parseEditRunInput = (threadId: string, body: unknown): StartAgentRunInput => {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("Edit request must be a JSON object");
+  }
+
+  const input = body as Record<string, unknown>;
+  const numTurns = input["numTurns"] === undefined ? 1 : input["numTurns"];
+
+  if (
+    threadId.length === 0 ||
+    typeof input["path"] !== "string" ||
+    !isAgentContent(input["content"]) ||
+    (input["clientRunId"] !== undefined && typeof input["clientRunId"] !== "string") ||
+    !Number.isInteger(numTurns) ||
+    (numTurns as number) <= 0
+  ) {
+    throw new Error("Invalid edit request");
+  }
+
+  return {
+    threadId,
+    path: input["path"],
+    content: input["content"] as AgentContent,
+    uiContext: parseAgentUiContext(input["uiContext"]),
+    clientRunId: input["clientRunId"] as string | undefined,
+    edit: { numTurns: numTurns as number },
+  };
+};
+
+const parseSteerRunInput = (
+  threadId: string,
+  runId: string,
+  body: unknown,
+): {
+  readonly threadId: string;
+  readonly runId: string;
+  readonly path: string;
+  readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
+} => {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("Steer request must be a JSON object");
+  }
+
+  const input = body as Record<string, unknown>;
+
+  if (threadId.length === 0 || runId.length === 0 || typeof input["path"] !== "string" || !isAgentContent(input["content"])) {
+    throw new Error("Invalid steer request");
+  }
+
+  return {
+    threadId,
+    runId,
+    path: input["path"],
+    content: input["content"] as AgentContent,
+    uiContext: parseAgentUiContext(input["uiContext"]),
+  };
+};
+
+const parseAgentUiContext = (value: unknown): AgentUiContext | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid UI context");
+  }
+
+  const context = value as Record<string, unknown>;
+
+  if (!Array.isArray(context["openFiles"])) {
+    throw new Error("Invalid UI context");
+  }
+
+  return {
+    openFiles: context["openFiles"].map((file): AgentUiContext["openFiles"][number] => {
+      if (
+        typeof file !== "object" ||
+        file === null ||
+        Array.isArray(file) ||
+        typeof (file as Record<string, unknown>)["path"] !== "string" ||
+        typeof (file as Record<string, unknown>)["isFocused"] !== "boolean"
+      ) {
+        throw new Error("Invalid UI context");
+      }
+
+      const openFile = file as Record<string, unknown>;
+      return {
+        path: openFile["path"] as string,
+        isFocused: openFile["isFocused"] as boolean,
+      };
+    }),
+  };
+};
+
+const withStreamingState = (
+  groups: readonly AgentThreadGroup[],
+  runManager: AgentRunManager,
+): AgentThreadGroup[] =>
+  groups.map((group) => ({
+    ...group,
+    threads: group.threads.map((thread) => ({
+      ...thread,
+      isStreaming: thread.isStreaming === true || runManager.isThreadRunning(thread.id),
+    })),
+  }));
 
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
   const chunks: Buffer[] = [];
@@ -225,6 +368,18 @@ const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
 const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
   response.writeHead(status, jsonHeaders);
   response.end(JSON.stringify(body));
+};
+
+const getAgentErrorStatus = (error: AgentError): number => {
+  if (error.code === "THREAD_NOT_FOUND" || error.code === "RUN_NOT_FOUND") {
+    return 404;
+  }
+
+  if (error.code === "THREAD_ACTIVE" || error.code === "RUN_NOT_ACTIVE" || error.code === "RUN_THREAD_MISMATCH") {
+    return 409;
+  }
+
+  return 400;
 };
 
 const formatSseEnvelope = (envelope: AgentSseEnvelope): string =>

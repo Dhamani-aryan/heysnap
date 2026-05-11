@@ -3,6 +3,8 @@
 export type ToolInstallState = "not_installed" | "installed" | "installing" | "failed";
 export type ToolConnectionState = "unsupported" | "unknown" | "connected" | "disconnected" | "error";
 export type SkillInstallState = "not_installed" | "installed" | "failed";
+export type CapabilityOperationStatus = "running" | "waiting_for_input" | "completed" | "failed" | "cancelled";
+export type CapabilityOperationName = "installTool" | "updateTool" | "connectTool";
 
 export interface AgentToolSnapshot {
   readonly id: string;
@@ -38,111 +40,147 @@ export interface CapabilitiesSnapshot {
   readonly skills: readonly AgentSkillSnapshot[];
 }
 
-export type CapabilityServerMessage =
-  | { readonly type: "hello"; readonly serverTime: string }
-  | { readonly type: "capabilities"; readonly requestId: string; readonly capabilities: CapabilitiesSnapshot }
-  | { readonly type: "operationStarted"; readonly requestId: string; readonly operationId: string; readonly operation: string; readonly targetId: string }
-  | { readonly type: "operationProgress"; readonly requestId: string; readonly operationId: string; readonly message: string }
-  | { readonly type: "operationCompleted"; readonly requestId: string; readonly operationId: string; readonly capabilities: CapabilitiesSnapshot }
-  | { readonly type: "operationFailed"; readonly requestId: string; readonly operationId: string; readonly code: string; readonly message: string }
-  | { readonly type: "toolStatus"; readonly requestId: string; readonly tool: AgentToolSnapshot }
-  | { readonly type: "skillStatus"; readonly requestId: string; readonly skill: AgentSkillSnapshot }
-  | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string }
-  | { readonly type: "pong"; readonly requestId: string; readonly serverTime: string };
+export interface CapabilityOperationSnapshot {
+  readonly id: string;
+  readonly operation: CapabilityOperationName;
+  readonly targetId: string;
+  readonly status: CapabilityOperationStatus;
+  readonly messages: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly capabilities?: CapabilitiesSnapshot;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
 
-export class CapabilitiesClient {
-  private socket: WebSocket | null = null;
-  private requestCounter = 0;
-  private readonly listeners = new Set<(message: CapabilityServerMessage) => void>();
+export interface CapabilitiesResponse {
+  readonly capabilities: CapabilitiesSnapshot;
+}
 
-  constructor(private readonly websocketUrl: string) {}
+export interface CapabilityOperationResponse {
+  readonly operation: CapabilityOperationSnapshot;
+}
 
-  connect(): void {
-    if (this.socket !== null) {
-      return;
-    }
+export class CapabilitiesApiError extends Error {
+  readonly status: number;
+  readonly code: string;
 
-    const socket = new WebSocket(this.websocketUrl);
-    this.socket = socket;
-    socket.addEventListener("message", (event) => {
-      void parseMessage(event.data).then((message) => {
-        for (const listener of this.listeners) {
-          listener(message);
-        }
-      });
-    });
-    socket.addEventListener("close", () => {
-      if (this.socket === socket) {
-        this.socket = null;
-      }
-    });
-  }
-
-  close(): void {
-    this.socket?.close();
-    this.socket = null;
-    this.listeners.clear();
-  }
-
-  subscribe(listener: (message: CapabilityServerMessage) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  listCapabilities(): void {
-    this.send({ type: "listCapabilities", requestId: this.nextRequestId() });
-  }
-
-  installTool(toolId: string): void {
-    this.send({ type: "installTool", requestId: this.nextRequestId(), toolId });
-  }
-
-  updateTool(toolId: string): void {
-    this.send({ type: "updateTool", requestId: this.nextRequestId(), toolId });
-  }
-
-  connectTool(toolId: string): void {
-    this.send({ type: "connectTool", requestId: this.nextRequestId(), toolId });
-  }
-
-  sendToolInput(operationId: string, input: string): void {
-    this.send({ type: "sendToolInput", requestId: this.nextRequestId(), operationId, input });
-  }
-
-  disconnectTool(toolId: string): void {
-    this.send({ type: "disconnectTool", requestId: this.nextRequestId(), toolId });
-  }
-
-  refreshToolStatus(toolId: string): void {
-    this.send({ type: "refreshToolStatus", requestId: this.nextRequestId(), toolId });
-  }
-
-  installSkill(skillId: string): void {
-    this.send({ type: "installSkill", requestId: this.nextRequestId(), skillId });
-  }
-
-  setSkillActive(skillId: string, active: boolean): void {
-    this.send({ type: "setSkillActive", requestId: this.nextRequestId(), skillId, active });
-  }
-
-  private send(message: Record<string, unknown>): void {
-    const socket = this.socket;
-    if (socket === null || socket.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    socket.send(JSON.stringify(message));
-  }
-
-  private nextRequestId(): string {
-    this.requestCounter += 1;
-    return `capabilities-${String(this.requestCounter)}`;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "CapabilitiesApiError";
+    this.status = status;
+    this.code = code;
   }
 }
 
-const parseMessage = async (data: unknown): Promise<CapabilityServerMessage> => {
-  const text = typeof data === "string" ? data : await (data as Blob).text();
-  return JSON.parse(text) as CapabilityServerMessage;
+export const getCapabilities = (baseUrl: string): Promise<CapabilitiesResponse> =>
+  requestJson<CapabilitiesResponse>(baseUrl);
+
+export const installTool = (baseUrl: string, toolId: string): Promise<CapabilityOperationResponse> =>
+  requestJson<CapabilityOperationResponse>(toolActionUrl(baseUrl, toolId, "install"), { method: "POST" });
+
+export const updateTool = (baseUrl: string, toolId: string): Promise<CapabilityOperationResponse> =>
+  requestJson<CapabilityOperationResponse>(toolActionUrl(baseUrl, toolId, "update"), { method: "POST" });
+
+export const connectTool = (
+  baseUrl: string,
+  toolId: string,
+): Promise<CapabilitiesResponse | CapabilityOperationResponse> =>
+  requestJson<CapabilitiesResponse | CapabilityOperationResponse>(toolActionUrl(baseUrl, toolId, "connect"), {
+    method: "POST",
+  });
+
+export const disconnectTool = (baseUrl: string, toolId: string): Promise<CapabilitiesResponse> =>
+  requestJson<CapabilitiesResponse>(toolActionUrl(baseUrl, toolId, "disconnect"), { method: "POST" });
+
+export const refreshToolStatus = (baseUrl: string, toolId: string): Promise<CapabilitiesResponse> =>
+  requestJson<CapabilitiesResponse>(toolActionUrl(baseUrl, toolId, "refresh-status"), { method: "POST" });
+
+export const getCapabilityOperation = (
+  baseUrl: string,
+  operationId: string,
+): Promise<CapabilityOperationResponse> =>
+  requestJson<CapabilityOperationResponse>(operationUrl(baseUrl, operationId));
+
+export const sendCapabilityOperationInput = (
+  baseUrl: string,
+  operationId: string,
+  input: string,
+): Promise<CapabilityOperationResponse> =>
+  requestJson<CapabilityOperationResponse>(operationInputUrl(baseUrl, operationId), {
+    method: "POST",
+    body: JSON.stringify({ input }),
+    headers: { "content-type": "application/json" },
+  });
+
+export const cancelCapabilityOperation = (
+  baseUrl: string,
+  operationId: string,
+): Promise<CapabilityOperationResponse> =>
+  requestJson<CapabilityOperationResponse>(operationUrl(baseUrl, operationId), { method: "DELETE" });
+
+export const isCapabilityOperationResponse = (
+  value: CapabilitiesResponse | CapabilityOperationResponse,
+): value is CapabilityOperationResponse =>
+  "operation" in value;
+
+const toolActionUrl = (baseUrl: string, toolId: string, action: string): string =>
+  joinUrl(baseUrl, `tools/${encodeURIComponent(toolId)}/${action}`);
+
+const operationUrl = (baseUrl: string, operationId: string): string =>
+  joinUrl(baseUrl, `operations/${encodeURIComponent(operationId)}`);
+
+const operationInputUrl = (baseUrl: string, operationId: string): string =>
+  joinUrl(baseUrl, `operations/${encodeURIComponent(operationId)}/input`);
+
+const joinUrl = (baseUrl: string, suffix: string): string => {
+  const [path, query = ""] = baseUrl.split("?", 2);
+  return `${path.replace(/\/+$/u, "")}/${suffix}${query.length === 0 ? "" : `?${query}`}`;
+};
+
+const requestJson = async <TResponse,>(url: string, init: RequestInit = {}): Promise<TResponse> => {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let body: unknown = null;
+
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      throw new CapabilitiesApiError(
+        response.status,
+        "INVALID_CAPABILITIES_RESPONSE",
+        response.ok
+          ? "Connectors API returned a non-JSON response. The machine server may need to be restarted or updated."
+          : text,
+      );
+    }
+  }
+
+  if (!response.ok) {
+    const error = readApiError(body);
+    throw new CapabilitiesApiError(response.status, error.code, error.message);
+  }
+
+  return body as TResponse;
+};
+
+const readApiError = (body: unknown): { readonly code: string; readonly message: string } => {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    !Array.isArray(body) &&
+    typeof (body as Record<string, unknown>)["error"] === "object" &&
+    (body as Record<string, unknown>)["error"] !== null
+  ) {
+    const error = (body as { readonly error: Record<string, unknown> }).error;
+    return {
+      code: typeof error["code"] === "string" ? error["code"] : "CAPABILITIES_ERROR",
+      message: typeof error["message"] === "string" ? error["message"] : "Capabilities request failed.",
+    };
+  }
+
+  return { code: "CAPABILITIES_ERROR", message: "Capabilities request failed." };
 };

@@ -56,6 +56,10 @@ const buildRoutePath = (route: CloudAppRoute): string => {
   }
 
   const machinePath = `/machines/${encodeURIComponent(route.computerId)}`;
+  if (route.panel === "connectors") {
+    return `${machinePath}/connectors`;
+  }
+
   return route.threadId === null || route.threadId === undefined
     ? machinePath
     : `${machinePath}/${encodeURIComponent(route.threadId)}`;

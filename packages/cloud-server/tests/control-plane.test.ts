@@ -52,6 +52,21 @@ describe("cloud server cors", () => {
     expect(me.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
   });
 
+  it("allows agent event stream resume headers from the web app", async () => {
+    const { app } = createTestApp();
+    const preflight = await app.request("/gateway/computers/computer-1/agent/runs/run-1/events", {
+      method: "OPTIONS",
+      headers: {
+        origin: "http://localhost:3000",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "last-event-id",
+      },
+    });
+
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("Last-Event-ID");
+  });
+
   it("does not allow unknown browser origins", async () => {
     const { app } = createTestApp();
     const response = await app.request("/health", {
@@ -607,7 +622,7 @@ describe("cloud server computer access sessions", () => {
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
       agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
-      capabilitiesWebSocketUrl: `/gateway/computers/${computer.id}/capabilities`,
+      capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
     });
 
     const tokenHash = hashToken(body.accessSession.token, config.sessionSecret);
@@ -755,6 +770,73 @@ describe("cloud server computer access sessions", () => {
     }]);
   });
 
+  it("proxies capabilities REST through authenticated gateway access sessions", async () => {
+    const requested: Array<{
+      readonly path: string;
+      readonly method?: string;
+      readonly body?: string;
+      readonly contentType?: string;
+    }> = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async (_computerId, input) => {
+        requested.push({
+          path: input.path,
+          method: input.method,
+          body: input.body?.toString("utf8"),
+          contentType: input.headers?.["content-type"],
+        });
+        return {
+          statusCode: 202,
+          headers: { "content-type": "application/json" },
+          body: Buffer.from(JSON.stringify({
+            operation: {
+              id: "operation-1",
+              operation: "installTool",
+              targetId: "github",
+              status: "running",
+              messages: [],
+              createdAt: "2026-05-11T00:00:00.000Z",
+              updatedAt: "2026-05-11T00:00:00.000Z",
+            },
+          }), "utf8"),
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "capabilities-proxy-user@example.com");
+    const computer = await createComputer(app, auth.token, "Capabilities VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/capabilities/tools/github/install?accessToken=${accessBody.accessSession.token}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    await expect(response.json()).resolves.toMatchObject({
+      operation: {
+        id: "operation-1",
+        operation: "installTool",
+      },
+    });
+    expect(requested).toEqual([{
+      path: "/capabilities/tools/github/install",
+      method: "POST",
+      body: JSON.stringify({}),
+      contentType: "application/json",
+    }]);
+  });
+
   it("rejects filesystem downloads without gateway access tokens", async () => {
     const { app } = createTestApp({
       tunnelRegistry: {
@@ -770,6 +852,45 @@ describe("cloud server computer access sessions", () => {
     const response = await app.request(`/gateway/computers/${computer.id}/filesystem/download?path=Project`);
 
     expect(response.status).toBe(401);
+  });
+
+  it("rejects capabilities REST without gateway access tokens", async () => {
+    const { app } = createTestApp({
+      tunnelRegistry: {
+        isConnected: () => true,
+        proxyHttpRequest: async () => {
+          throw new Error("should not proxy unauthenticated capabilities requests");
+        },
+      },
+    });
+    const auth = await registerUser(app, "capabilities-no-token@example.com");
+    const computer = await createComputer(app, auth.token, "Capabilities VM");
+
+    const response = await app.request(`/gateway/computers/${computer.id}/capabilities`);
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns tunnel unavailable for capabilities REST when the tunnel is disconnected", async () => {
+    const { app } = createTestApp({
+      tunnelRegistry: {
+        isConnected: () => false,
+        proxyHttpRequest: async () => null,
+      },
+    });
+    const auth = await registerUser(app, "capabilities-tunnel-missing@example.com");
+    const computer = await createComputer(app, auth.token, "Capabilities VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/capabilities?accessToken=${accessBody.accessSession.token}`,
+    );
+
+    expect(response.status).toBe(503);
   });
 });
 
@@ -1123,6 +1244,7 @@ interface AccessSessionResponse {
   readonly routes: {
     readonly filesystemWebSocketUrl: string;
     readonly agentBaseUrl: string;
+    readonly capabilitiesBaseUrl: string;
   };
 }
 

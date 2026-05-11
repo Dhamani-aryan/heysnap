@@ -202,6 +202,110 @@ describe("filesystem websocket", () => {
     });
   });
 
+  it("restores remembered directory and open files across reconnects", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "current"), { recursive: true });
+    await mkdir(join(root, "open"), { recursive: true });
+    await writeFile(join(root, "open", "report.txt"), "hello");
+    const { url } = await startFilesystemServer(root);
+    const firstClient = await connect(`${url}/filesystem`);
+
+    await firstClient.next("hello");
+    await firstClient.next("snapshot");
+
+    firstClient.socket.send(JSON.stringify({ type: "subscribe", requestId: "subscribe-current", path: "current" }));
+    expect(await firstClient.next("snapshot")).toMatchObject({
+      type: "snapshot",
+      listing: { path: "current" },
+    });
+
+    firstClient.socket.send(JSON.stringify({
+      type: "watchFiles",
+      requestId: "watch-open-files",
+      paths: ["open/report.txt"],
+    }));
+    await firstClient.next("ack");
+    await firstClient.next("fileUpdates");
+    firstClient.socket.close();
+
+    const secondClient = await connect(`${url}/filesystem`);
+    expect(await secondClient.next("hello")).toMatchObject({
+      type: "hello",
+      viewState: {
+        currentPath: "current",
+        openFiles: [{ path: "open/report.txt", type: "file", size: 5 }],
+      },
+    });
+    expect(await secondClient.next("snapshot")).toMatchObject({
+      type: "snapshot",
+      reason: "subscribe",
+      listing: { path: "current" },
+    });
+  });
+
+  it("does not restore closed or missing open files", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "open"), { recursive: true });
+    await writeFile(join(root, "open", "keep.txt"), "keep");
+    const { url } = await startFilesystemServer(root);
+    const firstClient = await connect(`${url}/filesystem`);
+
+    await firstClient.next("hello");
+    await firstClient.next("snapshot");
+
+    firstClient.socket.send(JSON.stringify({
+      type: "watchFiles",
+      requestId: "watch-open-files",
+      paths: ["open/keep.txt", "open/missing.txt"],
+    }));
+    await firstClient.next("ack");
+    await firstClient.next("fileUpdates");
+
+    firstClient.socket.send(JSON.stringify({
+      type: "watchFiles",
+      requestId: "watch-closed-files",
+      paths: [],
+    }));
+    await firstClient.next("ack");
+    firstClient.socket.close();
+
+    const secondClient = await connect(`${url}/filesystem`);
+    expect(await secondClient.next("hello")).toMatchObject({
+      type: "hello",
+      viewState: {
+        openFiles: [],
+      },
+    });
+  });
+
+  it("falls back to root when remembered directory no longer exists", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "gone"), { recursive: true });
+    const { url } = await startFilesystemServer(root);
+    const firstClient = await connect(`${url}/filesystem`);
+
+    await firstClient.next("hello");
+    await firstClient.next("snapshot");
+
+    firstClient.socket.send(JSON.stringify({ type: "subscribe", requestId: "subscribe-gone", path: "gone" }));
+    await firstClient.next("snapshot");
+    firstClient.socket.close();
+    await removeEntriesForTest(join(root, "gone"));
+
+    const secondClient = await connect(`${url}/filesystem`);
+    expect(await secondClient.next("hello")).toMatchObject({
+      type: "hello",
+      viewState: {
+        currentPath: "gone",
+      },
+    });
+    expect(await secondClient.next("snapshot")).toMatchObject({
+      type: "snapshot",
+      reason: "subscribe",
+      listing: { path: "" },
+    });
+  });
+
   it("responds to heartbeat pings", async () => {
     const root = await createRoot();
     const { url } = await startFilesystemServer(root);

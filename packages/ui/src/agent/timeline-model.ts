@@ -20,23 +20,39 @@ export const deriveTimelineRows = ({
   const transcriptMessages = messages.filter(isTranscriptMessage);
   const activeUserMessageId = isWorking ? findLastUserMessageId(transcriptMessages) : null;
   const rows: TimelineRow[] = [];
+  let pendingAssistantMessage: AgentTranscriptMessage | null = null;
 
-  for (const message of transcriptMessages) {
+  const pushMessageRow = (message: AgentTranscriptMessage): void => {
     rows.push({
       kind: "message",
       id: `message:${message.id}`,
       createdAt: message.timestamp,
       message,
     });
+  };
 
-    if (message.role === "user") {
-      rows.push({
-        kind: "status",
-        id: `status:${message.id}`,
-        createdAt: message.timestamp,
-        state: message.id === activeUserMessageId ? "working" : "worked",
-      });
+  for (const message of transcriptMessages) {
+    if (message.role === "assistant") {
+      pendingAssistantMessage = message;
+      continue;
     }
+
+    if (pendingAssistantMessage !== null) {
+      pushMessageRow(pendingAssistantMessage);
+      pendingAssistantMessage = null;
+    }
+
+    pushMessageRow(message);
+    rows.push({
+      kind: "status",
+      id: `status:${message.id}`,
+      createdAt: message.timestamp,
+      state: message.id === activeUserMessageId ? "working" : "worked",
+    });
+  }
+
+  if (pendingAssistantMessage !== null) {
+    pushMessageRow(pendingAssistantMessage);
   }
 
   return rows;
@@ -92,6 +108,6 @@ const attachmentSignature = (message: Extract<AgentTranscriptMessage, { readonly
   message.content
     .filter((block) => block.type === "image" || block.type === "file")
     .map((block) => block.type === "file"
-      ? `file:${block.filename}:${block.mimeType}:${block.data.length}`
+      ? `file:${block.filename}:${block.mimeType}:${block.data?.length ?? 0}`
       : `image:${block.mimeType}:${block.data.length}`)
     .join("|");

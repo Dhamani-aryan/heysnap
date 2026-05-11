@@ -2,6 +2,7 @@
 
 import {
   Add01Icon,
+  ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowLeft02Icon,
   Download05Icon,
@@ -19,8 +20,16 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
-import { retrieveAgentThreadGroups } from "../agent/agent-client";
-import type { AgentThreadGroup, AgentThreadSummary } from "../agent/types";
+import { useAgentThreadGroupsQuery } from "../agent/agent-queries";
+import {
+  AgentRuntimeProvider,
+  useAgentChatStore,
+  useAgentThreadListStore,
+  useOptionalAgentRuntime,
+} from "../agent/agent-runtime";
+import { selectHasThreads } from "../agent/agent-thread-list-store";
+import type { AgentThreadGroup, AgentThreadSummary, AgentUiContext } from "../agent/types";
+import { CapabilitiesPanel } from "../cloud/capabilities-panel";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
@@ -86,6 +95,8 @@ type OpenFileTab = {
   readonly size: number | null;
   readonly updatedAt: string;
 };
+
+export type WorkspacePanel = "chat" | "connectors";
 
 type BrowserFileSystemHandle = {
   readonly kind: "file" | "directory";
@@ -170,11 +181,25 @@ const createInitialNavigationHistory = (path: string): string[] => {
 const isInvalidInitialFilesystemPathError = (message: string): boolean =>
   /path (?:is not a directory|not found)/iu.test(message);
 
+const isFilesystemConnectionErrorMessage = (message: string): boolean =>
+  message === "Filesystem connection failed." ||
+  message === "Filesystem connection closed." ||
+  message === "Filesystem connection is not open.";
+
+const toListingErrorMessage = (message: string | null): string | null => {
+  if (message === null || isFilesystemConnectionErrorMessage(message)) {
+    return null;
+  }
+
+  return message;
+};
+
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentBaseUrl?: string;
-  readonly capabilitiesWebsocketUrl?: string;
+  readonly capabilitiesBaseUrl?: string;
   readonly selectedThreadId?: string | null;
+  readonly workspacePanel?: WorkspacePanel;
   readonly initialPath?: string;
   readonly machineName?: string;
   readonly canSleepMachine?: boolean;
@@ -183,6 +208,8 @@ export interface FilesystemExplorerProps {
   readonly onInitialPathInvalid?: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onNewThread?: () => void;
+  readonly onOpenConnectors?: () => void;
+  readonly onCloseConnectors?: () => void;
   readonly onThreadResolved?: (threadId: string) => void;
   readonly onBackToMachines?: () => void;
   readonly onSleepMachine?: () => Promise<void>;
@@ -191,7 +218,9 @@ export interface FilesystemExplorerProps {
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentBaseUrl = "http://localhost:4000/agent",
+  capabilitiesBaseUrl,
   selectedThreadId = null,
+  workspacePanel,
   initialPath,
   machineName = "Machine",
   canSleepMachine = true,
@@ -200,6 +229,8 @@ export function FilesystemExplorer({
   onInitialPathInvalid,
   onSelectThread,
   onNewThread,
+  onOpenConnectors,
+  onCloseConnectors,
   onThreadResolved,
   onBackToMachines,
   onSleepMachine,
@@ -221,7 +252,10 @@ export function FilesystemExplorer({
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>("connecting");
+  const [internalWorkspacePanel, setInternalWorkspacePanel] = useState<WorkspacePanel>("chat");
+  const activeWorkspacePanel = workspacePanel ?? internalWorkspacePanel;
   const currentPath = listing?.path ?? "";
+  const currentDirectoryName = listing?.name ?? "workspace";
   const activeFileTab = activeFilePath === null
     ? null
     : openFileTabs.find((tab) => tab.path === activeFilePath) ?? null;
@@ -229,6 +263,12 @@ export function FilesystemExplorer({
     () => openFileTabs.map((tab) => tab.path).sort((left, right) => left.localeCompare(right)).join("\0"),
     [openFileTabs],
   );
+  const agentUiContext = useMemo<AgentUiContext>(() => ({
+    openFiles: openFileTabs.map((tab) => ({
+      path: tab.path,
+      isFocused: tab.path === activeFilePath,
+    })),
+  }), [activeFilePath, openFileTabs]);
   const onFilesystemOpenRef = useRef(onFilesystemOpen);
   const onPathChangeRef = useRef(onPathChange);
   const onInitialPathInvalidRef = useRef(onInitialPathInvalid);
@@ -263,9 +303,13 @@ export function FilesystemExplorer({
       onFileUpdates: ({ entries }) => {
         setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
       },
+      onViewState: (viewState) => {
+        setOpenFileTabs(viewState.openFiles.map(toOpenFileTab));
+        setActiveFilePath(null);
+      },
       onLoading: setIsFetching,
       onError: (message) => {
-        setListingError(message);
+        setListingError(toListingErrorMessage(message));
 
         if (
           message === null ||
@@ -281,7 +325,7 @@ export function FilesystemExplorer({
         didRetryInitialPath = true;
         onInitialPathInvalidRef.current?.(initialPathForConnection);
         void clientRef.current?.subscribe("").catch((error) => {
-          setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+          setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
           setIsFetching(false);
         });
       },
@@ -316,7 +360,7 @@ export function FilesystemExplorer({
     const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
 
     void clientRef.current?.watchFiles(paths).catch((error) => {
-      setListingError(error instanceof Error ? error.message : "Failed to watch open files.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to watch open files."));
     });
   }, [openFileWatchKey]);
 
@@ -326,6 +370,30 @@ export function FilesystemExplorer({
     setLeftPaneRatio(nextRatio);
     window.localStorage.setItem(LEFT_PANE_RATIO_STORAGE_KEY, String(nextRatio));
   }, []);
+
+  const showChatPanel = useCallback((): void => {
+    setInternalWorkspacePanel("chat");
+  }, []);
+
+  const showConnectorsPanel = useCallback((): void => {
+    setInternalWorkspacePanel("connectors");
+    onOpenConnectors?.();
+  }, [onOpenConnectors]);
+
+  const closeConnectorsPanel = useCallback((): void => {
+    setInternalWorkspacePanel("chat");
+    onCloseConnectors?.();
+  }, [onCloseConnectors]);
+
+  const handleNewThread = useCallback((): void => {
+    showChatPanel();
+    onNewThread?.();
+  }, [onNewThread, showChatPanel]);
+
+  const handleSelectThread = useCallback((thread: AgentThreadSummary): void => {
+    showChatPanel();
+    onSelectThread?.(thread);
+  }, [onSelectThread, showChatPanel]);
 
   const subscribeTo = useCallback(async (nextPath: string, shouldPushHistory: boolean): Promise<void> => {
     setIsFetching(true);
@@ -365,7 +433,7 @@ export function FilesystemExplorer({
   const navigateTo = useCallback(
     (nextPath: string) => {
       void subscribeTo(nextPath, true).catch((error) => {
-        setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+        setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
         setIsFetching(false);
       });
     },
@@ -468,7 +536,7 @@ export function FilesystemExplorer({
     const nextIndex = historyIndex - 1;
     setHistoryIndex(nextIndex);
     void subscribeTo(history[nextIndex] ?? "", false).catch((error) => {
-      setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
       setIsFetching(false);
     });
   }, [history, historyIndex, subscribeTo]);
@@ -481,7 +549,7 @@ export function FilesystemExplorer({
     const nextIndex = historyIndex + 1;
     setHistoryIndex(nextIndex);
     void subscribeTo(history[nextIndex] ?? "", false).catch((error) => {
-      setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
       setIsFetching(false);
     });
   }, [history, historyIndex, subscribeTo]);
@@ -497,7 +565,7 @@ export function FilesystemExplorer({
         setRenamingPath(entry.path);
       }
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to create folder.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to create folder."));
     }
   }, [currentPath]);
 
@@ -523,7 +591,7 @@ export function FilesystemExplorer({
         setActiveFilePath((currentActivePath) => currentActivePath === entry.path ? renamed.path : currentActivePath);
       }
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to rename item.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to rename item."));
     }
   }, []);
 
@@ -548,7 +616,7 @@ export function FilesystemExplorer({
         currentActivePath !== null && pathsToTrash.includes(currentActivePath) ? null : currentActivePath,
       );
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to move items to Trash.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to move items to Trash."));
     }
   }, []);
 
@@ -566,7 +634,7 @@ export function FilesystemExplorer({
       link.click();
       link.remove();
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to start download.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to start download."));
     }
   }, [websocketUrl]);
 
@@ -641,7 +709,7 @@ export function FilesystemExplorer({
         setSelectionAnchorPath(uploadedPaths[0] ?? null);
       }
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to upload items.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to upload items."));
       setIsFetching(false);
     } finally {
       setUploadProgress(null);
@@ -683,7 +751,7 @@ export function FilesystemExplorer({
           return;
         }
 
-        setListingError(error instanceof Error ? error.message : "Failed to upload folder.");
+        setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to upload folder."));
       });
   }, [uploadBrowserSources]);
 
@@ -718,6 +786,55 @@ export function FilesystemExplorer({
     [listing?.entries, selectionAnchorPath],
   );
 
+  const rightSidebar = (
+    <aside className="split-right-sidebar" aria-label="Right sidebar" aria-hidden={!isRightSidebarOpen}>
+      <div className="split-right-sidebar-actions">
+        <RightSidebarAction
+          icon={Add01Icon}
+          label="New Chat"
+          isActive={activeWorkspacePanel === "chat" && selectedThreadId === null}
+          onClick={handleNewThread}
+        />
+        <RightSidebarAction icon={Search01Icon} label="Search" />
+        <RightSidebarAction
+          icon={PlugSocketIcon}
+          label="Connectors"
+          isActive={activeWorkspacePanel === "connectors"}
+          onClick={showConnectorsPanel}
+        />
+      </div>
+      <RightSidebarChats
+        agentBaseUrl={agentBaseUrl}
+        isOpen={isRightSidebarOpen}
+        selectedThreadId={selectedThreadId}
+        onSelectThread={handleSelectThread}
+      />
+    </aside>
+  );
+
+  if (activeWorkspacePanel === "connectors") {
+    return (
+      <main
+        className="finder-shell"
+        data-right-sidebar-open={isRightSidebarOpen ? "true" : undefined}
+        data-workspace-panel="connectors"
+      >
+        <ConnectorsWorkspaceToolbar
+          isRightSidebarOpen={isRightSidebarOpen}
+          onBack={closeConnectorsPanel}
+          onToggleRightSidebar={() => setIsRightSidebarOpen((current) => !current)}
+        />
+        <section className="connectors-workspace-main" aria-label="Connectors">
+          <CapabilitiesPanel
+            capabilitiesBaseUrl={capabilitiesBaseUrl}
+            showTopbar={false}
+          />
+        </section>
+        {rightSidebar}
+      </main>
+    );
+  }
+
   return (
     <main className="finder-shell" data-right-sidebar-open={isRightSidebarOpen ? "true" : undefined}>
       <input
@@ -750,9 +867,9 @@ export function FilesystemExplorer({
         canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
         onBack={onBack}
         onForward={onForward}
-        title={listing?.name ?? "Desktop"}
+        title={currentDirectoryName}
         isFetching={isFetching}
-        onNewThread={onNewThread}
+        onNewThread={handleNewThread}
         isRightSidebarOpen={isRightSidebarOpen}
         onToggleRightSidebar={() => setIsRightSidebarOpen((current) => !current)}
         openFileTabs={openFileTabs}
@@ -768,8 +885,12 @@ export function FilesystemExplorer({
         agentBaseUrl={agentBaseUrl}
         selectedThreadId={selectedThreadId}
         currentPath={currentPath}
+        currentDirectoryName={currentDirectoryName}
+        workspacePanel={activeWorkspacePanel}
+        capabilitiesBaseUrl={capabilitiesBaseUrl}
+        uiContext={agentUiContext}
         onOpenFilePath={openFilePath}
-        onSelectThread={onSelectThread}
+        onSelectThread={handleSelectThread}
         onThreadResolved={onThreadResolved}
       >
         <div className="left-pane-surface-stack">
@@ -823,25 +944,7 @@ export function FilesystemExplorer({
           onSleep={onSleepMachine}
         />
       </DesktopSplitPane>
-      <aside className="split-right-sidebar" aria-label="Right sidebar" aria-hidden={!isRightSidebarOpen}>
-        <div className="split-right-sidebar-actions">
-          <RightSidebarAction
-            icon={Add01Icon}
-            label="New Chat"
-            onClick={() => {
-              onNewThread?.();
-            }}
-          />
-          <RightSidebarAction icon={Search01Icon} label="Search" />
-          <RightSidebarAction icon={PlugSocketIcon} label="Connectors" />
-        </div>
-        <RightSidebarChats
-          agentBaseUrl={agentBaseUrl}
-          isOpen={isRightSidebarOpen}
-          selectedThreadId={selectedThreadId}
-          onSelectThread={onSelectThread}
-        />
-      </aside>
+      {rightSidebar}
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
     </main>
   );
@@ -891,14 +994,21 @@ const UploadProgressDialog = ({
 
 const RightSidebarAction = ({
   icon,
+  isActive = false,
   label,
   onClick,
 }: {
   readonly icon: IconSvgElement;
+  readonly isActive?: boolean;
   readonly label: string;
   readonly onClick?: () => void;
 }): React.ReactElement => (
-  <button className="split-right-sidebar-action" type="button" onClick={onClick}>
+  <button
+    className={isActive ? "split-right-sidebar-action active" : "split-right-sidebar-action"}
+    type="button"
+    aria-pressed={isActive}
+    onClick={onClick}
+  >
     <HugeiconsIcon icon={icon} size={16} color="currentColor" strokeWidth={1.8} />
     <span>{label}</span>
   </button>
@@ -915,44 +1025,50 @@ const RightSidebarChats = ({
   readonly selectedThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
-  const [groups, setGroups] = useState<AgentThreadGroup[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const hasThreads = groups.some((group) => group.threads.length > 0);
+  const runtime = useOptionalAgentRuntime();
 
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
+  if (runtime === null) {
+    return (
+      <AgentRuntimeProvider agentBaseUrl={agentBaseUrl}>
+        <RightSidebarChats
+          agentBaseUrl={agentBaseUrl}
+          isOpen={isOpen}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={onSelectThread}
+        />
+      </AgentRuntimeProvider>
+    );
+  }
 
-    let isCurrent = true;
-    setIsLoading(true);
-    setError(null);
+  return (
+    <RightSidebarChatsContent
+      isOpen={isOpen}
+      selectedThreadId={selectedThreadId}
+      onSelectThread={onSelectThread}
+    />
+  );
+};
 
-    void retrieveAgentThreadGroups(agentBaseUrl)
-      .then((nextGroups) => {
-        if (isCurrent) {
-          setGroups(nextGroups);
-          setHasLoaded(true);
-        }
-      })
-      .catch((reason) => {
-        if (isCurrent) {
-          setError(reason instanceof Error ? reason.message : "Failed to load chats.");
-          setHasLoaded(true);
-        }
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [agentBaseUrl, isOpen]);
+const RightSidebarChatsContent = ({
+  isOpen,
+  selectedThreadId,
+  onSelectThread,
+}: {
+  readonly isOpen: boolean;
+  readonly selectedThreadId: string | null;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+}): React.ReactElement => {
+  useAgentThreadGroupsQuery({ enabled: isOpen });
+  const groups = useAgentThreadListStore((state) => state.groups);
+  const isLoading = useAgentThreadListStore((state) => state.isLoading);
+  const hasLoaded = useAgentThreadListStore((state) => state.hasLoaded);
+  const error = useAgentThreadListStore((state) => state.error);
+  const hasThreads = useAgentThreadListStore(selectHasThreads);
+  const activeRun = useAgentChatStore((state) => state.activeRun);
+  const activeThreadSummary = useAgentChatStore((state) => state.threadSummary);
+  const activeStreamingThreadId = activeRun === null
+    ? null
+    : activeRun.threadId ?? activeThreadSummary?.id ?? null;
 
   return (
     <section className="split-right-sidebar-chats" aria-label="Chats">
@@ -969,6 +1085,7 @@ const RightSidebarChats = ({
                 key={group.path}
                 group={group}
                 selectedThreadId={selectedThreadId}
+                activeStreamingThreadId={activeStreamingThreadId}
                 onSelectThread={onSelectThread}
               />
             ),
@@ -984,18 +1101,20 @@ const RightSidebarChats = ({
 const RightSidebarChatGroup = ({
   group,
   selectedThreadId,
+  activeStreamingThreadId,
   onSelectThread,
 }: {
   readonly group: AgentThreadGroup;
   readonly selectedThreadId: string | null;
+  readonly activeStreamingThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
-  const label = group.path.trim().length === 0 ? "Desktop" : group.path;
+  const label = group.path.trim().length === 0 ? "workspace" : group.path;
   const hasSelectedThread = group.threads.some((thread) => thread.id === selectedThreadId);
   const [isExpanded, setIsExpanded] = useState(hasSelectedThread);
   const [isShowingAll, setIsShowingAll] = useState(false);
   const visibleThreads = isShowingAll ? group.threads : group.threads.slice(0, 5);
-  const hasMoreThreads = group.threads.length > visibleThreads.length;
+  const canToggleVisibleThreads = group.threads.length > 5;
 
   useEffect(() => {
     if (hasSelectedThread) {
@@ -1039,17 +1158,18 @@ const RightSidebarChatGroup = ({
                 key={thread.id}
                 thread={thread}
                 isSelected={thread.id === selectedThreadId}
+                isStreaming={thread.isStreaming === true || thread.id === activeStreamingThreadId}
                 onSelectThread={onSelectThread}
               />
             ))}
-            {hasMoreThreads ? (
+            {canToggleVisibleThreads ? (
               <button
                 className="split-right-sidebar-show-more"
                 type="button"
-                onClick={() => setIsShowingAll(true)}
+                onClick={() => setIsShowingAll((current) => !current)}
                 tabIndex={isExpanded ? 0 : -1}
               >
-                Show more
+                {isShowingAll ? "Show less" : "Show more"}
               </button>
             ) : null}
           </div>
@@ -1062,10 +1182,12 @@ const RightSidebarChatGroup = ({
 const RightSidebarChatItem = ({
   thread,
   isSelected,
+  isStreaming,
   onSelectThread,
 }: {
   readonly thread: AgentThreadSummary;
   readonly isSelected: boolean;
+  readonly isStreaming: boolean;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
   const updatedLabel = useMemo(() => formatSidebarChatDate(thread.updatedAt), [thread.updatedAt]);
@@ -1078,7 +1200,11 @@ const RightSidebarChatItem = ({
       onClick={() => onSelectThread?.(thread)}
     >
       <span className="split-right-sidebar-chat-title">{thread.title}</span>
-      <span className="split-right-sidebar-chat-meta">{updatedLabel}</span>
+      <span className="split-right-sidebar-chat-meta">
+        {isStreaming ? (
+          <span className="split-right-sidebar-chat-spinner" aria-label="Streaming" />
+        ) : updatedLabel}
+      </span>
     </button>
   );
 };
@@ -1234,7 +1360,7 @@ const MachineStatusControl = ({
           setIsOpen((current) => !current);
         }}
       >
-        <HugeiconsIcon icon={PowerIcon} size={14} color="currentColor" strokeWidth={1.8} />
+        <HugeiconsIcon icon={PowerIcon} size={12} color="currentColor" strokeWidth={1.8} />
         <span className="machine-status-label">{machineName}</span>
         <ConnectionStatusIndicator status={status} />
       </button>
@@ -1264,6 +1390,33 @@ const getFilesystemConnectionLabel = (status: FilesystemConnectionStatus): strin
       return "Disconnected";
   }
 };
+
+const ConnectorsWorkspaceToolbar = ({
+  isRightSidebarOpen,
+  onBack,
+  onToggleRightSidebar,
+}: {
+  readonly isRightSidebarOpen: boolean;
+  readonly onBack: () => void;
+  readonly onToggleRightSidebar: () => void;
+}): React.ReactElement => (
+  <div className="connectors-workspace-toolbar">
+    <button className="connectors-back-button" type="button" onClick={onBack}>
+      <span aria-hidden="true">
+        <HugeiconsIcon icon={ArrowLeft01Icon} size={17} color="currentColor" strokeWidth={1.8} />
+      </span>
+      Back
+    </button>
+    <ToolbarButton
+      onClick={onToggleRightSidebar}
+      ariaLabel={isRightSidebarOpen ? "Close right sidebar" : "Open right sidebar"}
+      title={isRightSidebarOpen ? "Close right sidebar" : "Open right sidebar"}
+      pressed={isRightSidebarOpen}
+    >
+      <HugeiconsIcon icon={SidebarRightIcon} size={18} color="currentColor" strokeWidth={1.8} />
+    </ToolbarButton>
+  </div>
+);
 
 const FinderToolbar = ({
   canGoBack,
@@ -2168,6 +2321,10 @@ const DesktopSplitPane = ({
   agentBaseUrl,
   selectedThreadId,
   currentPath,
+  currentDirectoryName,
+  workspacePanel,
+  capabilitiesBaseUrl,
+  uiContext,
   onOpenFilePath,
   onSelectThread,
   onThreadResolved,
@@ -2178,6 +2335,10 @@ const DesktopSplitPane = ({
   readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
+  readonly currentDirectoryName: string;
+  readonly workspacePanel: WorkspacePanel;
+  readonly capabilitiesBaseUrl?: string;
+  readonly uiContext: AgentUiContext;
   readonly onOpenFilePath: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
@@ -2250,15 +2411,24 @@ const DesktopSplitPane = ({
           <div className="split-resizer-handle" />
         </div>
 
-        <aside className="split-preview" aria-label="Preview panel">
-          <AgentPanel
-            agentBaseUrl={agentBaseUrl}
-            selectedThreadId={selectedThreadId}
-            currentPath={currentPath}
-            onOpenFilePath={onOpenFilePath}
-            onSelectThread={onSelectThread}
-            onThreadResolved={onThreadResolved}
-          />
+        <aside
+          className="split-preview"
+          aria-label={workspacePanel === "connectors" ? "Connectors panel" : "Preview panel"}
+        >
+          {workspacePanel === "connectors" ? (
+            <CapabilitiesPanel capabilitiesBaseUrl={capabilitiesBaseUrl} />
+          ) : (
+            <AgentPanel
+              agentBaseUrl={agentBaseUrl}
+              selectedThreadId={selectedThreadId}
+              currentPath={currentPath}
+              currentDirectoryName={currentDirectoryName}
+              uiContext={uiContext}
+              onOpenFilePath={onOpenFilePath}
+              onSelectThread={onSelectThread}
+              onThreadResolved={onThreadResolved}
+            />
+          )}
         </aside>
       </div>
     </div>

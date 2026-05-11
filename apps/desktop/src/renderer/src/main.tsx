@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { CloudApp, CloudRuntimeProvider } from "@ank1015-app/ui";
 import "@ank1015-app/ui/filesystem.css";
 import "@ank1015-app/ui/cloud.css";
+import "katex/dist/katex.min.css";
+import "streamdown/styles.css";
 import "./style.css";
 import { DesktopUpdatePrompt } from "./update-prompt";
 

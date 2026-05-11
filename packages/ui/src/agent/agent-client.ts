@@ -3,6 +3,7 @@ import type {
   AgentRunEvent,
   AgentThread,
   AgentThreadGroup,
+  AgentUiContext,
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 5000;
@@ -48,6 +49,19 @@ export interface StartAgentRunInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
+}
+
+export interface SteerAgentRunInput {
+  readonly threadId: string;
+  readonly runId: string;
+  readonly path: string;
+  readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
+}
+
+export interface SteerAgentRunResult {
+  readonly turnId: string;
 }
 
 export interface AgentRunCallbacks {
@@ -60,6 +74,7 @@ export interface AgentRunCallbacks {
 export interface AgentRunHandle {
   readonly cancel: () => void;
   readonly close: () => void;
+  readonly done: Promise<void>;
 }
 
 export const startAgentRun = (
@@ -75,6 +90,30 @@ export const startAgentRun = (
     method: "POST",
     url: buildAgentUrl(agentBaseUrl, "/runs").toString(),
     body: JSON.stringify({ ...input, clientRunId }),
+  });
+
+  return createRunHandle(state);
+};
+
+export const editAgentThreadUserMessage = (
+  agentBaseUrl: string,
+  input: Required<Pick<StartAgentRunInput, "threadId">> & StartAgentRunInput,
+  callbacks: AgentRunCallbacks,
+): AgentRunHandle => {
+  const requestId = createRequestId();
+  const clientRunId = createRequestId();
+  const state = createRunStreamState(agentBaseUrl, callbacks, requestId);
+
+  void runStreamLoop(state, {
+    method: "POST",
+    url: buildAgentUrl(agentBaseUrl, `/threads/${encodeURIComponent(input.threadId)}/edit`).toString(),
+    body: JSON.stringify({
+      path: input.path,
+      content: input.content,
+      uiContext: input.uiContext,
+      numTurns: 1,
+      clientRunId,
+    }),
   });
 
   return createRunHandle(state);
@@ -106,6 +145,26 @@ export const resumeAgentRun = (
   return createRunHandle(state);
 };
 
+export const steerAgentRun = async (
+  agentBaseUrl: string,
+  input: SteerAgentRunInput,
+): Promise<SteerAgentRunResult> => {
+  return fetchJson<SteerAgentRunResult>(
+    buildAgentUrl(
+      agentBaseUrl,
+      `/threads/${encodeURIComponent(input.threadId)}/runs/${encodeURIComponent(input.runId)}/steer`,
+    ),
+    {
+      method: "POST",
+      body: JSON.stringify({
+        path: input.path,
+        content: input.content,
+        uiContext: input.uiContext,
+      }),
+    },
+  );
+};
+
 interface RunStreamState {
   readonly agentBaseUrl: string;
   readonly callbacks: AgentRunCallbacks;
@@ -118,6 +177,10 @@ interface RunStreamState {
   cancelRequestSent: boolean;
   closed: boolean;
   ended: boolean;
+  settled: boolean;
+  readonly done: Promise<void>;
+  readonly resolveDone: () => void;
+  readonly rejectDone: (error: Error) => void;
 }
 
 interface RunStreamRequest {
@@ -140,21 +203,35 @@ const createRunStreamState = (
   agentBaseUrl: string,
   callbacks: AgentRunCallbacks,
   requestId: string,
-): RunStreamState => ({
-  agentBaseUrl,
-  callbacks,
-  requestId,
-  abortController: new AbortController(),
-  runId: null,
-  threadId: null,
-  lastEventId: 0,
-  cancelWhenReady: false,
-  cancelRequestSent: false,
-  closed: false,
-  ended: false,
-});
+): RunStreamState => {
+  let resolveDone: () => void = () => {};
+  let rejectDone: (error: Error) => void = () => {};
+  const done = new Promise<void>((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+
+  return {
+    agentBaseUrl,
+    callbacks,
+    requestId,
+    abortController: new AbortController(),
+    runId: null,
+    threadId: null,
+    lastEventId: 0,
+    cancelWhenReady: false,
+    cancelRequestSent: false,
+    closed: false,
+    ended: false,
+    settled: false,
+    done,
+    resolveDone,
+    rejectDone,
+  };
+};
 
 const createRunHandle = (state: RunStreamState): AgentRunHandle => ({
+  done: state.done,
   cancel: () => {
     state.cancelWhenReady = true;
     void sendCancelIfReady(state);
@@ -162,6 +239,7 @@ const createRunHandle = (state: RunStreamState): AgentRunHandle => ({
   close: () => {
     state.closed = true;
     state.abortController.abort();
+    settleRun(state);
   },
 });
 
@@ -257,11 +335,13 @@ const handleRunStreamMessage = (state: RunStreamState, message: AgentSseMessage)
       runId: message.data.runId,
       threadId: message.data.threadId,
     });
+    settleRun(state);
     return;
   }
 
   state.ended = true;
   state.callbacks.onError?.(new Error(message.data.message));
+  settleRun(state, new Error(message.data.message));
 };
 
 const sendCancelIfReady = async (state: RunStreamState): Promise<void> => {
@@ -294,14 +374,41 @@ const failRun = (state: RunStreamState, error: Error): void => {
 
   state.ended = true;
   state.callbacks.onError?.(error);
+  settleRun(state, error);
 };
 
-const fetchJson = async <TResponse>(url: URL): Promise<TResponse> => {
+const settleRun = (state: RunStreamState, error?: Error): void => {
+  if (state.settled) {
+    return;
+  }
+
+  state.settled = true;
+  if (error === undefined) {
+    state.resolveDone();
+    return;
+  }
+
+  state.rejectDone(error);
+};
+
+const fetchJson = async <TResponse>(
+  url: URL,
+  init: RequestInit = {},
+): Promise<TResponse> => {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const headers = new Headers(init.headers);
+    if (init.body !== undefined && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+
+    const response = await fetch(url, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
 
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));

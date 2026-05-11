@@ -13,6 +13,7 @@ import type {
   FilesystemListing,
   FilesystemServerMessage,
   FilesystemRoot,
+  FilesystemViewState,
   SnapshotReason,
 } from "./types.js";
 
@@ -27,6 +28,10 @@ export const attachFilesystemWebSocketServer = (
   options: FilesystemWebSocketOptions,
 ): WebSocketServer => {
   const socketServer = new WebSocketServer({ noServer: true });
+  const viewState: MutableFilesystemViewState = {
+    currentPath: null,
+    openFilePaths: [],
+  };
   attachWebSocketUpgradeRoute(server, "/filesystem", socketServer);
 
   socketServer.on("connection", (webSocket, request) => {
@@ -38,6 +43,7 @@ export const attachFilesystemWebSocketServer = (
       ...options,
       initialPath,
       showHidden,
+      viewState,
     }).start();
   });
 
@@ -56,6 +62,12 @@ export const createFilesystemServer = (
 interface FilesystemSocketSessionOptions extends FilesystemWebSocketOptions {
   readonly initialPath?: string;
   readonly showHidden: boolean;
+  readonly viewState: MutableFilesystemViewState;
+}
+
+interface MutableFilesystemViewState {
+  currentPath: string | null;
+  openFilePaths: string[];
 }
 
 class FilesystemSocketSession {
@@ -84,10 +96,12 @@ class FilesystemSocketSession {
   }
 
   async start(): Promise<void> {
+    const initialViewState = await this.readViewState();
     this.send({
       type: "hello",
       root: { name: this.options.root.name, path: "" },
       serverTime: new Date().toISOString(),
+      viewState: initialViewState,
     });
 
     this.webSocket.on("message", (data) => {
@@ -100,7 +114,8 @@ class FilesystemSocketSession {
       void this.close();
     });
 
-    await this.subscribe(this.options.initialPath, undefined, this.showHidden, "subscribe");
+    const initialPath = await this.resolveInitialPath();
+    await this.subscribe(initialPath, undefined, this.showHidden, "subscribe");
   }
 
   private async handleRawMessage(data: WebSocket.RawData): Promise<void> {
@@ -124,6 +139,7 @@ class FilesystemSocketSession {
           break;
         case "watchFiles":
           await this.replaceFileWatcher(message.paths);
+          this.options.viewState.openFilePaths = this.openFilePaths;
           this.send({ type: "ack", requestId: message.requestId, action: "watchFiles", result: { paths: this.openFilePaths } });
           await this.publishFileUpdates("subscription");
           break;
@@ -169,9 +185,25 @@ class FilesystemSocketSession {
   ): Promise<void> {
     const listing = await this.service.listDirectory(rawPath, showHidden);
     this.activePath = listing.path;
+    this.options.viewState.currentPath = listing.path;
     this.showHidden = showHidden;
     await this.replaceWatcher(this.activePath);
     this.send({ type: "snapshot", requestId, reason, listing });
+  }
+
+  private async resolveInitialPath(): Promise<string | undefined> {
+    const rememberedPath = this.options.viewState.currentPath;
+
+    if (rememberedPath !== null) {
+      try {
+        await this.service.listDirectory(rememberedPath, this.showHidden);
+        return rememberedPath;
+      } catch {
+        this.options.viewState.currentPath = null;
+      }
+    }
+
+    return this.options.initialPath;
   }
 
   private async replaceFileWatcher(paths: readonly string[]): Promise<void> {
@@ -271,7 +303,28 @@ class FilesystemSocketSession {
 
   private async publishSnapshot(reason: SnapshotReason, requestId?: string): Promise<void> {
     const listing = await this.service.listDirectory(this.activePath, this.showHidden);
+    this.options.viewState.currentPath = listing.path;
     this.send({ type: "snapshot", requestId, reason, listing });
+  }
+
+  private async readViewState(): Promise<FilesystemViewState> {
+    const openFiles = (
+      await Promise.all(this.options.viewState.openFilePaths.map(async (path) => {
+        try {
+          const entry = await this.service.getEntry(path);
+          return entry.type === "file" ? entry : undefined;
+        } catch {
+          return undefined;
+        }
+      }))
+    ).filter((entry): entry is FilesystemEntry => entry !== undefined);
+
+    this.options.viewState.openFilePaths = openFiles.map((entry) => entry.path);
+
+    return {
+      currentPath: this.options.viewState.currentPath,
+      openFiles,
+    };
   }
 
   private async replaceWatcher(clientPath: string): Promise<void> {

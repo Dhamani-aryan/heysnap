@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { AgentError } from "./errors.js";
 import type {
   AgentContent,
+  EditThreadUserMessageInput,
   AgentMessage,
   AgentRunEvent,
   AgentThread,
@@ -13,6 +14,8 @@ import type {
   RetrieveThreadsInput,
   RetrieveThreadsResult,
   SendMessageInput,
+  SteerRunInput,
+  SteerRunResult,
   UserMessage,
 } from "./types.js";
 
@@ -216,8 +219,28 @@ export class MockAgentHarness implements IAgentHarness {
     yield { ...base("thread.updated", now + 3), thread: toThreadSummary(thread) };
   }
 
+  async *editThreadUserMessage(input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent> {
+    const thread = this.threads.get(input.threadId);
+
+    if (thread === undefined) {
+      throw new AgentError("THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    rollbackThread(thread, input.numTurns);
+
+    yield* this.sendMessage({
+      threadId: input.threadId,
+      path: input.path,
+      content: input.content,
+    });
+  }
+
   async cancelRun(): Promise<void> {
     return Promise.resolve();
+  }
+
+  async steerRun(input: SteerRunInput): Promise<SteerRunResult> {
+    return Promise.resolve({ turnId: input.runId });
   }
 }
 
@@ -233,6 +256,31 @@ const createThread = (input: SendMessageInput, now: number): AgentThread => ({
   activities: [],
   proposedPlans: [],
 });
+
+const rollbackThread = (thread: MutableAgentThread, numTurns: number): void => {
+  let userMessagesSeen = 0;
+
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    const message = thread.messages[index];
+
+    if (message?.role !== "user") {
+      continue;
+    }
+
+    userMessagesSeen += 1;
+
+    if (userMessagesSeen === numTurns) {
+      thread.messages.splice(index);
+      thread.activities.splice(0);
+      thread.proposedPlans?.splice(0);
+      thread.messageCount = thread.messages.filter((candidate) => candidate.role === "user").length;
+      thread.updatedAt = Date.now();
+      return;
+    }
+  }
+
+  throw new AgentError("TURN_NOT_FOUND", "Could not find a user turn to edit");
+};
 
 const createSeedThreads = (): MutableAgentThread[] => {
   const now = Date.now();

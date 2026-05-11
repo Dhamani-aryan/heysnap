@@ -84,6 +84,6 @@ const createAccessSession = (input: {
   routes: {
     filesystemWebSocketUrl: "/filesystem",
     agentBaseUrl: "/agent",
-    capabilitiesWebSocketUrl: "/capabilities",
+    capabilitiesBaseUrl: "/capabilities",
   },
 });

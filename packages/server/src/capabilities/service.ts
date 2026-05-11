@@ -87,6 +87,14 @@ export class AgentCapabilitiesService {
     return this.snapshot();
   }
 
+  async refreshToolStatuses(): Promise<CapabilitiesSnapshot> {
+    await this.ensureInitialized();
+    for (const tool of this.catalog.tools) {
+      await this.refreshToolStatus(tool.id);
+    }
+    return this.snapshot();
+  }
+
   async installTool(toolId: string, onProgress: (progress: CapabilityProgress) => void = () => {}): Promise<AgentToolSnapshot> {
     const tool = this.requireTool(toolId);
     await this.ensureInitialized();
@@ -184,11 +192,35 @@ export class AgentCapabilitiesService {
       await this.installTool(tool.id, onProgress);
     }
 
-    const command = runInteractive(tool.connect, {
+    let command: InteractiveRunResult | null = null;
+    let pendingGitHubAutoInputs = 0;
+    const maybeWriteGitHubAutoInputs = (): void => {
+      if (
+        tool.id !== "github" ||
+        pendingGitHubAutoInputs === 0 ||
+        command === null
+      ) {
+        return;
+      }
+
+      while (pendingGitHubAutoInputs > 0) {
+        pendingGitHubAutoInputs -= 1;
+        command.writeInput("\n");
+      }
+    };
+
+    command = runInteractive(tool.connect, {
       env: this.commandEnv(),
       timeoutMs: COMMAND_TIMEOUT_MS * 5,
-      onOutput: (chunk) => onProgress({ message: chunk.trim() }),
+      onOutput: (chunk) => {
+        if (isGitHubAutoAdvancePrompt(chunk)) {
+          pendingGitHubAutoInputs += 1;
+          maybeWriteGitHubAutoInputs();
+        }
+        onProgress({ message: chunk.trim() });
+      },
     });
+    maybeWriteGitHubAutoInputs();
 
     return {
       writeInput: command.writeInput,
@@ -890,6 +922,10 @@ const respondToTerminalQueries = (child: { write(data: string): void }, text: st
     child.write("\x1b[1;1R");
   }
 };
+
+const isGitHubAutoAdvancePrompt = (text: string): boolean =>
+  text.includes("Authenticate Git with your GitHub credentials?") ||
+  (text.includes("Press Enter") && text.includes("github.com"));
 
 const killPty = (pid: number): void => {
   try {

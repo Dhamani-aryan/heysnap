@@ -1,13 +1,14 @@
 "use client";
 
-import { ArrowUp02Icon, Pdf02Icon, PlusSignIcon, StopIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp02Icon, Folder01Icon, Pdf02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AgentContent } from "./types";
 
 const PDF_MIME_TYPE = "application/pdf";
-const ATTACHMENT_ACCEPT = `image/*,${PDF_MIME_TYPE}`;
+const ATTACHMENT_ACCEPT = "";
+const DEFAULT_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 const PROMPT_MAX_HEIGHT = 220;
 
 export type PromptAttachment = {
@@ -21,8 +22,10 @@ export type PromptAttachment = {
 
 export interface RightPromptComposerProps {
   readonly isRunning?: boolean;
+  readonly draftSeed?: { readonly id: number; readonly text: string } | null;
+  readonly activeFolderName?: string;
   readonly onCancel?: () => void;
-  readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void;
+  readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void | Promise<boolean | void>;
 }
 
 const getAttachmentId = (): string => {
@@ -49,14 +52,6 @@ const formatAttachmentSize = (size: number | undefined): string | null => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const isSupportedAttachmentFile = (file: File): boolean => {
-  if (file.type === PDF_MIME_TYPE) {
-    return true;
-  }
-
-  return file.type.startsWith("image/");
-};
-
 const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   let binary = "";
   const bytes = new Uint8Array(buffer);
@@ -73,9 +68,9 @@ const toPromptAttachment = async (file: File): Promise<PromptAttachment> => {
 
   return {
     id: getAttachmentId(),
-    type: file.type === PDF_MIME_TYPE ? "file" : "image",
+    type: file.type.startsWith("image/") ? "image" : "file",
     fileName: file.name,
-    mimeType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? PDF_MIME_TYPE : ""),
+    mimeType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? PDF_MIME_TYPE : DEFAULT_ATTACHMENT_MIME_TYPE),
     size: file.size,
     content,
   };
@@ -111,6 +106,8 @@ const toAgentContent = (text: string, attachments: readonly PromptAttachment[]):
 
 export const RightPromptComposer = ({
   isRunning = false,
+  draftSeed = null,
+  activeFolderName,
   onCancel,
   onSubmit,
 }: RightPromptComposerProps): React.ReactElement => {
@@ -118,6 +115,7 @@ export const RightPromptComposer = ({
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
@@ -134,6 +132,16 @@ export const RightPromptComposer = ({
     textarea.style.height = `${Math.min(textarea.scrollHeight, PROMPT_MAX_HEIGHT)}px`;
   }, [draft]);
 
+  useEffect(() => {
+    if (draftSeed === null) {
+      return;
+    }
+
+    setDraft(draftSeed.text);
+    setAttachmentError(null);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [draftSeed]);
+
   const handleAttachmentFiles = async (files: FileList | File[]): Promise<void> => {
     const nextFiles = Array.from(files);
 
@@ -141,20 +149,10 @@ export const RightPromptComposer = ({
       return;
     }
 
-    const supported = nextFiles.filter(isSupportedAttachmentFile);
-    const rejected = nextFiles.filter((file) => !isSupportedAttachmentFile(file));
-
-    setAttachmentError(rejected.length > 0 ? "Only images and PDFs are supported." : null);
-
-    if (supported.length === 0) {
-      if (fileInputRef.current !== null) {
-        fileInputRef.current.value = "";
-      }
-      return;
-    }
+    setAttachmentError(null);
 
     try {
-      const nextAttachments = await Promise.all(supported.map((file) => toPromptAttachment(file)));
+      const nextAttachments = await Promise.all(nextFiles.map((file) => toPromptAttachment(file)));
       setAttachments((current) => [...current, ...nextAttachments]);
     } catch (error) {
       setAttachmentError(error instanceof Error ? error.message : "Failed to read attachment.");
@@ -165,34 +163,43 @@ export const RightPromptComposer = ({
     }
   };
 
-  const handleSubmit = (): void => {
-    if (isRunning || !canSubmit) {
+  const handleSubmit = async (): Promise<void> => {
+    if (!canSubmit || isSubmitting) {
       return;
     }
 
-    const didSubmit = onSubmit?.({ content: toAgentContent(draft, attachments) });
+    setIsSubmitting(true);
 
-    if (didSubmit === false) {
-      return;
-    }
+    try {
+      const didSubmit = await onSubmit?.({ content: toAgentContent(draft, attachments) });
 
-    setDraft("");
-    setAttachments([]);
-    setAttachmentError(null);
+      if (didSubmit === false) {
+        return;
+      }
 
-    if (fileInputRef.current !== null) {
-      fileInputRef.current.value = "";
+      setDraft("");
+      setAttachments([]);
+      setAttachmentError(null);
+
+      if (fileInputRef.current !== null) {
+        fileInputRef.current.value = "";
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handlePrimaryAction = (): void => {
-    if (isRunning) {
+    if (isRunning && !canSubmit) {
       onCancel?.();
       return;
     }
 
-    handleSubmit();
+    void handleSubmit();
   };
+
+  const isAbortAction = isRunning && !canSubmit;
+  const isSendAction = !isAbortAction;
 
   return (
     <div
@@ -286,24 +293,33 @@ export const RightPromptComposer = ({
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            handleSubmit();
+            void handleSubmit();
           }
         }}
       />
 
       <div className="prompt-actions">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            fileInputRef.current?.click();
-          }}
-          className="prompt-attachment-button"
-          aria-label="Add attachment"
-          title="Add attachment"
-        >
-          <HugeiconsIcon icon={PlusSignIcon} size={18} color="currentColor" strokeWidth={1.9} />
-        </button>
+        <div className="prompt-leading-actions">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            className="prompt-attachment-button"
+            aria-label="Add attachment"
+            title="Add attachment"
+          >
+            <HugeiconsIcon icon={PlusSignIcon} size={18} color="currentColor" strokeWidth={1.9} />
+          </button>
+
+          {activeFolderName === undefined ? null : (
+            <div className="prompt-folder-chip" title={activeFolderName} aria-label={`Current folder: ${activeFolderName}`}>
+              <HugeiconsIcon icon={Folder01Icon} size={14} color="currentColor" strokeWidth={1.9} />
+              <span>{activeFolderName}</span>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
@@ -311,21 +327,25 @@ export const RightPromptComposer = ({
             event.stopPropagation();
             handlePrimaryAction();
           }}
-          disabled={!isRunning && !canSubmit}
-          className={isRunning ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
-          aria-label={isRunning ? "Stop response" : "Send prompt"}
-          title={isRunning ? "Stop response" : "Send prompt"}
+          disabled={isSubmitting || (!isRunning && !canSubmit)}
+          className={isAbortAction ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
+          aria-label={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
+          title={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
         >
-          <HugeiconsIcon
-            icon={isRunning ? StopIcon : ArrowUp02Icon}
-            size={isRunning ? 13 : 16}
-            color="currentColor"
-            strokeWidth={1.9}
-          />
+          {isSendAction ? (
+            <HugeiconsIcon
+              icon={ArrowUp02Icon}
+              size={16}
+              color="currentColor"
+              strokeWidth={1.9}
+            />
+          ) : (
+            <span className="prompt-stop-square" aria-hidden="true" />
+          )}
         </button>
       </div>
 
-      {isDragActive ? <div className="prompt-drop-overlay">Drop images or PDFs to attach</div> : null}
+      {isDragActive ? <div className="prompt-drop-overlay">Drop files to attach</div> : null}
     </div>
   );
 };

@@ -26,7 +26,7 @@ const assistantMessage: AgentMessage = {
 };
 
 describe("timeline model", () => {
-  it("places a fixed status row directly after user messages", () => {
+  it("places a stable status row directly after user messages", () => {
     const rows = deriveTimelineRows({
       messages: [userMessage, assistantMessage],
       isWorking: false,
@@ -53,6 +53,35 @@ describe("timeline model", () => {
     });
 
     expect(rows.filter((row) => row.kind === "status").map((row) => row.state)).toEqual(["worked", "working"]);
+  });
+
+  it("shows only the latest assistant message for a user turn", () => {
+    const firstAssistant: AgentMessage = {
+      ...assistantMessage,
+      id: "assistant-older",
+      content: [
+        {
+          type: "response" as const,
+          response: [{ type: "text" as const, content: "Older commentary." }],
+        },
+      ],
+    };
+    const latestAssistant: AgentMessage = {
+      ...assistantMessage,
+      id: "assistant-latest",
+      content: [
+        {
+          type: "response" as const,
+          response: [{ type: "text" as const, content: "Latest commentary." }],
+        },
+      ],
+    };
+    const rows = deriveTimelineRows({
+      messages: [userMessage, firstAssistant, latestAssistant],
+      isWorking: true,
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["message:user-1", "status:user-1", "message:assistant-latest"]);
   });
 
   it("reuses assistant row objects when only the run status changes", () => {

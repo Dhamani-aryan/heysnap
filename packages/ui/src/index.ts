@@ -16,6 +16,8 @@ export type {
 } from "./cloud/cloud-client";
 export { AgentPanel } from "./agent/agent-panel";
 export type { AgentPanelProps } from "./agent/agent-panel";
+export { AgentRuntimeProvider, useAgentChatStore, useAgentThreadListStore } from "./agent/agent-runtime";
+export type { AgentRuntimeProviderProps } from "./agent/agent-runtime";
 export { AgentEmptyThread } from "./agent/empty-thread";
 export { RightPromptComposer } from "./agent/prompt-composer";
 export type { PromptAttachment, RightPromptComposerProps } from "./agent/prompt-composer";

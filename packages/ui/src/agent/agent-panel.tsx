@@ -1,275 +1,107 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useStore } from "zustand";
-
-import { getAgentThread, resumeAgentRun, startAgentRun, type AgentRunHandle } from "./agent-client";
 import {
-  createAgentChatStore,
-  type ActiveRunState,
-  type AgentChatStore,
-} from "./agent-store";
+  useAgentEditUserMessageMutation,
+  useAgentRunMutation,
+  useAgentThreadQuery,
+  useCloseAgentRuntimeRunOnUnmount,
+} from "./agent-queries";
+import {
+  AgentRuntimeProvider,
+  useAgentChatStore,
+  useOptionalAgentRuntime,
+} from "./agent-runtime";
 import { AgentEmptyThread } from "./empty-thread";
 import { RightPromptComposer } from "./prompt-composer";
 import { AgentTimeline } from "./timeline";
-import type {
-  AgentContent,
-  AgentMessage,
-  AgentRunEvent,
-  AgentThreadSummary,
-  UserMessage,
-} from "./types";
+import type { AgentThreadSummary, AgentUiContext } from "./types";
 
 export interface AgentPanelProps {
   readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
+  readonly currentDirectoryName: string;
+  readonly uiContext?: AgentUiContext;
   readonly workspaceRoot?: string;
   readonly onOpenFilePath?: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
 }
 
-export const AgentPanel = ({
-  agentBaseUrl,
+export const AgentPanel = (props: AgentPanelProps): React.ReactElement => {
+  const runtime = useOptionalAgentRuntime();
+
+  if (runtime === null) {
+    return (
+      <AgentRuntimeProvider agentBaseUrl={props.agentBaseUrl}>
+        <AgentPanelContent {...props} />
+      </AgentRuntimeProvider>
+    );
+  }
+
+  return <AgentPanelContent {...props} />;
+};
+
+const AgentPanelContent = ({
   selectedThreadId,
   currentPath,
+  currentDirectoryName,
+  uiContext,
   workspaceRoot,
   onOpenFilePath,
   onSelectThread,
   onThreadResolved,
 }: AgentPanelProps): React.ReactElement => {
-  const store = useAgentChatStoreRef();
-  const activeRunHandleRef = useRef<AgentRunHandle | null>(null);
-  const flushFrameRef = useRef<number | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [runError, setRunError] = useState<string | null>(null);
-  const messagesById = useStore(store, (state) => state.messagesById);
-  const messageOrder = useStore(store, (state) => state.messageOrder);
-  const activeRun = useStore(store, (state) => state.activeRun);
-  const storeError = useStore(store, (state) => state.error);
-  const messages = useMemo(
-    () => selectMessages(messageOrder, messagesById),
-    [messageOrder, messagesById],
-  );
+  useCloseAgentRuntimeRunOnUnmount();
+  useAgentThreadQuery(selectedThreadId, { onThreadResolved });
+
+  const activeRun = useAgentChatStore((state) => state.activeRun);
+  const hasMessages = useAgentChatStore((state) => state.messageOrder.length > 0);
+  const loadStatus = useAgentChatStore((state) => state.loadStatus);
+  const loadError = useAgentChatStore((state) => state.loadError);
+  const runError = useAgentChatStore((state) => state.runError ?? state.error);
   const isRunning = activeRun !== null;
-
-  const flushBufferedEvents = useCallback((): void => {
-    if (flushFrameRef.current !== null) {
-      window.cancelAnimationFrame(flushFrameRef.current);
-      flushFrameRef.current = null;
-    }
-    store.getState().flushBufferedRuntimeEvents();
-  }, [store]);
-
-  const scheduleDeltaFlush = useCallback((): void => {
-    if (flushFrameRef.current !== null) {
-      return;
-    }
-
-    flushFrameRef.current = window.requestAnimationFrame(() => {
-      flushFrameRef.current = null;
-      store.getState().flushBufferedRuntimeEvents();
-    });
-  }, [store]);
-
-  const applyRuntimeEvent = useCallback(
-    (event: AgentRunEvent): void => {
-      if (event.type === "content.delta") {
-        store.getState().bufferRuntimeEvent(event);
-        scheduleDeltaFlush();
-        return;
-      }
-
-      flushBufferedEvents();
-      store.getState().applyRuntimeEvent(event);
-    },
-    [flushBufferedEvents, scheduleDeltaFlush, store],
-  );
-
-  const handleCancel = useCallback((): void => {
-    activeRunHandleRef.current?.cancel();
-  }, []);
-
-  const handleSubmit = useCallback(
-    ({ content }: { readonly content: AgentContent }): boolean => {
-      if (activeRunHandleRef.current !== null) {
-        return false;
-      }
-
-      const startedAt = Date.now();
-      const optimisticUserMessage = createOptimisticUserMessage(content, currentPath, startedAt);
-      const optimisticRun: ActiveRunState = {
-        runId: null,
-        threadId: selectedThreadId,
-        startedAt,
-        optimisticUserMessageId: optimisticUserMessage.id,
-      };
-      let latestThreadSummary: AgentThreadSummary | null = null;
-
-      setRunError(null);
-      setLoadError(null);
-      store.getState().addOptimisticUserMessage(optimisticUserMessage, optimisticRun);
-
-      activeRunHandleRef.current = startAgentRun(agentBaseUrl, {
-        threadId: selectedThreadId ?? undefined,
-        path: currentPath,
-        content,
-      }, {
-        onRunStart: ({ runId, threadId }) => {
-          store.getState().markRunStarted({ runId, threadId });
-          onThreadResolved?.(threadId);
-        },
-        onEvent: (event) => {
-          if (event.type === "thread.created" || event.type === "thread.updated") {
-            latestThreadSummary = event.thread;
-            onThreadResolved?.(event.thread.id);
-          }
-
-          if (event.type === "runtime.error") {
-            setRunError(event.error.message);
-          }
-
-          applyRuntimeEvent(event);
-        },
-        onRunEnd: () => {
-          flushBufferedEvents();
-          store.getState().finishRun();
-          activeRunHandleRef.current = null;
-
-          if (latestThreadSummary !== null) {
-            onSelectThread?.(latestThreadSummary);
-          }
-        },
-        onError: (error) => {
-          flushBufferedEvents();
-          setRunError(error.message);
-          store.getState().failRun(error.message);
-          activeRunHandleRef.current = null;
-        },
-      });
-
-      return true;
-    },
-    [
-      agentBaseUrl,
-      applyRuntimeEvent,
-      currentPath,
-      flushBufferedEvents,
-      onSelectThread,
-      onThreadResolved,
-      selectedThreadId,
-      store,
-    ],
-  );
-
-  useEffect(() => {
-    if (selectedThreadId === null) {
-      if (activeRunHandleRef.current === null) {
-        store.getState().reset();
-        setLoadError(null);
-        setRunError(null);
-        setIsLoading(false);
-      }
-      return;
-    }
-
-    const currentActiveRun = store.getState().activeRun;
-    if (activeRunHandleRef.current !== null && currentActiveRun?.threadId === selectedThreadId) {
-      return;
-    }
-
-    let isCurrent = true;
-    activeRunHandleRef.current?.close();
-    activeRunHandleRef.current = null;
-    flushBufferedEvents();
-    store.getState().reset();
-    setLoadError(null);
-    setRunError(null);
-    setIsLoading(true);
-
-    void getAgentThread(agentBaseUrl, selectedThreadId)
-      .then((result) => {
-        if (isCurrent) {
-          store.getState().loadThread(result.thread);
-
-          if (result.activeRun !== undefined) {
-            activeRunHandleRef.current = resumeAgentRun(agentBaseUrl, result.activeRun, {
-              onRunStart: ({ runId, threadId }) => {
-                store.getState().markRunStarted({ runId, threadId });
-                onThreadResolved?.(threadId);
-              },
-              onEvent: applyRuntimeEvent,
-              onRunEnd: () => {
-                flushBufferedEvents();
-                store.getState().finishRun();
-                activeRunHandleRef.current = null;
-              },
-              onError: (error) => {
-                flushBufferedEvents();
-                setRunError(error.message);
-                store.getState().failRun(error.message);
-                activeRunHandleRef.current = null;
-              },
-            });
-          }
-        }
-      })
-      .catch((error) => {
-        if (isCurrent) {
-          setLoadError(error instanceof Error ? error.message : "Failed to load thread.");
-        }
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [agentBaseUrl, applyRuntimeEvent, flushBufferedEvents, onThreadResolved, selectedThreadId, store]);
-
-  useEffect(() => {
-    return () => {
-      activeRunHandleRef.current?.close();
-      activeRunHandleRef.current = null;
-      if (flushFrameRef.current !== null) {
-        window.cancelAnimationFrame(flushFrameRef.current);
-        flushFrameRef.current = null;
-      }
-    };
-  }, []);
-
+  const { cancel, steer, submit } = useAgentRunMutation({
+    currentPath,
+    uiContext,
+    selectedThreadId,
+    onSelectThread,
+    onThreadResolved,
+  });
+  const { submit: submitEditedUserMessage } = useAgentEditUserMessageMutation({
+    currentPath,
+    uiContext,
+    selectedThreadId,
+    onSelectThread,
+    onThreadResolved,
+  });
   const composerProps = {
+    activeFolderName: currentDirectoryName,
     isRunning,
-    onCancel: handleCancel,
-    onSubmit: handleSubmit,
+    onCancel: cancel,
+    onSubmit: isRunning ? steer : submit,
   };
 
-  if (selectedThreadId === null && messages.length === 0 && activeRun === null && runError === null && storeError === null) {
-    return <AgentEmptyThread {...composerProps} />;
+  if (selectedThreadId === null && !hasMessages && !isRunning && runError === null) {
+    return <AgentEmptyThread {...composerProps} currentDirectoryName={currentDirectoryName} />;
   }
 
   return (
     <div className="right-prompt-surface">
       <div className="agent-thread-scroll">
         {loadError !== null ? <AgentPanelState label={loadError} variant="error" /> : null}
-        {!isLoading && loadError === null ? (
+        {loadStatus !== "loading" && loadError === null ? (
           <AgentTimeline
-            messages={messages}
-            isWorking={isRunning}
             currentPath={currentPath}
             workspaceRoot={workspaceRoot}
             onOpenFilePath={onOpenFilePath}
+            onSubmitUserMessageEdit={submitEditedUserMessage}
           />
         ) : null}
       </div>
       <div className="right-prompt-composer-wrap">
-        {runError === null && storeError === null ? null : (
-          <div className="agent-run-error">{runError ?? storeError}</div>
+        {runError === null ? null : (
+          <div className="agent-run-error">{runError}</div>
         )}
         <RightPromptComposer {...composerProps} />
       </div>
@@ -286,31 +118,3 @@ const AgentPanelState = ({
 }): React.ReactElement => (
   <div className={variant === "error" ? "agent-panel-state error" : "agent-panel-state"}>{label}</div>
 );
-
-const useAgentChatStoreRef = (): AgentChatStore => {
-  const storeRef = useRef<AgentChatStore | null>(null);
-  if (storeRef.current === null) {
-    storeRef.current = createAgentChatStore();
-  }
-  return storeRef.current;
-};
-
-const selectMessages = (
-  messageOrder: readonly string[],
-  messagesById: Readonly<Record<string, AgentMessage>>,
-): AgentMessage[] =>
-  messageOrder
-    .map((id) => messagesById[id])
-    .filter((message): message is AgentMessage => message !== undefined);
-
-const createOptimisticUserMessage = (
-  content: AgentContent,
-  path: string,
-  timestamp: number,
-): UserMessage => ({
-  role: "user",
-  id: `optimistic-user-${String(timestamp)}`,
-  timestamp,
-  content,
-  path,
-});

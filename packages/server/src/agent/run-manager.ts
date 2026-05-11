@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import { toAgentError } from "./errors.js";
+import { AgentError, toAgentError } from "./errors.js";
 import type {
   AgentContent,
+  EditThreadUserMessageInput,
   AgentMessage,
   AgentRunEvent,
   AgentThread,
+  AgentUiContext,
   IAgentHarness,
+  SteerRunResult,
 } from "./types.js";
 
 const RECENT_RUN_TTL_MS = 10 * 60 * 1000;
@@ -19,7 +22,11 @@ export interface StartAgentRunInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
   readonly clientRunId?: string;
+  readonly edit?: {
+    readonly numTurns: number;
+  };
 }
 
 export interface AgentActiveRun {
@@ -82,6 +89,16 @@ export class AgentRunManager {
   startRun(input: StartAgentRunInput): AgentRunRecord {
     this.pruneCompletedRuns();
 
+    if (input.edit !== undefined) {
+      if (input.threadId === undefined) {
+        throw new Error("Edit run requires a thread id");
+      }
+
+      if (this.isThreadRunning(input.threadId)) {
+        throw new Error("Cannot edit a thread while it is running");
+      }
+    }
+
     if (input.clientRunId !== undefined) {
       const existing = this.runsByClientRunId.get(input.clientRunId);
       if (existing !== undefined) {
@@ -139,6 +156,22 @@ export class AgentRunManager {
     return undefined;
   }
 
+  isThreadRunning(threadId: string): boolean {
+    this.pruneCompletedRuns();
+
+    for (const record of this.runsByInternalId.values()) {
+      if (
+        record.status !== "completed" &&
+        record.status !== "failed" &&
+        record.threadId === threadId
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   getActiveRunCount(): number {
     this.pruneCompletedRuns();
     let count = 0;
@@ -178,13 +211,52 @@ export class AgentRunManager {
     await this.options.harness.cancelRun?.({ threadId, runId });
   }
 
+  async steerRun(input: {
+    readonly threadId: string;
+    readonly runId: string;
+    readonly path: string;
+    readonly content: AgentContent;
+    readonly uiContext?: AgentUiContext;
+  }): Promise<SteerRunResult> {
+    const { threadId, runId } = input;
+    const record = this.getRun(runId);
+
+    if (record === undefined) {
+      throw new AgentError("RUN_NOT_FOUND", "Run not found");
+    }
+
+    if (record.threadId !== threadId) {
+      throw new AgentError("RUN_THREAD_MISMATCH", "Run does not belong to the requested thread");
+    }
+
+    if (record.status !== "running") {
+      throw new AgentError("RUN_NOT_ACTIVE", "Cannot steer a run that is not active");
+    }
+
+    if (this.options.harness.steerRun === undefined) {
+      throw new AgentError("STEER_NOT_SUPPORTED", "Steering active turns is not supported by this agent harness");
+    }
+
+    return this.options.harness.steerRun(input);
+  }
+
   private async consumeRun(record: AgentRunRecord): Promise<void> {
     try {
-      const iterator = this.options.harness.sendMessage({
-        threadId: record.input.threadId,
-        path: record.input.path,
-        content: record.input.content,
-      })[Symbol.asyncIterator]();
+      const iterable = record.input.edit === undefined
+        ? this.options.harness.sendMessage({
+          threadId: record.input.threadId,
+          path: record.input.path,
+          content: record.input.content,
+          uiContext: record.input.uiContext,
+        })
+        : this.editThreadUserMessage({
+          threadId: requireThreadId(record.input.threadId),
+          path: record.input.path,
+          content: record.input.content,
+          numTurns: record.input.edit.numTurns,
+          uiContext: record.input.uiContext,
+        });
+      const iterator = iterable[Symbol.asyncIterator]();
 
       const firstResult = await iterator.next();
 
@@ -230,6 +302,14 @@ export class AgentRunManager {
       });
       record.subscribers.clear();
     }
+  }
+
+  private editThreadUserMessage(input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent> {
+    if (this.options.harness.editThreadUserMessage === undefined) {
+      throw new Error("Editing thread messages is not supported by this agent harness");
+    }
+
+    return this.options.harness.editThreadUserMessage(input);
   }
 
   private markRunStarted(record: AgentRunRecord, firstEvent: AgentRunEvent): void {
@@ -281,6 +361,14 @@ export class AgentRunManager {
     }
   }
 }
+
+const requireThreadId = (threadId: string | undefined): string => {
+  if (threadId === undefined) {
+    throw new Error("Edit run requires a thread id");
+  }
+
+  return threadId;
+};
 
 interface ThreadSnapshotIndex {
   readonly threadId: string;
