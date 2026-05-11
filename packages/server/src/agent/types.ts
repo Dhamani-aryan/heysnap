@@ -205,6 +205,16 @@ export interface CancelRunInput {
   readonly runId: string;
 }
 
+export interface SteerRunInput {
+  readonly threadId: string;
+  readonly runId: string;
+  readonly content: AgentContent;
+}
+
+export interface SteerRunResult {
+  readonly turnId: string;
+}
+
 export interface SetupInput {
   readonly install?: boolean;
   readonly apiKey?: string;
@@ -220,6 +230,7 @@ export interface IAgentHarness {
   sendMessage(input: SendMessageInput): AsyncIterable<AgentRunEvent>;
   editThreadUserMessage?(input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent>;
   cancelRun?(input: CancelRunInput): Promise<void>;
+  steerRun?(input: SteerRunInput): Promise<SteerRunResult>;
 }
 
 export interface AgentErrorPayload {

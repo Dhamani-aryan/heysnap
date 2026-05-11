@@ -15,6 +15,8 @@ import type {
   RetrieveThreadsResult,
   SendMessageInput,
   SetupInput,
+  SteerRunInput,
+  SteerRunResult,
   UserMessage,
 } from "../src/agent/types.js";
 
@@ -207,6 +209,98 @@ describe("agent HTTP API", () => {
     });
   });
 
+  it("steers active runs with full agent content", async () => {
+    const harness = new PausedAfterDeltaHarness();
+    const { url } = await startAgentHttpServer(harness);
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "Projects/app", content: textContent("Build the UI") }),
+      headers: { "content-type": "application/json" },
+    });
+    const firstMessages = await readSseMessages(response, 1);
+    const threadId = readThreadId(firstMessages);
+    const runId = readRunId(firstMessages);
+    const steerContent: AgentContent = [
+      { type: "text", content: "Focus on tests first" },
+      {
+        type: "image",
+        data: "aW1hZ2U=",
+        mimeType: "image/png",
+        metadata: { filename: "screenshot.png" },
+      },
+      {
+        type: "file",
+        data: "cGRm",
+        mimeType: "application/pdf",
+        filename: "notes.pdf",
+      },
+    ];
+
+    const steerResponse = await fetch(
+      `${url}/agent/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/steer`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content: steerContent }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    expect(steerResponse.status).toBe(200);
+    expect(await steerResponse.json()).toEqual({ turnId: runId });
+    expect(harness.steerInputs).toEqual([{ threadId, runId, content: steerContent }]);
+    harness.resume();
+  });
+
+  it("rejects steering unknown, inactive, and mismatched runs", async () => {
+    const completedHarness = new MockAgentHarness();
+    const { url: completedUrl } = await startAgentHttpServer(completedHarness);
+    const completedResponse = await fetch(`${completedUrl}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "Projects/app", content: textContent("Build the UI") }),
+      headers: { "content-type": "application/json" },
+    });
+    const completedMessages = await readSseMessages(completedResponse);
+    const completedThreadId = readThreadId(completedMessages);
+    const completedRunId = readRunId(completedMessages);
+
+    const missingResponse = await fetch(`${completedUrl}/agent/threads/thread-1/runs/missing-run/steer`, {
+      method: "POST",
+      body: JSON.stringify({ content: textContent("Missing") }),
+      headers: { "content-type": "application/json" },
+    });
+    const inactiveResponse = await fetch(
+      `${completedUrl}/agent/threads/${encodeURIComponent(completedThreadId)}/runs/${encodeURIComponent(completedRunId)}/steer`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content: textContent("Inactive") }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const activeHarness = new PausedAfterDeltaHarness();
+    const { url: activeUrl } = await startAgentHttpServer(activeHarness);
+    const activeResponse = await fetch(`${activeUrl}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "Projects/app", content: textContent("Build the UI") }),
+      headers: { "content-type": "application/json" },
+    });
+    const activeMessages = await readSseMessages(activeResponse, 1);
+    const activeRunId = readRunId(activeMessages);
+    const mismatchResponse = await fetch(
+      `${activeUrl}/agent/threads/other-thread/runs/${encodeURIComponent(activeRunId)}/steer`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content: textContent("Mismatch") }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    expect(missingResponse.status).toBe(404);
+    expect(inactiveResponse.status).toBe(409);
+    expect(mismatchResponse.status).toBe(409);
+    activeHarness.resume();
+  });
+
   it("resumes active thread streams after the loaded thread snapshot", async () => {
     const harness = new PausedAfterDeltaHarness();
     const { url } = await startAgentHttpServer(harness);
@@ -350,6 +444,7 @@ class StaticThreadsHarness implements IAgentHarness {
 
 class PausedAfterDeltaHarness implements IAgentHarness {
   private readonly gate = createGate();
+  readonly steerInputs: SteerRunInput[] = [];
   private thread: AgentThread | null = null;
 
   setup(_input: SetupInput): Promise<void> {
@@ -473,6 +568,11 @@ class PausedAfterDeltaHarness implements IAgentHarness {
   cancelRun(): Promise<void> {
     this.resume();
     return Promise.resolve();
+  }
+
+  steerRun(input: SteerRunInput): Promise<SteerRunResult> {
+    this.steerInputs.push(input);
+    return Promise.resolve({ turnId: input.runId });
   }
 
   resume(): void {

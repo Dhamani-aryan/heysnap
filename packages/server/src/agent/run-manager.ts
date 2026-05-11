@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { toAgentError } from "./errors.js";
+import { AgentError, toAgentError } from "./errors.js";
 import type {
   AgentContent,
   EditThreadUserMessageInput,
@@ -8,6 +8,7 @@ import type {
   AgentRunEvent,
   AgentThread,
   IAgentHarness,
+  SteerRunResult,
 } from "./types.js";
 
 const RECENT_RUN_TTL_MS = 10 * 60 * 1000;
@@ -206,6 +207,28 @@ export class AgentRunManager {
 
   async cancelRun(threadId: string, runId: string): Promise<void> {
     await this.options.harness.cancelRun?.({ threadId, runId });
+  }
+
+  async steerRun(threadId: string, runId: string, content: AgentContent): Promise<SteerRunResult> {
+    const record = this.getRun(runId);
+
+    if (record === undefined) {
+      throw new AgentError("RUN_NOT_FOUND", "Run not found");
+    }
+
+    if (record.threadId !== threadId) {
+      throw new AgentError("RUN_THREAD_MISMATCH", "Run does not belong to the requested thread");
+    }
+
+    if (record.status !== "running") {
+      throw new AgentError("RUN_NOT_ACTIVE", "Cannot steer a run that is not active");
+    }
+
+    if (this.options.harness.steerRun === undefined) {
+      throw new AgentError("STEER_NOT_SUPPORTED", "Steering active turns is not supported by this agent harness");
+    }
+
+    return this.options.harness.steerRun({ threadId, runId, content });
   }
 
   private async consumeRun(record: AgentRunRecord): Promise<void> {

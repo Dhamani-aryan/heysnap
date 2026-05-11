@@ -14,6 +14,8 @@ import type {
   RetrieveThreadsInput,
   RetrieveThreadsResult,
   SendMessageInput,
+  SteerRunInput,
+  SteerRunResult,
   UserMessage,
 } from "./types.js";
 
@@ -235,6 +237,10 @@ export class MockAgentHarness implements IAgentHarness {
 
   async cancelRun(): Promise<void> {
     return Promise.resolve();
+  }
+
+  async steerRun(input: SteerRunInput): Promise<SteerRunResult> {
+    return Promise.resolve({ turnId: input.runId });
   }
 }
 

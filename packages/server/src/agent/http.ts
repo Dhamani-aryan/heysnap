@@ -135,6 +135,18 @@ const handleAgentHttpRequest = async (
       return true;
     }
 
+    const steerMatch = /^\/agent\/threads\/([^/]+)\/runs\/([^/]+)\/steer$/.exec(requestUrl.pathname);
+
+    if (request.method === "POST" && steerMatch !== null) {
+      const result = await runManager.steerRun(
+        decodeURIComponent(steerMatch[1] ?? ""),
+        decodeURIComponent(steerMatch[2] ?? ""),
+        parseSteerRunContent(await readJsonBody(request)),
+      );
+      sendJson(response, 200, result);
+      return true;
+    }
+
     sendJson(response, 404, { code: "NOT_FOUND", message: "Agent endpoint not found" });
     return true;
   } catch (error) {
@@ -255,6 +267,20 @@ const parseEditRunInput = (threadId: string, body: unknown): StartAgentRunInput 
   };
 };
 
+const parseSteerRunContent = (body: unknown): AgentContent => {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("Steer request must be a JSON object");
+  }
+
+  const input = body as Record<string, unknown>;
+
+  if (!isAgentContent(input["content"])) {
+    throw new Error("Invalid steer request");
+  }
+
+  return input["content"] as AgentContent;
+};
+
 const withStreamingState = (
   groups: readonly AgentThreadGroup[],
   runManager: AgentRunManager,
@@ -293,7 +319,7 @@ const getAgentErrorStatus = (error: AgentError): number => {
     return 404;
   }
 
-  if (error.code === "THREAD_ACTIVE") {
+  if (error.code === "THREAD_ACTIVE" || error.code === "RUN_NOT_ACTIVE" || error.code === "RUN_THREAD_MISMATCH") {
     return 409;
   }
 
