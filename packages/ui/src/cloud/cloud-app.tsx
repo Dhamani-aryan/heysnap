@@ -50,6 +50,7 @@ export type CloudAppRoute =
   | {
     readonly view: "workspace";
     readonly computerId: string;
+    readonly panel?: "chat" | "connectors";
     readonly threadId?: string | null;
   };
 
@@ -90,7 +91,11 @@ function CloudAppContent({
   );
   const activeRoute = route ?? internalRoute;
   const selectedComputerId = activeRoute.view === "workspace" ? activeRoute.computerId : null;
-  const selectedThreadId = activeRoute.view === "workspace" ? activeRoute.threadId ?? null : null;
+  const selectedWorkspacePanel = activeRoute.view === "workspace" ? activeRoute.panel ?? "chat" : "chat";
+  const selectedThreadId =
+    activeRoute.view === "workspace" && selectedWorkspacePanel === "chat"
+      ? activeRoute.threadId ?? null
+      : null;
   const suppressSelectedComputerAutoStart =
     selectedComputerId !== null && autoStartSuppressedComputerIds.has(selectedComputerId);
   const changeRoute = useCallback((
@@ -287,7 +292,7 @@ function CloudAppContent({
       return;
     }
 
-    changeRoute({ view: "workspace", computerId: selectedComputerId, threadId: thread.id });
+    changeRoute({ view: "workspace", computerId: selectedComputerId, panel: "chat", threadId: thread.id });
   }, [changeRoute, selectedComputerId]);
 
   const newThread = useCallback((): void => {
@@ -295,7 +300,23 @@ function CloudAppContent({
       return;
     }
 
-    changeRoute({ view: "workspace", computerId: selectedComputerId, threadId: null });
+    changeRoute({ view: "workspace", computerId: selectedComputerId, panel: "chat", threadId: null });
+  }, [changeRoute, selectedComputerId]);
+
+  const openConnectors = useCallback((): void => {
+    if (selectedComputerId === null) {
+      return;
+    }
+
+    changeRoute({ view: "workspace", computerId: selectedComputerId, panel: "connectors", threadId: null });
+  }, [changeRoute, selectedComputerId]);
+
+  const closeConnectors = useCallback((): void => {
+    if (selectedComputerId === null) {
+      return;
+    }
+
+    changeRoute({ view: "workspace", computerId: selectedComputerId, panel: "chat", threadId: null });
   }, [changeRoute, selectedComputerId]);
 
   const resolveThread = useCallback((threadId: string): void => {
@@ -303,7 +324,7 @@ function CloudAppContent({
       return;
     }
 
-    changeRoute({ view: "workspace", computerId: selectedComputerId, threadId }, { replace: true });
+    changeRoute({ view: "workspace", computerId: selectedComputerId, panel: "chat", threadId }, { replace: true });
   }, [changeRoute, selectedComputerId, selectedThreadId]);
 
   const startRemoteMachineCreate = (): void => {
@@ -411,9 +432,9 @@ function CloudAppContent({
             path: workspaceSession.accessSession.routes.agentBaseUrl,
             token: workspaceSession.accessSession.accessSession.token,
           })}
-          capabilitiesWebsocketUrl={workspaceSession.accessSession.routes.capabilitiesWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
+          capabilitiesBaseUrl={workspaceSession.accessSession.routes.capabilitiesBaseUrl === undefined ? undefined : buildGatewayHttpUrl({
             baseUrl: client.baseUrl,
-            path: workspaceSession.accessSession.routes.capabilitiesWebSocketUrl,
+            path: workspaceSession.accessSession.routes.capabilitiesBaseUrl,
             token: workspaceSession.accessSession.accessSession.token,
           })}
           computer={selectedComputer}
@@ -423,8 +444,11 @@ function CloudAppContent({
             token: workspaceSession.accessSession.accessSession.token,
           })}
           selectedThreadId={selectedThreadId}
+          workspacePanel={selectedWorkspacePanel}
           onSelectThread={selectThread}
           onNewThread={newThread}
+          onOpenConnectors={openConnectors}
+          onCloseConnectors={closeConnectors}
           onThreadResolved={resolveThread}
           onBackToMachines={closeMachine}
           onSleepMachine={sleepSelectedMachine}

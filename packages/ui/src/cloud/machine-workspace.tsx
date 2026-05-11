@@ -20,12 +20,15 @@ const getImageSrc = (asset: ImageAsset): string => {
 
 export interface MachineWorkspaceProps {
   readonly agentBaseUrl: string;
-  readonly capabilitiesWebsocketUrl?: string;
+  readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
   readonly selectedThreadId?: string | null;
+  readonly workspacePanel?: "chat" | "connectors";
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onNewThread?: () => void;
+  readonly onOpenConnectors?: () => void;
+  readonly onCloseConnectors?: () => void;
   readonly onThreadResolved?: (threadId: string) => void;
   readonly onBackToMachines?: () => void;
   readonly onSleepMachine?: () => Promise<void>;
@@ -34,12 +37,15 @@ export interface MachineWorkspaceProps {
 
 export function MachineWorkspace({
   agentBaseUrl,
-  capabilitiesWebsocketUrl,
+  capabilitiesBaseUrl,
   computer,
   filesystemWebsocketUrl,
   selectedThreadId = null,
+  workspacePanel = "chat",
   onSelectThread,
   onNewThread,
+  onOpenConnectors,
+  onCloseConnectors,
   onThreadResolved,
   onBackToMachines,
   onSleepMachine,
@@ -87,13 +93,16 @@ export function MachineWorkspace({
           <FilesystemExplorer
             websocketUrl={filesystemWebsocketUrl}
             agentBaseUrl={agentBaseUrl}
-            capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
+            capabilitiesBaseUrl={capabilitiesBaseUrl}
             selectedThreadId={selectedThreadId}
+            workspacePanel={workspacePanel}
             machineName={computer.name}
             canSleepMachine={computer.kind !== "local"}
             onFilesystemOpen={handleFilesystemOpen}
             onSelectThread={onSelectThread}
             onNewThread={onNewThread}
+            onOpenConnectors={onOpenConnectors}
+            onCloseConnectors={onCloseConnectors}
             onThreadResolved={onThreadResolved}
             onBackToMachines={onBackToMachines}
             onSleepMachine={onSleepMachine}
