@@ -52,6 +52,21 @@ describe("cloud server cors", () => {
     expect(me.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
   });
 
+  it("allows agent event stream resume headers from the web app", async () => {
+    const { app } = createTestApp();
+    const preflight = await app.request("/gateway/computers/computer-1/agent/runs/run-1/events", {
+      method: "OPTIONS",
+      headers: {
+        origin: "http://localhost:3000",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "last-event-id",
+      },
+    });
+
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("Last-Event-ID");
+  });
+
   it("does not allow unknown browser origins", async () => {
     const { app } = createTestApp();
     const response = await app.request("/health", {

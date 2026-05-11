@@ -50,7 +50,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
 
       return options.config.allowedOrigins.includes(origin) ? origin : null;
     },
-    allowHeaders: ["Authorization", "Content-Type"],
+    allowHeaders: ["Authorization", "Content-Type", "Last-Event-ID"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     maxAge: 600,
   }));
