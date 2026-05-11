@@ -85,6 +85,7 @@ describe("codex agent harness", () => {
       cwd: "/workspace/Desktop/Projects/app",
       createdAt: 10,
       updatedAt: 20,
+      status: { type: "active", activeFlags: ["turn"] },
     });
     const externalListThread = createCodexThread({
       id: "thread-external",
@@ -173,10 +174,59 @@ describe("codex agent harness", () => {
             createdAt: 10000,
             updatedAt: 20000,
             messageCount: 2,
+            isStreaming: true,
           },
         ],
       },
     ]);
+  });
+
+  it("does not mark non-active Codex thread statuses as streaming", async () => {
+    const client = new FakeCodexClient((method) => {
+      if (method === "thread/list") {
+        return {
+          data: [
+            createCodexThread({
+              id: "thread-idle",
+              preview: "Idle thread",
+              cwd: "/workspace/Desktop/Projects/app",
+              updatedAt: 30,
+              status: { type: "idle" },
+            }),
+            createCodexThread({
+              id: "thread-not-loaded",
+              preview: "Not loaded thread",
+              cwd: "/workspace/Desktop/Projects/app",
+              updatedAt: 20,
+              status: { type: "notLoaded" },
+            }),
+            createCodexThread({
+              id: "thread-system-error",
+              preview: "System error thread",
+              cwd: "/workspace/Desktop/Projects/app",
+              updatedAt: 10,
+              status: { type: "systemError" },
+            }),
+          ],
+        };
+      }
+
+      if (method === "thread/read") {
+        return { thread: createCodexThread({ id: "thread-read", preview: "Thread", cwd: "/workspace/Desktop/Projects/app", updatedAt: 1 }) };
+      }
+
+      throw new Error(`Unexpected method ${method}`);
+    });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    const result = await harness.retrieveThreads({ limit: 10 });
+    const threads = result.groups.flatMap((group) => group.threads);
+
+    expect(threads).toHaveLength(3);
+    expect(threads.every((thread) => thread.isStreaming !== true)).toBe(true);
   });
 
   it("uses user message counts already present on populated Codex thread summaries", async () => {
@@ -857,6 +907,92 @@ describe("codex agent harness", () => {
     expect(events.map((event) => event.type)).toContain("turn.completed");
   });
 
+  it("rolls back a previous Codex user turn before starting an edited turn", async () => {
+    let client: FakeCodexClient;
+    client = new FakeCodexClient((method) => {
+      if (method === "thread/resume") {
+        return {
+          thread: createCodexThread({
+            id: "thread-edit",
+            preview: "Edited thread",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 20,
+          }),
+        };
+      }
+
+      if (method === "thread/rollback") {
+        return {};
+      }
+
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          client.emit(createNotification("turn/completed", {
+            threadId: "thread-edit",
+            turn: { id: "turn-edited", status: "completed" },
+          }));
+        });
+        return { turn: { id: "turn-edited", status: "inProgress", items: [] } };
+      }
+
+      if (method === "thread/read") {
+        return {
+          thread: createCodexThread({
+            id: "thread-edit",
+            preview: "Edited thread",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 30,
+            turns: [createUserTurn("turn-edited")],
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected method ${method}`);
+    });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    const events = await collectAsyncIterable(harness.editThreadUserMessage({
+      threadId: "thread-edit",
+      path: "Projects/app",
+      content: [{ type: "text", content: "Edited user message" }],
+      numTurns: 1,
+    }));
+
+    expect(client.requests.slice(0, 3)).toEqual([
+      {
+        method: "thread/resume",
+        params: { threadId: "thread-edit" },
+      },
+      {
+        method: "thread/rollback",
+        params: {
+          threadId: "thread-edit",
+          numTurns: 1,
+        },
+      },
+      {
+        method: "turn/start",
+        params: {
+          threadId: "thread-edit",
+          input: [
+            { type: "text", text: "Edited user message" },
+          ],
+        },
+      },
+    ]);
+    expect(events.some((event) => event.type === "thread.created")).toBe(false);
+    expect(events.find((event) => event.type === "turn.started")).toMatchObject({
+      input: [{ type: "text", content: "Edited user message" }],
+      path: "Projects/app",
+    });
+    expect(events.map((event) => event.type)).toContain("turn.completed");
+  });
+
   it("hides appended navigated directory context from user messages", async () => {
     let client: FakeCodexClient;
     client = new FakeCodexClient((method) => {
@@ -1378,6 +1514,7 @@ const createCodexThread = (input: {
   readonly name?: string | null;
   readonly path?: string | null;
   readonly source?: unknown;
+  readonly status?: unknown;
   readonly createdAt?: number;
   readonly turns?: readonly unknown[];
 }): Record<string, unknown> => ({
@@ -1387,6 +1524,7 @@ const createCodexThread = (input: {
   cwd: input.cwd,
   path: input.path,
   source: input.source ?? "appServer",
+  status: input.status,
   modelProvider: input.modelProvider,
   createdAt: input.createdAt ?? input.updatedAt,
   updatedAt: input.updatedAt,
