@@ -15,7 +15,12 @@ const tempRoots: string[] = [];
 afterEach(async () => {
   await Promise.all(openServers.map((server) => closeServer(server)));
   openServers = [];
-  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 25,
+  })));
 });
 
 describe("capabilities REST API", () => {
@@ -133,6 +138,9 @@ describe("capabilities REST API", () => {
 
     const operation = await waitForOperationMessage(url, body.operation.id, "First copy your one-time code: ABCD-1234");
     expect(operation.messages.join("\n")).toContain("Authenticate Git with your GitHub credentials?");
+    await expect(waitForOperation(url, body.operation.id, "completed")).resolves.toMatchObject({
+      status: "completed",
+    });
   });
 
   it("returns client-safe errors", async () => {
