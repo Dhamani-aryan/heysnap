@@ -2250,6 +2250,15 @@ button:disabled {
   width: 100%;
   max-width: 680px;
   min-width: 0;
+  --sd-background: 0 0% 100%;
+  --sd-foreground: 220 5% 89.6%;
+  --sd-muted: 0 0% 95%;
+  --sd-muted-foreground: 0 0% 42%;
+  --sd-border: 0 0% 88%;
+  --sd-sidebar: 0 0% 97%;
+  --sd-primary: 0 0% 10%;
+  --sd-primary-foreground: 0 0% 98%;
+  --color-muted-foreground: hsl(var(--sd-muted-foreground));
   color: #e3e4e6;
   font-size: 14px;
   font-weight: 400;
@@ -2262,159 +2271,6 @@ button:disabled {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-}
-
-.chat-markdown > :first-child {
-  margin-top: 0;
-}
-
-.chat-markdown > :last-child {
-  margin-bottom: 0;
-}
-
-.chat-markdown p,
-.chat-markdown ul,
-.chat-markdown ol,
-.chat-markdown blockquote,
-.chat-markdown pre,
-.chat-markdown table {
-  margin: 0.65rem 0;
-}
-
-.chat-markdown ul,
-.chat-markdown ol {
-  padding-left: 1.25rem;
-}
-
-.chat-markdown ul {
-  list-style-type: disc;
-}
-
-.chat-markdown ol {
-  list-style-type: decimal;
-}
-
-.chat-markdown li + li {
-  margin-top: 0.25rem;
-}
-
-.chat-markdown a {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: rgba(0, 0, 0, 0.32);
-}
-
-:root.dark .chat-markdown a {
-  text-decoration-color: rgba(255, 255, 255, 0.34);
-}
-
-.chat-markdown blockquote {
-  border-left: 2px solid rgba(0, 0, 0, 0.12);
-  padding-left: 0.8rem;
-  color: rgba(0, 0, 0, 0.58);
-}
-
-:root.dark .chat-markdown blockquote {
-  border-left-color: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.62);
-}
-
-.chat-markdown :not(pre) > code {
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.05);
-  padding: 0.1rem 0.35rem;
-  color: inherit;
-  font-size: 0.86em;
-}
-
-:root.dark .chat-markdown :not(pre) > code {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.chat-markdown pre {
-  max-width: 100%;
-  overflow-x: auto;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.045);
-  padding: 0.8rem 0.9rem;
-}
-
-:root.dark .chat-markdown pre {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.chat-markdown pre code {
-  border: none;
-  background: transparent;
-  padding: 0;
-  font-size: 12px;
-}
-
-.chat-markdown table {
-  display: block;
-  width: 100%;
-  overflow-x: auto;
-  border-collapse: collapse;
-}
-
-.chat-markdown th,
-.chat-markdown td {
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  padding: 0.35rem 0.45rem;
-  text-align: left;
-}
-
-:root.dark .chat-markdown th,
-:root.dark .chat-markdown td {
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.chat-markdown-codeblock {
-  position: relative;
-  margin: 0.65rem 0;
-}
-
-.chat-markdown-codeblock pre {
-  margin: 0;
-  padding-right: 4rem;
-}
-
-.chat-markdown-copy-button {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 1;
-  height: 24px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.78);
-  color: rgba(0, 0, 0, 0.58);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  opacity: 0;
-  padding: 0 7px;
-  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-:root.dark .chat-markdown-copy-button {
-  border-color: rgba(255, 255, 255, 0.14);
-  background: rgba(18, 18, 20, 0.82);
-  color: rgba(255, 255, 255, 0.62);
-}
-
-.chat-markdown-codeblock:hover .chat-markdown-copy-button,
-.chat-markdown-codeblock:focus-within .chat-markdown-copy-button {
-  opacity: 1;
-}
-
-.chat-markdown-shiki .shiki {
-  margin: 0;
-  background: transparent !important;
 }
 
 .chat-markdown-file-link {
@@ -2491,6 +2347,48 @@ button:disabled {
 
 :root.dark .chat-markdown-file-menu button:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+:root.dark .agent-assistant-markdown {
+  --sd-background: 240 6% 7%;
+  --sd-foreground: 220 5% 89.6%;
+  --sd-muted: 240 5% 14%;
+  --sd-muted-foreground: 220 6% 66%;
+  --sd-border: 240 5% 20%;
+  --sd-sidebar: 240 5% 10%;
+  --sd-primary: 220 5% 96%;
+  --sd-primary-foreground: 240 6% 8%;
+}
+
+.agent-assistant-markdown [data-streamdown="code-block"],
+.agent-assistant-markdown [data-streamdown="mermaid-block"],
+.agent-assistant-markdown [data-streamdown="table-wrapper"] {
+  border-radius: 8px;
+}
+
+.agent-assistant-markdown [data-streamdown="code-block-body"],
+.agent-assistant-markdown [data-streamdown="table-wrapper"] > div:last-child,
+.agent-assistant-markdown [data-streamdown="mermaid-block"] > div:last-child {
+  scrollbar-width: thin;
+}
+
+.agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar,
+.agent-assistant-markdown [data-streamdown="table-wrapper"] > div:last-child::-webkit-scrollbar,
+.agent-assistant-markdown [data-streamdown="mermaid-block"] > div:last-child::-webkit-scrollbar {
+  height: 6px;
+}
+
+.agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb,
+.agent-assistant-markdown [data-streamdown="table-wrapper"] > div:last-child::-webkit-scrollbar-thumb,
+.agent-assistant-markdown [data-streamdown="mermaid-block"] > div:last-child::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+:root.dark .agent-assistant-markdown [data-streamdown="code-block-body"]::-webkit-scrollbar-thumb,
+:root.dark .agent-assistant-markdown [data-streamdown="table-wrapper"] > div:last-child::-webkit-scrollbar-thumb,
+:root.dark .agent-assistant-markdown [data-streamdown="mermaid-block"] > div:last-child::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .agent-work-card {
@@ -2711,135 +2609,6 @@ button:disabled {
   40% {
     opacity: 0.9;
   }
-}
-
-.agent-assistant-markdown * {
-  max-width: 100%;
-}
-
-:root.dark .agent-assistant-markdown {
-  color: #e3e4e6;
-}
-
-.agent-assistant-markdown p,
-.agent-assistant-markdown ul,
-.agent-assistant-markdown ol,
-.agent-assistant-markdown blockquote,
-.agent-assistant-markdown pre,
-.agent-assistant-markdown table {
-  margin-top: 0;
-  margin-bottom: 12px;
-}
-
-.agent-assistant-markdown table {
-  display: block;
-  overflow-x: auto;
-}
-
-.agent-assistant-markdown > *:last-child {
-  margin-bottom: 0;
-}
-
-.agent-assistant-markdown strong {
-  font-weight: 700;
-}
-
-.agent-assistant-markdown a {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: rgba(0, 0, 0, 0.3);
-  text-underline-offset: 3px;
-}
-
-:root.dark .agent-assistant-markdown a {
-  text-decoration-color: rgba(255, 255, 255, 0.35);
-}
-
-.agent-assistant-markdown code {
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.06);
-  padding: 0.08em 0.3em;
-  font-family: var(--font-geist-mono), ui-monospace, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.9em;
-}
-
-:root.dark .agent-assistant-markdown code {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.agent-assistant-markdown pre {
-  max-width: 100%;
-  overflow-x: auto;
-  border-radius: 8px;
-  background: #f5f5f5;
-  padding: 12px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-:root.dark .agent-assistant-markdown pre {
-  background: #171717;
-}
-
-.agent-assistant-markdown pre code {
-  background: transparent;
-  padding: 0;
-}
-
-.agent-assistant-markdown .code-block {
-  width: 100%;
-  max-width: 100%;
-  margin-bottom: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  background: #f5f5f5;
-  padding: 0;
-}
-
-:root.dark .agent-assistant-markdown .code-block {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: #151515;
-}
-
-.agent-assistant-markdown .code-block-header,
-.agent-assistant-markdown .code-block-actions {
-  display: none !important;
-}
-
-.agent-assistant-markdown .code-block-body {
-  max-width: 100%;
-  overflow-x: auto;
-  border-radius: 8px;
-  border: 0;
-  background: transparent;
-  scrollbar-width: thin;
-}
-
-.agent-assistant-markdown .code-block-body::-webkit-scrollbar {
-  height: 6px;
-}
-
-.agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.22);
-}
-
-:root.dark .agent-assistant-markdown .code-block-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.agent-assistant-markdown .code-block pre {
-  margin: 0;
-  border: 0;
-  background: transparent;
-}
-
-.agent-assistant-markdown .code-block pre code,
-.agent-assistant-markdown .code-block pre code span {
-  background: transparent !important;
-  background-color: transparent !important;
-  text-shadow: none;
 }
 
 .agent-panel-state {
