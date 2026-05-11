@@ -23,6 +23,8 @@ import type {
   RetrieveThreadsResult,
   SendMessageInput,
   SetupInput,
+  SteerRunInput,
+  SteerRunResult,
   ToolResultMessage,
 } from "../../types.js";
 import { AgentError } from "../../errors.js";
@@ -339,6 +341,23 @@ export class CodexAgentHarness implements IAgentHarness {
     });
   }
 
+  async steerRun(input: SteerRunInput): Promise<SteerRunResult> {
+    const result = await this.client.request<CodexTurnSteerResponse>("turn/steer", {
+      threadId: input.threadId,
+      expectedTurnId: input.runId,
+      input: agentContentToCodexInput(input.content),
+    });
+
+    if (result.turnId !== input.runId) {
+      throw new AgentError(
+        "STEER_TURN_MISMATCH",
+        "Codex returned a different turn id for the steered run",
+      );
+    }
+
+    return { turnId: result.turnId };
+  }
+
   private async countUserMessages(thread: CodexThread): Promise<number> {
     if ((thread.turns ?? []).some((turn) => (turn.items ?? []).length > 0)) {
       return countUserMessages(thread);
@@ -384,6 +403,10 @@ interface CodexThreadStartResponse {
 
 interface CodexTurnStartResponse {
   readonly turn: CodexTurn;
+}
+
+interface CodexTurnSteerResponse {
+  readonly turnId: string;
 }
 
 interface CodexLiveTurnMapperOptions {

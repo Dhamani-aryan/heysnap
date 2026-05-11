@@ -1371,6 +1371,63 @@ describe("codex agent harness", () => {
       },
     ]);
   });
+
+  it("steers Codex turns with the active run id as expected turn id", async () => {
+    const client = new FakeCodexClient({ turnId: "turn-1" });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    await expect(harness.steerRun({
+      threadId: "thread-1",
+      runId: "turn-1",
+      content: [
+        { type: "text", content: "Focus on tests first" },
+        {
+          type: "image",
+          data: "aW1hZ2U=",
+          mimeType: "image/png",
+          metadata: { filename: "screenshot.png" },
+        },
+        {
+          type: "file",
+          data: "cGRm",
+          mimeType: "application/pdf",
+          filename: "notes.pdf",
+        },
+      ],
+    })).resolves.toEqual({ turnId: "turn-1" });
+
+    expect(client.requests).toEqual([
+      {
+        method: "turn/steer",
+        params: {
+          threadId: "thread-1",
+          expectedTurnId: "turn-1",
+          input: [
+            { type: "text", text: "Focus on tests first" },
+            { type: "text", text: "[Image attachment: image/png]" },
+            { type: "text", text: "[File attachment: notes.pdf (application/pdf)]" },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("rejects Codex steer responses that return another turn id", async () => {
+    const client = new FakeCodexClient({ turnId: "turn-2" });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    await expect(harness.steerRun({
+      threadId: "thread-1",
+      runId: "turn-1",
+      content: [{ type: "text", content: "Focus on tests first" }],
+    })).rejects.toThrow("different turn id");
+  });
 });
 
 describe("codex app-server client", () => {
