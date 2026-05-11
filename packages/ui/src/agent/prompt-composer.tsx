@@ -23,7 +23,7 @@ export interface RightPromptComposerProps {
   readonly isRunning?: boolean;
   readonly draftSeed?: { readonly id: number; readonly text: string } | null;
   readonly onCancel?: () => void;
-  readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void;
+  readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void | Promise<boolean | void>;
 }
 
 const getAttachmentId = (): string => {
@@ -120,6 +120,7 @@ export const RightPromptComposer = ({
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
@@ -177,34 +178,43 @@ export const RightPromptComposer = ({
     }
   };
 
-  const handleSubmit = (): void => {
-    if (isRunning || !canSubmit) {
+  const handleSubmit = async (): Promise<void> => {
+    if (!canSubmit || isSubmitting) {
       return;
     }
 
-    const didSubmit = onSubmit?.({ content: toAgentContent(draft, attachments) });
+    setIsSubmitting(true);
 
-    if (didSubmit === false) {
-      return;
-    }
+    try {
+      const didSubmit = await onSubmit?.({ content: toAgentContent(draft, attachments) });
 
-    setDraft("");
-    setAttachments([]);
-    setAttachmentError(null);
+      if (didSubmit === false) {
+        return;
+      }
 
-    if (fileInputRef.current !== null) {
-      fileInputRef.current.value = "";
+      setDraft("");
+      setAttachments([]);
+      setAttachmentError(null);
+
+      if (fileInputRef.current !== null) {
+        fileInputRef.current.value = "";
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handlePrimaryAction = (): void => {
-    if (isRunning) {
+    if (isRunning && !canSubmit) {
       onCancel?.();
       return;
     }
 
-    handleSubmit();
+    void handleSubmit();
   };
+
+  const isAbortAction = isRunning && !canSubmit;
+  const isSendAction = !isAbortAction;
 
   return (
     <div
@@ -298,7 +308,7 @@ export const RightPromptComposer = ({
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            handleSubmit();
+            void handleSubmit();
           }
         }}
       />
@@ -323,20 +333,20 @@ export const RightPromptComposer = ({
             event.stopPropagation();
             handlePrimaryAction();
           }}
-          disabled={!isRunning && !canSubmit}
-          className={isRunning ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
-          aria-label={isRunning ? "Stop response" : "Send prompt"}
-          title={isRunning ? "Stop response" : "Send prompt"}
+          disabled={isSubmitting || (!isRunning && !canSubmit)}
+          className={isAbortAction ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
+          aria-label={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
+          title={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
         >
-          {isRunning ? (
-            <span className="prompt-stop-square" aria-hidden="true" />
-          ) : (
+          {isSendAction ? (
             <HugeiconsIcon
               icon={ArrowUp02Icon}
               size={16}
               color="currentColor"
               strokeWidth={1.9}
             />
+          ) : (
+            <span className="prompt-stop-square" aria-hidden="true" />
           )}
         </button>
       </div>
