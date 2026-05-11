@@ -60,6 +60,7 @@ export interface AgentRunCallbacks {
 export interface AgentRunHandle {
   readonly cancel: () => void;
   readonly close: () => void;
+  readonly done: Promise<void>;
 }
 
 export const startAgentRun = (
@@ -75,6 +76,29 @@ export const startAgentRun = (
     method: "POST",
     url: buildAgentUrl(agentBaseUrl, "/runs").toString(),
     body: JSON.stringify({ ...input, clientRunId }),
+  });
+
+  return createRunHandle(state);
+};
+
+export const editAgentThreadUserMessage = (
+  agentBaseUrl: string,
+  input: Required<Pick<StartAgentRunInput, "threadId">> & StartAgentRunInput,
+  callbacks: AgentRunCallbacks,
+): AgentRunHandle => {
+  const requestId = createRequestId();
+  const clientRunId = createRequestId();
+  const state = createRunStreamState(agentBaseUrl, callbacks, requestId);
+
+  void runStreamLoop(state, {
+    method: "POST",
+    url: buildAgentUrl(agentBaseUrl, `/threads/${encodeURIComponent(input.threadId)}/edit`).toString(),
+    body: JSON.stringify({
+      path: input.path,
+      content: input.content,
+      numTurns: 1,
+      clientRunId,
+    }),
   });
 
   return createRunHandle(state);
@@ -118,6 +142,10 @@ interface RunStreamState {
   cancelRequestSent: boolean;
   closed: boolean;
   ended: boolean;
+  settled: boolean;
+  readonly done: Promise<void>;
+  readonly resolveDone: () => void;
+  readonly rejectDone: (error: Error) => void;
 }
 
 interface RunStreamRequest {
@@ -140,21 +168,35 @@ const createRunStreamState = (
   agentBaseUrl: string,
   callbacks: AgentRunCallbacks,
   requestId: string,
-): RunStreamState => ({
-  agentBaseUrl,
-  callbacks,
-  requestId,
-  abortController: new AbortController(),
-  runId: null,
-  threadId: null,
-  lastEventId: 0,
-  cancelWhenReady: false,
-  cancelRequestSent: false,
-  closed: false,
-  ended: false,
-});
+): RunStreamState => {
+  let resolveDone: () => void = () => {};
+  let rejectDone: (error: Error) => void = () => {};
+  const done = new Promise<void>((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+
+  return {
+    agentBaseUrl,
+    callbacks,
+    requestId,
+    abortController: new AbortController(),
+    runId: null,
+    threadId: null,
+    lastEventId: 0,
+    cancelWhenReady: false,
+    cancelRequestSent: false,
+    closed: false,
+    ended: false,
+    settled: false,
+    done,
+    resolveDone,
+    rejectDone,
+  };
+};
 
 const createRunHandle = (state: RunStreamState): AgentRunHandle => ({
+  done: state.done,
   cancel: () => {
     state.cancelWhenReady = true;
     void sendCancelIfReady(state);
@@ -162,6 +204,7 @@ const createRunHandle = (state: RunStreamState): AgentRunHandle => ({
   close: () => {
     state.closed = true;
     state.abortController.abort();
+    settleRun(state);
   },
 });
 
@@ -257,11 +300,13 @@ const handleRunStreamMessage = (state: RunStreamState, message: AgentSseMessage)
       runId: message.data.runId,
       threadId: message.data.threadId,
     });
+    settleRun(state);
     return;
   }
 
   state.ended = true;
   state.callbacks.onError?.(new Error(message.data.message));
+  settleRun(state, new Error(message.data.message));
 };
 
 const sendCancelIfReady = async (state: RunStreamState): Promise<void> => {
@@ -294,6 +339,21 @@ const failRun = (state: RunStreamState, error: Error): void => {
 
   state.ended = true;
   state.callbacks.onError?.(error);
+  settleRun(state, error);
+};
+
+const settleRun = (state: RunStreamState, error?: Error): void => {
+  if (state.settled) {
+    return;
+  }
+
+  state.settled = true;
+  if (error === undefined) {
+    state.resolveDone();
+    return;
+  }
+
+  state.rejectDone(error);
 };
 
 const fetchJson = async <TResponse>(url: URL): Promise<TResponse> => {
