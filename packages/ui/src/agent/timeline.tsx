@@ -1,6 +1,6 @@
 "use client";
 
-import { CopyIcon, Edit03Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { CopyIcon, Edit03Icon, Pdf02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -205,8 +205,7 @@ const UserMessageBubble = memo(function UserMessageBubble({
           onSubmit={handleSubmitEdit}
         />
       ) : (
-        <div className="agent-user-bubble">
-          {text.length > 0 ? <div className="agent-user-text">{text}</div> : null}
+        <>
           {attachments.length > 0 ? (
             <div className="agent-user-attachments">
               {attachments.map((attachment, index) => (
@@ -214,7 +213,12 @@ const UserMessageBubble = memo(function UserMessageBubble({
               ))}
             </div>
           ) : null}
-        </div>
+          {text.length > 0 ? (
+            <div className="agent-user-bubble">
+              <div className="agent-user-text">{text}</div>
+            </div>
+          ) : null}
+        </>
       )}
       {!isEditing && (isTurnCompleted || isLatestUserMessage) && text.length > 0 ? (
         <MessageActions actions={actions} />
@@ -299,7 +303,7 @@ const UserMessageEditBox = ({
 };
 
 const UserAttachment = ({ attachment }: { readonly attachment: ImageContent | FileContent }) => {
-  if (attachment.type === "image") {
+  if (attachment.type === "image" && attachment.data.length > 0) {
     return (
       <div className="agent-user-image-attachment">
         <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt="Attached image" />
@@ -307,12 +311,37 @@ const UserAttachment = ({ attachment }: { readonly attachment: ImageContent | Fi
     );
   }
 
+  const filename = attachment.type === "file"
+    ? attachment.filename
+    : typeof attachment.metadata?.["filename"] === "string"
+      ? attachment.metadata["filename"]
+      : "Attached image";
+  const size = typeof attachment.metadata?.["size"] === "number" ? attachment.metadata["size"] : undefined;
+  const detail = size === undefined ? "Document" : formatAttachmentSize(size);
+
   return (
     <div className="agent-user-file-attachment">
-      <span>{attachment.filename}</span>
-      <small>{attachment.mimeType}</small>
+      <div className="agent-user-file-icon">
+        <HugeiconsIcon icon={Pdf02Icon} size={16} color="currentColor" strokeWidth={1.8} />
+      </div>
+      <div className="agent-user-file-meta">
+        <span>{filename}</span>
+        <small>{detail}</small>
+      </div>
     </div>
   );
+};
+
+const formatAttachmentSize = (size: number): string => {
+  if (size < 1024) {
+    return `${String(size)} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const AssistantMessageBlock = memo(function AssistantMessageBlock({

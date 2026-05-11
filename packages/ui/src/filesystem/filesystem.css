@@ -2113,17 +2113,33 @@ button:disabled {
 
 .agent-user-attachments {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
   gap: 6px;
-  margin-top: 8px;
+  max-width: min(76%, 520px);
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.agent-user-attachments::-webkit-scrollbar {
+  display: none;
 }
 
 .agent-user-image-attachment {
+  flex: 0 0 auto;
   overflow: hidden;
-  width: 56px;
-  height: 56px;
-  border-radius: 10px;
+  width: 72px;
+  height: 72px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
   background: var(--accent);
+}
+
+:root.dark .agent-user-image-attachment {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .agent-user-image-attachment img {
@@ -2135,20 +2151,44 @@ button:disabled {
 
 .agent-user-file-attachment {
   display: flex;
-  max-width: 180px;
-  min-width: 0;
-  flex-direction: column;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.06);
-  padding: 6px 8px;
+  box-sizing: border-box;
+  width: min(220px, 64vw);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  background: var(--accent);
+  color: #000000;
+  padding: 6px 10px;
 }
 
 :root.dark .agent-user-file-attachment {
-  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.agent-user-file-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(255, 99, 99, 0.12);
+  color: #ff6363;
+}
+
+.agent-user-file-meta {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
 }
 
 .agent-user-file-attachment span,
 .agent-user-file-attachment small {
+  display: block;
   overflow: hidden;
   max-width: 100%;
   text-overflow: ellipsis;
@@ -2156,18 +2196,19 @@ button:disabled {
 }
 
 .agent-user-file-attachment span {
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 .agent-user-file-attachment small {
-  color: rgba(0, 0, 0, 0.48);
-  font-size: 10px;
-  line-height: 14px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 16px;
 }
 
 :root.dark .agent-user-file-attachment small {
-  color: rgba(255, 255, 255, 0.48);
+  color: rgba(255, 255, 255, 0.42);
 }
 
 .agent-worked-label {
@@ -2645,6 +2686,10 @@ button:disabled {
     max-width: 88%;
     padding: 9px 12px;
     font-size: 13px;
+  }
+
+  .agent-user-attachments {
+    max-width: 88%;
   }
 
   .agent-worked-label,
