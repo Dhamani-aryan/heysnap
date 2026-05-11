@@ -290,6 +290,10 @@ export function FilesystemExplorer({
       onFileUpdates: ({ entries }) => {
         setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
       },
+      onViewState: (viewState) => {
+        setOpenFileTabs(viewState.openFiles.map(toOpenFileTab));
+        setActiveFilePath(null);
+      },
       onLoading: setIsFetching,
       onError: (message) => {
         setListingError(toListingErrorMessage(message));

@@ -25,6 +25,11 @@ export interface FilesystemUploadFile {
   readonly updatedAt?: string;
 }
 
+export interface FilesystemViewState {
+  readonly currentPath: string | null;
+  readonly openFiles: FilesystemEntry[];
+}
+
 export type FilesystemClientMessage =
   | { readonly type: "subscribe"; readonly requestId: string; readonly path?: string; readonly showHidden?: boolean }
   | { readonly type: "refresh"; readonly requestId: string }
@@ -36,7 +41,7 @@ export type FilesystemClientMessage =
   | { readonly type: "ping"; readonly requestId: string };
 
 export type FilesystemServerMessage =
-  | { readonly type: "hello"; readonly root: { readonly name: string; readonly path: "" }; readonly serverTime: string }
+  | { readonly type: "hello"; readonly root: { readonly name: string; readonly path: "" }; readonly serverTime: string; readonly viewState?: FilesystemViewState }
   | { readonly type: "snapshot"; readonly requestId?: string; readonly reason: "subscribe" | "refresh" | "watch" | "mutation"; readonly listing: FilesystemListing }
   | { readonly type: "fileUpdates"; readonly reason: "watch" | "subscription"; readonly entries: FilesystemEntry[]; readonly missingPaths: string[] }
   | { readonly type: "ack"; readonly requestId: string; readonly action: "watchFiles" | "createFolder" | "upload" | "rename" | "trash"; readonly result?: unknown }

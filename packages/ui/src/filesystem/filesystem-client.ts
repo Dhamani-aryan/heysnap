@@ -4,6 +4,7 @@ import type {
   FilesystemListing,
   FilesystemServerMessage,
   FilesystemUploadFile,
+  FilesystemViewState,
 } from "./types";
 
 export type FilesystemConnectionStatus = "connecting" | "alive" | "closed";
@@ -25,6 +26,7 @@ export interface FilesystemClientOptions {
   readonly onLoading: (loading: boolean) => void;
   readonly onError: (message: string | null) => void;
   readonly onFileUpdates?: (updates: { readonly entries: FilesystemEntry[]; readonly missingPaths: string[] }) => void;
+  readonly onViewState?: (viewState: FilesystemViewState) => void;
   readonly onOpen?: () => void;
   readonly onClose?: () => void;
   readonly onConnectionStatus?: (status: FilesystemConnectionStatus) => void;
@@ -188,6 +190,9 @@ export class FilesystemClient {
   private handleServerMessage(message: FilesystemServerMessage): void {
     switch (message.type) {
       case "hello":
+        if (message.viewState !== undefined) {
+          this.options.onViewState?.(message.viewState);
+        }
         return;
       case "snapshot":
         this.options.onLoading(false);
