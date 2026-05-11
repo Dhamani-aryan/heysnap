@@ -1,11 +1,6 @@
-export type CapabilityOperation =
-  | "installTool"
-  | "updateTool"
-  | "connectTool"
-  | "disconnectTool"
-  | "refreshToolStatus"
-  | "installSkill"
-  | "setSkillActive";
+export type CapabilityRestOperation = "installTool" | "updateTool" | "connectTool";
+
+export type CapabilityOperationStatus = "running" | "waiting_for_input" | "completed" | "failed" | "cancelled";
 
 export type ToolInstallState = "not_installed" | "installed" | "installing" | "failed";
 export type ToolConnectionState = "unsupported" | "unknown" | "connected" | "disconnected" | "error";
@@ -94,6 +89,21 @@ export interface CapabilitiesSnapshot {
   readonly skills: readonly AgentSkillSnapshot[];
 }
 
+export interface CapabilityOperationSnapshot {
+  readonly id: string;
+  readonly operation: CapabilityRestOperation;
+  readonly targetId: string;
+  readonly status: CapabilityOperationStatus;
+  readonly messages: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly capabilities?: CapabilitiesSnapshot;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
 export interface AgentToolSnapshot extends AgentToolDefinition {
   readonly installedVersion: string | null;
   readonly installState: ToolInstallState;
@@ -110,38 +120,3 @@ export interface AgentSkillSnapshot extends Omit<AgentSkillDefinition, "sourcePa
   readonly active: boolean;
   readonly lastError?: string;
 }
-
-export type CapabilityClientMessage =
-  | { readonly type: "listCapabilities"; readonly requestId: string }
-  | { readonly type: "installTool"; readonly requestId: string; readonly toolId: string }
-  | { readonly type: "updateTool"; readonly requestId: string; readonly toolId: string }
-  | { readonly type: "connectTool"; readonly requestId: string; readonly toolId: string }
-  | { readonly type: "sendToolInput"; readonly requestId: string; readonly operationId: string; readonly input: string }
-  | { readonly type: "disconnectTool"; readonly requestId: string; readonly toolId: string }
-  | { readonly type: "refreshToolStatus"; readonly requestId: string; readonly toolId: string }
-  | { readonly type: "installSkill"; readonly requestId: string; readonly skillId: string }
-  | { readonly type: "setSkillActive"; readonly requestId: string; readonly skillId: string; readonly active: boolean }
-  | { readonly type: "ping"; readonly requestId: string };
-
-export type CapabilityServerMessage =
-  | { readonly type: "hello"; readonly serverTime: string }
-  | { readonly type: "capabilities"; readonly requestId: string; readonly capabilities: CapabilitiesSnapshot }
-  | {
-      readonly type: "operationStarted";
-      readonly requestId: string;
-      readonly operationId: string;
-      readonly operation: CapabilityOperation;
-      readonly targetId: string;
-    }
-  | { readonly type: "operationProgress"; readonly requestId: string; readonly operationId: string; readonly message: string }
-  | {
-      readonly type: "operationCompleted";
-      readonly requestId: string;
-      readonly operationId: string;
-      readonly capabilities: CapabilitiesSnapshot;
-    }
-  | { readonly type: "operationFailed"; readonly requestId: string; readonly operationId: string; readonly code: string; readonly message: string }
-  | { readonly type: "toolStatus"; readonly requestId: string; readonly tool: AgentToolSnapshot }
-  | { readonly type: "skillStatus"; readonly requestId: string; readonly skill: AgentSkillSnapshot }
-  | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string }
-  | { readonly type: "pong"; readonly requestId: string; readonly serverTime: string };

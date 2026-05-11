@@ -4,8 +4,8 @@ import { basename, resolve } from "node:path";
 import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
 import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
 import { createAgentHttpService } from "./agent/http.js";
+import { createCapabilitiesHttpService } from "./capabilities/http.js";
 import { AgentCapabilitiesService } from "./capabilities/service.js";
-import { attachCapabilitiesWebSocketServer } from "./capabilities/websocket.js";
 import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
 import {
   filesystemDownloadCorsHeaders,
@@ -33,7 +33,7 @@ export interface LocalServerUrls {
   readonly healthUrl: string;
   readonly filesystemWebSocketUrl: string;
   readonly agentBaseUrl: string;
-  readonly capabilitiesWebSocketUrl: string;
+  readonly capabilitiesBaseUrl: string;
 }
 
 export interface RunningServer {
@@ -52,7 +52,6 @@ export interface MachineServerStatus {
   readonly activeSessions: {
     readonly filesystem: number;
     readonly agent: number;
-    readonly capabilities: number;
     readonly total: number;
   };
   readonly safeToRestart: boolean;
@@ -71,8 +70,14 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     codexBin: options.codexBin ?? process.env.CODEX_BIN ?? capabilities.getCodexBin(),
   });
   const agentHttpService = createAgentHttpService({ harness: agentHarness });
+  const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+    if (requestUrl.pathname.startsWith("/capabilities")) {
+      void capabilitiesHttpService.handleRequest(request, response);
+      return;
+    }
 
     if (requestUrl.pathname.startsWith("/agent")) {
       void agentHttpService.handleRequest(request, response);
@@ -124,9 +129,6 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const filesystemSocketServer = attachFilesystemWebSocketServer(server, {
     root: filesystemRoot,
   });
-  const capabilitiesSocketServer = attachCapabilitiesWebSocketServer(server, {
-    service: capabilities,
-  });
 
   await listen(server, requestedPort, host);
 
@@ -137,8 +139,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const getStatus = (): MachineServerStatus => {
     const filesystem = filesystemSocketServer.clients.size;
     const agent = agentHttpService.runManager.getActiveRunCount();
-    const capabilitySessions = capabilitiesSocketServer.clients.size;
-    const total = filesystem + agent + capabilitySessions;
+    const total = filesystem + agent;
 
     return {
       ok: true,
@@ -146,7 +147,6 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
       activeSessions: {
         filesystem,
         agent,
-        capabilities: capabilitySessions,
         total,
       },
       safeToRestart: total === 0,
@@ -162,13 +162,12 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
       healthUrl: `${localBaseUrl}/health`,
       filesystemWebSocketUrl: `${localWebSocketBaseUrl}/filesystem`,
       agentBaseUrl: `${localBaseUrl}/agent`,
-      capabilitiesWebSocketUrl: `${localWebSocketBaseUrl}/capabilities`,
+      capabilitiesBaseUrl: `${localBaseUrl}/capabilities`,
     },
     getStatus,
     async stop() {
       await Promise.all([
         closeWebSocketServer(filesystemSocketServer),
-        closeWebSocketServer(capabilitiesSocketServer),
       ]);
       await closeServer(server);
     },
