@@ -19,7 +19,14 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
-import { retrieveAgentThreadGroups } from "../agent/agent-client";
+import { useAgentThreadGroupsQuery } from "../agent/agent-queries";
+import {
+  AgentRuntimeProvider,
+  useAgentChatStore,
+  useAgentThreadListStore,
+  useOptionalAgentRuntime,
+} from "../agent/agent-runtime";
+import { selectHasThreads } from "../agent/agent-thread-list-store";
 import type { AgentThreadGroup, AgentThreadSummary } from "../agent/types";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
@@ -170,6 +177,19 @@ const createInitialNavigationHistory = (path: string): string[] => {
 const isInvalidInitialFilesystemPathError = (message: string): boolean =>
   /path (?:is not a directory|not found)/iu.test(message);
 
+const isFilesystemConnectionErrorMessage = (message: string): boolean =>
+  message === "Filesystem connection failed." ||
+  message === "Filesystem connection closed." ||
+  message === "Filesystem connection is not open.";
+
+const toListingErrorMessage = (message: string | null): string | null => {
+  if (message === null || isFilesystemConnectionErrorMessage(message)) {
+    return null;
+  }
+
+  return message;
+};
+
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentBaseUrl?: string;
@@ -222,6 +242,7 @@ export function FilesystemExplorer({
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>("connecting");
   const currentPath = listing?.path ?? "";
+  const currentDirectoryName = listing?.name ?? "Desktop";
   const activeFileTab = activeFilePath === null
     ? null
     : openFileTabs.find((tab) => tab.path === activeFilePath) ?? null;
@@ -265,7 +286,7 @@ export function FilesystemExplorer({
       },
       onLoading: setIsFetching,
       onError: (message) => {
-        setListingError(message);
+        setListingError(toListingErrorMessage(message));
 
         if (
           message === null ||
@@ -281,7 +302,7 @@ export function FilesystemExplorer({
         didRetryInitialPath = true;
         onInitialPathInvalidRef.current?.(initialPathForConnection);
         void clientRef.current?.subscribe("").catch((error) => {
-          setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+          setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
           setIsFetching(false);
         });
       },
@@ -316,7 +337,7 @@ export function FilesystemExplorer({
     const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
 
     void clientRef.current?.watchFiles(paths).catch((error) => {
-      setListingError(error instanceof Error ? error.message : "Failed to watch open files.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to watch open files."));
     });
   }, [openFileWatchKey]);
 
@@ -365,7 +386,7 @@ export function FilesystemExplorer({
   const navigateTo = useCallback(
     (nextPath: string) => {
       void subscribeTo(nextPath, true).catch((error) => {
-        setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+        setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
         setIsFetching(false);
       });
     },
@@ -468,7 +489,7 @@ export function FilesystemExplorer({
     const nextIndex = historyIndex - 1;
     setHistoryIndex(nextIndex);
     void subscribeTo(history[nextIndex] ?? "", false).catch((error) => {
-      setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
       setIsFetching(false);
     });
   }, [history, historyIndex, subscribeTo]);
@@ -481,7 +502,7 @@ export function FilesystemExplorer({
     const nextIndex = historyIndex + 1;
     setHistoryIndex(nextIndex);
     void subscribeTo(history[nextIndex] ?? "", false).catch((error) => {
-      setListingError(error instanceof Error ? error.message : "Failed to load folder.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to load folder."));
       setIsFetching(false);
     });
   }, [history, historyIndex, subscribeTo]);
@@ -497,7 +518,7 @@ export function FilesystemExplorer({
         setRenamingPath(entry.path);
       }
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to create folder.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to create folder."));
     }
   }, [currentPath]);
 
@@ -523,7 +544,7 @@ export function FilesystemExplorer({
         setActiveFilePath((currentActivePath) => currentActivePath === entry.path ? renamed.path : currentActivePath);
       }
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to rename item.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to rename item."));
     }
   }, []);
 
@@ -548,7 +569,7 @@ export function FilesystemExplorer({
         currentActivePath !== null && pathsToTrash.includes(currentActivePath) ? null : currentActivePath,
       );
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to move items to Trash.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to move items to Trash."));
     }
   }, []);
 
@@ -566,7 +587,7 @@ export function FilesystemExplorer({
       link.click();
       link.remove();
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to start download.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to start download."));
     }
   }, [websocketUrl]);
 
@@ -641,7 +662,7 @@ export function FilesystemExplorer({
         setSelectionAnchorPath(uploadedPaths[0] ?? null);
       }
     } catch (error) {
-      setListingError(error instanceof Error ? error.message : "Failed to upload items.");
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to upload items."));
       setIsFetching(false);
     } finally {
       setUploadProgress(null);
@@ -683,7 +704,7 @@ export function FilesystemExplorer({
           return;
         }
 
-        setListingError(error instanceof Error ? error.message : "Failed to upload folder.");
+        setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to upload folder."));
       });
   }, [uploadBrowserSources]);
 
@@ -750,7 +771,7 @@ export function FilesystemExplorer({
         canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
         onBack={onBack}
         onForward={onForward}
-        title={listing?.name ?? "Desktop"}
+        title={currentDirectoryName}
         isFetching={isFetching}
         onNewThread={onNewThread}
         isRightSidebarOpen={isRightSidebarOpen}
@@ -768,6 +789,7 @@ export function FilesystemExplorer({
         agentBaseUrl={agentBaseUrl}
         selectedThreadId={selectedThreadId}
         currentPath={currentPath}
+        currentDirectoryName={currentDirectoryName}
         onOpenFilePath={openFilePath}
         onSelectThread={onSelectThread}
         onThreadResolved={onThreadResolved}
@@ -915,44 +937,50 @@ const RightSidebarChats = ({
   readonly selectedThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
-  const [groups, setGroups] = useState<AgentThreadGroup[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const hasThreads = groups.some((group) => group.threads.length > 0);
+  const runtime = useOptionalAgentRuntime();
 
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
+  if (runtime === null) {
+    return (
+      <AgentRuntimeProvider agentBaseUrl={agentBaseUrl}>
+        <RightSidebarChats
+          agentBaseUrl={agentBaseUrl}
+          isOpen={isOpen}
+          selectedThreadId={selectedThreadId}
+          onSelectThread={onSelectThread}
+        />
+      </AgentRuntimeProvider>
+    );
+  }
 
-    let isCurrent = true;
-    setIsLoading(true);
-    setError(null);
+  return (
+    <RightSidebarChatsContent
+      isOpen={isOpen}
+      selectedThreadId={selectedThreadId}
+      onSelectThread={onSelectThread}
+    />
+  );
+};
 
-    void retrieveAgentThreadGroups(agentBaseUrl)
-      .then((nextGroups) => {
-        if (isCurrent) {
-          setGroups(nextGroups);
-          setHasLoaded(true);
-        }
-      })
-      .catch((reason) => {
-        if (isCurrent) {
-          setError(reason instanceof Error ? reason.message : "Failed to load chats.");
-          setHasLoaded(true);
-        }
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [agentBaseUrl, isOpen]);
+const RightSidebarChatsContent = ({
+  isOpen,
+  selectedThreadId,
+  onSelectThread,
+}: {
+  readonly isOpen: boolean;
+  readonly selectedThreadId: string | null;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+}): React.ReactElement => {
+  useAgentThreadGroupsQuery({ enabled: isOpen });
+  const groups = useAgentThreadListStore((state) => state.groups);
+  const isLoading = useAgentThreadListStore((state) => state.isLoading);
+  const hasLoaded = useAgentThreadListStore((state) => state.hasLoaded);
+  const error = useAgentThreadListStore((state) => state.error);
+  const hasThreads = useAgentThreadListStore(selectHasThreads);
+  const activeRun = useAgentChatStore((state) => state.activeRun);
+  const activeThreadSummary = useAgentChatStore((state) => state.threadSummary);
+  const activeStreamingThreadId = activeRun === null
+    ? null
+    : activeRun.threadId ?? activeThreadSummary?.id ?? null;
 
   return (
     <section className="split-right-sidebar-chats" aria-label="Chats">
@@ -969,6 +997,7 @@ const RightSidebarChats = ({
                 key={group.path}
                 group={group}
                 selectedThreadId={selectedThreadId}
+                activeStreamingThreadId={activeStreamingThreadId}
                 onSelectThread={onSelectThread}
               />
             ),
@@ -984,10 +1013,12 @@ const RightSidebarChats = ({
 const RightSidebarChatGroup = ({
   group,
   selectedThreadId,
+  activeStreamingThreadId,
   onSelectThread,
 }: {
   readonly group: AgentThreadGroup;
   readonly selectedThreadId: string | null;
+  readonly activeStreamingThreadId: string | null;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
   const label = group.path.trim().length === 0 ? "Desktop" : group.path;
@@ -995,7 +1026,7 @@ const RightSidebarChatGroup = ({
   const [isExpanded, setIsExpanded] = useState(hasSelectedThread);
   const [isShowingAll, setIsShowingAll] = useState(false);
   const visibleThreads = isShowingAll ? group.threads : group.threads.slice(0, 5);
-  const hasMoreThreads = group.threads.length > visibleThreads.length;
+  const canToggleVisibleThreads = group.threads.length > 5;
 
   useEffect(() => {
     if (hasSelectedThread) {
@@ -1039,17 +1070,18 @@ const RightSidebarChatGroup = ({
                 key={thread.id}
                 thread={thread}
                 isSelected={thread.id === selectedThreadId}
+                isStreaming={thread.isStreaming === true || thread.id === activeStreamingThreadId}
                 onSelectThread={onSelectThread}
               />
             ))}
-            {hasMoreThreads ? (
+            {canToggleVisibleThreads ? (
               <button
                 className="split-right-sidebar-show-more"
                 type="button"
-                onClick={() => setIsShowingAll(true)}
+                onClick={() => setIsShowingAll((current) => !current)}
                 tabIndex={isExpanded ? 0 : -1}
               >
-                Show more
+                {isShowingAll ? "Show less" : "Show more"}
               </button>
             ) : null}
           </div>
@@ -1062,10 +1094,12 @@ const RightSidebarChatGroup = ({
 const RightSidebarChatItem = ({
   thread,
   isSelected,
+  isStreaming,
   onSelectThread,
 }: {
   readonly thread: AgentThreadSummary;
   readonly isSelected: boolean;
+  readonly isStreaming: boolean;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
 }): React.ReactElement => {
   const updatedLabel = useMemo(() => formatSidebarChatDate(thread.updatedAt), [thread.updatedAt]);
@@ -1078,7 +1112,11 @@ const RightSidebarChatItem = ({
       onClick={() => onSelectThread?.(thread)}
     >
       <span className="split-right-sidebar-chat-title">{thread.title}</span>
-      <span className="split-right-sidebar-chat-meta">{updatedLabel}</span>
+      <span className="split-right-sidebar-chat-meta">
+        {isStreaming ? (
+          <span className="split-right-sidebar-chat-spinner" aria-label="Streaming" />
+        ) : updatedLabel}
+      </span>
     </button>
   );
 };
@@ -1234,7 +1272,7 @@ const MachineStatusControl = ({
           setIsOpen((current) => !current);
         }}
       >
-        <HugeiconsIcon icon={PowerIcon} size={14} color="currentColor" strokeWidth={1.8} />
+        <HugeiconsIcon icon={PowerIcon} size={12} color="currentColor" strokeWidth={1.8} />
         <span className="machine-status-label">{machineName}</span>
         <ConnectionStatusIndicator status={status} />
       </button>
@@ -2168,6 +2206,7 @@ const DesktopSplitPane = ({
   agentBaseUrl,
   selectedThreadId,
   currentPath,
+  currentDirectoryName,
   onOpenFilePath,
   onSelectThread,
   onThreadResolved,
@@ -2178,6 +2217,7 @@ const DesktopSplitPane = ({
   readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
+  readonly currentDirectoryName: string;
   readonly onOpenFilePath: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
@@ -2255,6 +2295,7 @@ const DesktopSplitPane = ({
             agentBaseUrl={agentBaseUrl}
             selectedThreadId={selectedThreadId}
             currentPath={currentPath}
+            currentDirectoryName={currentDirectoryName}
             onOpenFilePath={onOpenFilePath}
             onSelectThread={onSelectThread}
             onThreadResolved={onThreadResolved}

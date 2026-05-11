@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import macImageUrl from "../../../../apps/assets/mac.png";
 import newMacImageUrl from "../../../../apps/assets/new-mac.png";
+import { AgentRuntimeProvider } from "../agent/agent-runtime";
 import type { AgentThreadSummary } from "../agent/types";
 import { FilesystemExplorer } from "../filesystem/filesystem-explorer";
 import type { CloudComputer } from "./cloud-client";
@@ -113,23 +114,25 @@ export function MachineWorkspace({
         }}
         transition={WORKSPACE_TRANSITION}
       >
-        <FilesystemExplorer
-          websocketUrl={filesystemWebsocketUrl}
-          agentBaseUrl={agentBaseUrl}
-          capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
-          selectedThreadId={selectedThreadId}
-          initialPath={initialFilesystemPathRef.current}
-          machineName={computer.name}
-          canSleepMachine={computer.kind !== "local"}
-          onFilesystemOpen={handleFilesystemOpen}
-          onPathChange={handlePathChange}
-          onInitialPathInvalid={handleInitialPathInvalid}
-          onSelectThread={onSelectThread}
-          onNewThread={onNewThread}
-          onThreadResolved={onThreadResolved}
-          onBackToMachines={onBackToMachines}
-          onSleepMachine={onSleepMachine}
-        />
+        <AgentRuntimeProvider key={computer.id} agentBaseUrl={agentBaseUrl}>
+          <FilesystemExplorer
+            websocketUrl={filesystemWebsocketUrl}
+            agentBaseUrl={agentBaseUrl}
+            capabilitiesWebsocketUrl={capabilitiesWebsocketUrl}
+            selectedThreadId={selectedThreadId}
+            initialPath={initialFilesystemPathRef.current}
+            machineName={computer.name}
+            canSleepMachine={computer.kind !== "local"}
+            onFilesystemOpen={handleFilesystemOpen}
+            onPathChange={handlePathChange}
+            onInitialPathInvalid={handleInitialPathInvalid}
+            onSelectThread={onSelectThread}
+            onNewThread={onNewThread}
+            onThreadResolved={onThreadResolved}
+            onBackToMachines={onBackToMachines}
+            onSleepMachine={onSleepMachine}
+          />
+        </AgentRuntimeProvider>
       </motion.div>
       <AnimatePresence>
         {!isWorkspaceReady ? (
