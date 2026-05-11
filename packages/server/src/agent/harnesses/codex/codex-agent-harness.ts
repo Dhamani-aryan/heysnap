@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type {
   AgentContent,
   AgentErrorPayload,
+  EditThreadUserMessageInput,
   AgentMessage,
   AgentRunEvent,
   AgentRuntimeEventBase,
@@ -187,8 +188,46 @@ export class CodexAgentHarness implements IAgentHarness {
   async *sendMessage(_input: SendMessageInput): AsyncIterable<AgentRunEvent> {
     const isNewThread = _input.threadId === undefined;
     const thread = isNewThread ? await this.startThread(_input.path) : await this.resumeThread(_input.threadId);
-    const threadId = thread.id;
     const path = isNewThread ? _input.path : toThreadSummary(thread, this.filesystemRoot).lastPath;
+    const codexInput = agentContentToCodexInput(_input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: _input.path,
+    });
+
+    yield* this.startTurn({
+      thread,
+      path,
+      content: _input.content,
+      codexInput,
+      emitThreadCreated: isNewThread,
+    });
+  }
+
+  async *editThreadUserMessage(input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent> {
+    const thread = await this.resumeThread(input.threadId);
+
+    await this.client.request("thread/rollback", {
+      threadId: input.threadId,
+      numTurns: input.numTurns,
+    });
+
+    yield* this.startTurn({
+      thread,
+      path: input.path,
+      content: input.content,
+      codexInput: agentContentToCodexInput(input.content),
+      emitThreadCreated: false,
+    });
+  }
+
+  private async *startTurn(input: {
+    readonly thread: CodexThread;
+    readonly path: string;
+    readonly content: AgentContent;
+    readonly codexInput: readonly CodexUserInput[];
+    readonly emitThreadCreated: boolean;
+  }): AsyncIterable<AgentRunEvent> {
+    const threadId = input.thread.id;
     const queue = new AsyncQueue<CodexAppServerNotification>();
     const pendingNotifications: CodexAppServerNotification[] = [];
     let turnId: string | undefined;
@@ -207,15 +246,11 @@ export class CodexAgentHarness implements IAgentHarness {
         queue.push(notification);
       }
     });
-    const codexInput = agentContentToCodexInput(_input.content, {
-      filesystemRoot: this.filesystemRoot,
-      path: _input.path,
-    });
 
     try {
       const turnResponse = await this.client.request<CodexTurnStartResponse>("turn/start", {
         threadId,
-        input: codexInput,
+        input: input.codexInput,
       });
       turnId = turnResponse.turn.id;
       const scope = { runId: turnId, threadId };
@@ -244,9 +279,9 @@ export class CodexAgentHarness implements IAgentHarness {
       });
       const mapper = new CodexLiveTurnMapper({
         scope,
-        thread,
+        thread: input.thread,
         turn: turnResponse.turn,
-        path,
+        path: input.path,
         filesystemRoot: this.filesystemRoot,
         nextBase,
         readUpdatedThread: () => this.client.request<CodexThreadReadResponse>("thread/read", {
@@ -261,17 +296,17 @@ export class CodexAgentHarness implements IAgentHarness {
         }
       }
 
-      if (isNewThread) {
+      if (input.emitThreadCreated) {
         yield {
-          ...nextBase("thread.created", { createdAt: threadTimestampMs(thread) }),
-          thread: toThreadSummary(thread, this.filesystemRoot, 1),
+          ...nextBase("thread.created", { createdAt: threadTimestampMs(input.thread) }),
+          thread: toThreadSummary(input.thread, this.filesystemRoot, 1),
         };
       }
 
       yield {
-        ...nextBase("turn.started", { createdAt: turnTimestampMs(turnResponse.turn, thread) }),
-        input: _input.content,
-        path,
+        ...nextBase("turn.started", { createdAt: turnTimestampMs(turnResponse.turn, input.thread) }),
+        input: input.content,
+        path: input.path,
       };
 
       for (;;) {
