@@ -343,6 +343,7 @@ const AssistantMessageBlock = memo(function AssistantMessageBlock({
           <ChatMarkdown
             text={markdown}
             cwd={currentPath}
+            isStreaming={!isTurnCompleted}
             workspaceRoot={workspaceRoot}
             onOpenFilePath={onOpenFilePath}
           />
