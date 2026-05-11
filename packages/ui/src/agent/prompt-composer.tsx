@@ -7,7 +7,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgentContent } from "./types";
 
 const PDF_MIME_TYPE = "application/pdf";
-const ATTACHMENT_ACCEPT = `image/*,${PDF_MIME_TYPE}`;
+const ATTACHMENT_ACCEPT = "";
+const DEFAULT_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 const PROMPT_MAX_HEIGHT = 220;
 
 export type PromptAttachment = {
@@ -50,14 +51,6 @@ const formatAttachmentSize = (size: number | undefined): string | null => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const isSupportedAttachmentFile = (file: File): boolean => {
-  if (file.type === PDF_MIME_TYPE) {
-    return true;
-  }
-
-  return file.type.startsWith("image/");
-};
-
 const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   let binary = "";
   const bytes = new Uint8Array(buffer);
@@ -74,9 +67,9 @@ const toPromptAttachment = async (file: File): Promise<PromptAttachment> => {
 
   return {
     id: getAttachmentId(),
-    type: file.type === PDF_MIME_TYPE ? "file" : "image",
+    type: file.type.startsWith("image/") ? "image" : "file",
     fileName: file.name,
-    mimeType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? PDF_MIME_TYPE : ""),
+    mimeType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? PDF_MIME_TYPE : DEFAULT_ATTACHMENT_MIME_TYPE),
     size: file.size,
     content,
   };
@@ -154,20 +147,10 @@ export const RightPromptComposer = ({
       return;
     }
 
-    const supported = nextFiles.filter(isSupportedAttachmentFile);
-    const rejected = nextFiles.filter((file) => !isSupportedAttachmentFile(file));
-
-    setAttachmentError(rejected.length > 0 ? "Only images and PDFs are supported." : null);
-
-    if (supported.length === 0) {
-      if (fileInputRef.current !== null) {
-        fileInputRef.current.value = "";
-      }
-      return;
-    }
+    setAttachmentError(null);
 
     try {
-      const nextAttachments = await Promise.all(supported.map((file) => toPromptAttachment(file)));
+      const nextAttachments = await Promise.all(nextFiles.map((file) => toPromptAttachment(file)));
       setAttachments((current) => [...current, ...nextAttachments]);
     } catch (error) {
       setAttachmentError(error instanceof Error ? error.message : "Failed to read attachment.");
@@ -351,7 +334,7 @@ export const RightPromptComposer = ({
         </button>
       </div>
 
-      {isDragActive ? <div className="prompt-drop-overlay">Drop images or PDFs to attach</div> : null}
+      {isDragActive ? <div className="prompt-drop-overlay">Drop files to attach</div> : null}
     </div>
   );
 };
