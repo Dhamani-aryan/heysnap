@@ -7,6 +7,7 @@ import type {
   AgentMessage,
   AgentRunEvent,
   AgentThread,
+  AgentUiContext,
   IAgentHarness,
   SteerRunResult,
 } from "./types.js";
@@ -21,6 +22,7 @@ export interface StartAgentRunInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
   readonly clientRunId?: string;
   readonly edit?: {
     readonly numTurns: number;
@@ -209,7 +211,14 @@ export class AgentRunManager {
     await this.options.harness.cancelRun?.({ threadId, runId });
   }
 
-  async steerRun(threadId: string, runId: string, content: AgentContent): Promise<SteerRunResult> {
+  async steerRun(input: {
+    readonly threadId: string;
+    readonly runId: string;
+    readonly path: string;
+    readonly content: AgentContent;
+    readonly uiContext?: AgentUiContext;
+  }): Promise<SteerRunResult> {
+    const { threadId, runId } = input;
     const record = this.getRun(runId);
 
     if (record === undefined) {
@@ -228,7 +237,7 @@ export class AgentRunManager {
       throw new AgentError("STEER_NOT_SUPPORTED", "Steering active turns is not supported by this agent harness");
     }
 
-    return this.options.harness.steerRun({ threadId, runId, content });
+    return this.options.harness.steerRun(input);
   }
 
   private async consumeRun(record: AgentRunRecord): Promise<void> {
@@ -238,12 +247,14 @@ export class AgentRunManager {
           threadId: record.input.threadId,
           path: record.input.path,
           content: record.input.content,
+          uiContext: record.input.uiContext,
         })
         : this.editThreadUserMessage({
           threadId: requireThreadId(record.input.threadId),
           path: record.input.path,
           content: record.input.content,
           numTurns: record.input.edit.numTurns,
+          uiContext: record.input.uiContext,
         });
       const iterator = iterable[Symbol.asyncIterator]();
 

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { AgentError, toAgentError } from "./errors.js";
 import { isAgentContent } from "./validation.js";
-import type { AgentContent, AgentThreadGroup, IAgentHarness } from "./types.js";
+import type { AgentContent, AgentThreadGroup, AgentUiContext, IAgentHarness } from "./types.js";
 import {
   AgentRunManager,
   type AgentRunRecord,
@@ -139,9 +139,11 @@ const handleAgentHttpRequest = async (
 
     if (request.method === "POST" && steerMatch !== null) {
       const result = await runManager.steerRun(
-        decodeURIComponent(steerMatch[1] ?? ""),
-        decodeURIComponent(steerMatch[2] ?? ""),
-        parseSteerRunContent(await readJsonBody(request)),
+        parseSteerRunInput(
+          decodeURIComponent(steerMatch[1] ?? ""),
+          decodeURIComponent(steerMatch[2] ?? ""),
+          await readJsonBody(request),
+        ),
       );
       sendJson(response, 200, result);
       return true;
@@ -235,6 +237,7 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
     threadId: input["threadId"] as string | undefined,
     path: input["path"],
     content: input["content"] as AgentContent,
+    uiContext: parseAgentUiContext(input["uiContext"]),
     clientRunId: input["clientRunId"] as string | undefined,
   };
 };
@@ -262,23 +265,76 @@ const parseEditRunInput = (threadId: string, body: unknown): StartAgentRunInput 
     threadId,
     path: input["path"],
     content: input["content"] as AgentContent,
+    uiContext: parseAgentUiContext(input["uiContext"]),
     clientRunId: input["clientRunId"] as string | undefined,
     edit: { numTurns: numTurns as number },
   };
 };
 
-const parseSteerRunContent = (body: unknown): AgentContent => {
+const parseSteerRunInput = (
+  threadId: string,
+  runId: string,
+  body: unknown,
+): {
+  readonly threadId: string;
+  readonly runId: string;
+  readonly path: string;
+  readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
+} => {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new Error("Steer request must be a JSON object");
   }
 
   const input = body as Record<string, unknown>;
 
-  if (!isAgentContent(input["content"])) {
+  if (threadId.length === 0 || runId.length === 0 || typeof input["path"] !== "string" || !isAgentContent(input["content"])) {
     throw new Error("Invalid steer request");
   }
 
-  return input["content"] as AgentContent;
+  return {
+    threadId,
+    runId,
+    path: input["path"],
+    content: input["content"] as AgentContent,
+    uiContext: parseAgentUiContext(input["uiContext"]),
+  };
+};
+
+const parseAgentUiContext = (value: unknown): AgentUiContext | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid UI context");
+  }
+
+  const context = value as Record<string, unknown>;
+
+  if (!Array.isArray(context["openFiles"])) {
+    throw new Error("Invalid UI context");
+  }
+
+  return {
+    openFiles: context["openFiles"].map((file): AgentUiContext["openFiles"][number] => {
+      if (
+        typeof file !== "object" ||
+        file === null ||
+        Array.isArray(file) ||
+        typeof (file as Record<string, unknown>)["path"] !== "string" ||
+        typeof (file as Record<string, unknown>)["isFocused"] !== "boolean"
+      ) {
+        throw new Error("Invalid UI context");
+      }
+
+      const openFile = file as Record<string, unknown>;
+      return {
+        path: openFile["path"] as string,
+        isFocused: openFile["isFocused"] as boolean,
+      };
+    }),
+  };
 };
 
 const withStreamingState = (

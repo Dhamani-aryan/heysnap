@@ -54,7 +54,15 @@ describe("agent HTTP API", () => {
     const { url } = await startAgentHttpServer(new MockAgentHarness());
     const response = await fetch(`${url}/agent/runs`, {
       method: "POST",
-      body: JSON.stringify({ path: "Projects/app", content: textContent("Build the UI") }),
+      body: JSON.stringify({
+        path: "Projects/app",
+        content: textContent("Build the UI"),
+        uiContext: {
+          openFiles: [
+            { path: "Projects/app/src/App.tsx", isFocused: true },
+          ],
+        },
+      }),
       headers: { "content-type": "application/json" },
     });
 
@@ -240,14 +248,63 @@ describe("agent HTTP API", () => {
       `${url}/agent/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/steer`,
       {
         method: "POST",
-        body: JSON.stringify({ content: steerContent }),
+        body: JSON.stringify({
+          path: "Projects/app",
+          content: steerContent,
+          uiContext: {
+            openFiles: [
+              { path: "Projects/app/src/App.tsx", isFocused: false },
+              { path: "Projects/app/src/Test.ts", isFocused: true },
+            ],
+          },
+        }),
         headers: { "content-type": "application/json" },
       },
     );
 
     expect(steerResponse.status).toBe(200);
     expect(await steerResponse.json()).toEqual({ turnId: runId });
-    expect(harness.steerInputs).toEqual([{ threadId, runId, content: steerContent }]);
+    expect(harness.steerInputs).toEqual([{
+      threadId,
+      runId,
+      path: "Projects/app",
+      content: steerContent,
+      uiContext: {
+        openFiles: [
+          { path: "Projects/app/src/App.tsx", isFocused: false },
+          { path: "Projects/app/src/Test.ts", isFocused: true },
+        ],
+      },
+    }]);
+    harness.resume();
+  });
+
+  it("rejects invalid UI context for steer requests", async () => {
+    const harness = new PausedAfterDeltaHarness();
+    const { url } = await startAgentHttpServer(harness);
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "Projects/app", content: textContent("Build the UI") }),
+      headers: { "content-type": "application/json" },
+    });
+    const firstMessages = await readSseMessages(response, 1);
+    const threadId = readThreadId(firstMessages);
+    const runId = readRunId(firstMessages);
+
+    const steerResponse = await fetch(
+      `${url}/agent/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/steer`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          path: "Projects/app",
+          content: textContent("Invalid"),
+          uiContext: { openFiles: [{ path: "Projects/app/src/App.tsx" }] },
+        }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    expect(steerResponse.status).toBe(400);
     harness.resume();
   });
 
@@ -265,14 +322,14 @@ describe("agent HTTP API", () => {
 
     const missingResponse = await fetch(`${completedUrl}/agent/threads/thread-1/runs/missing-run/steer`, {
       method: "POST",
-      body: JSON.stringify({ content: textContent("Missing") }),
+      body: JSON.stringify({ path: "Projects/app", content: textContent("Missing") }),
       headers: { "content-type": "application/json" },
     });
     const inactiveResponse = await fetch(
       `${completedUrl}/agent/threads/${encodeURIComponent(completedThreadId)}/runs/${encodeURIComponent(completedRunId)}/steer`,
       {
         method: "POST",
-        body: JSON.stringify({ content: textContent("Inactive") }),
+        body: JSON.stringify({ path: "Projects/app", content: textContent("Inactive") }),
         headers: { "content-type": "application/json" },
       },
     );
@@ -290,7 +347,7 @@ describe("agent HTTP API", () => {
       `${activeUrl}/agent/threads/other-thread/runs/${encodeURIComponent(activeRunId)}/steer`,
       {
         method: "POST",
-        body: JSON.stringify({ content: textContent("Mismatch") }),
+        body: JSON.stringify({ path: "Projects/app", content: textContent("Mismatch") }),
         headers: { "content-type": "application/json" },
       },
     );

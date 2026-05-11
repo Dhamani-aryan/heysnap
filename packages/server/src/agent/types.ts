@@ -15,7 +15,7 @@ export interface ImageContent {
 
 export interface FileContent {
   readonly type: "file";
-  readonly data: string;
+  readonly data?: string;
   readonly mimeType: string;
   readonly filename: string;
   readonly metadata?: Record<string, unknown>;
@@ -187,10 +187,20 @@ export interface GetThreadInput {
   readonly threadId: string;
 }
 
+export interface AgentUiContext {
+  readonly openFiles: readonly AgentUiOpenFile[];
+}
+
+export interface AgentUiOpenFile {
+  readonly path: string;
+  readonly isFocused: boolean;
+}
+
 export interface SendMessageInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
 }
 
 export interface EditThreadUserMessageInput {
@@ -198,6 +208,7 @@ export interface EditThreadUserMessageInput {
   readonly path: string;
   readonly content: AgentContent;
   readonly numTurns: number;
+  readonly uiContext?: AgentUiContext;
 }
 
 export interface CancelRunInput {
@@ -208,7 +219,9 @@ export interface CancelRunInput {
 export interface SteerRunInput {
   readonly threadId: string;
   readonly runId: string;
+  readonly path: string;
   readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
 }
 
 export interface SteerRunResult {
