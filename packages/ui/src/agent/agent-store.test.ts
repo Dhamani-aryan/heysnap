@@ -149,6 +149,54 @@ describe("agent chat store projector", () => {
     expect(store.getState().activeRun?.optimisticUserMessageId).toBeNull();
   });
 
+  it("reconciles hydrated attachment placeholders without duplicating optimistic attachments", () => {
+    const store = createAgentChatStore();
+    const optimisticMessage = {
+      role: "user" as const,
+      id: "optimistic-user-1",
+      timestamp: 1_000,
+      path: "project",
+      content: [
+        { type: "text" as const, content: "Review this" },
+        {
+          type: "file" as const,
+          data: "cGRm",
+          mimeType: "application/pdf",
+          filename: "notes.pdf",
+        },
+      ],
+    };
+    const serverMessage = {
+      ...optimisticMessage,
+      id: "user-1",
+      content: [
+        { type: "text" as const, content: "Review this" },
+        {
+          type: "file" as const,
+          mimeType: "application/pdf",
+          filename: "notes.pdf",
+          metadata: { savedPath: "/workspace/project/.codex/user_uploads/notes.pdf" },
+        },
+      ],
+    };
+
+    store.getState().addOptimisticUserMessage(optimisticMessage, {
+      runId: null,
+      threadId: "thread-1",
+      startedAt: 1_000,
+      optimisticUserMessageId: optimisticMessage.id,
+    });
+    store.getState().applyRuntimeEvent(baseEvent("message.started", {
+      messageId: serverMessage.id,
+      messageType: "user",
+      message: serverMessage,
+    }, 1));
+
+    expect(store.getState().messageOrder).toEqual(["optimistic-user-1"]);
+    expect(store.getState().messagesById["optimistic-user-1"]?.content).toEqual(serverMessage.content);
+    expect(store.getState().messagesById["user-1"]).toBeUndefined();
+  });
+
   it("merges replayed ongoing turn events into the loaded thread snapshot", () => {
     const store = createAgentChatStore();
     const loadedUser = {
@@ -218,6 +266,58 @@ describe("agent chat store projector", () => {
       "message:loaded-user",
       "status:loaded-user",
       "message:replayed-assistant",
+    ]);
+  });
+
+  it("merges replayed user events into loaded messages even when attachment hydration differs", () => {
+    const store = createAgentChatStore();
+    const loadedUser = {
+      role: "user" as const,
+      id: "loaded-user",
+      timestamp: 1_000,
+      path: "project",
+      content: [
+        { type: "text" as const, content: "What is this picture about?" },
+        {
+          type: "image" as const,
+          data: "aW1hZ2U=",
+          mimeType: "image/png",
+          metadata: { filename: "screenshot.png" },
+        },
+      ],
+    };
+    const replayedUser = {
+      role: "user" as const,
+      id: "replayed-user",
+      timestamp: 1_000,
+      path: "project",
+      content: [{ type: "text" as const, content: "What is this picture about?" }],
+    };
+
+    store.getState().loadThread({
+      id: "thread-1",
+      title: "Picture",
+      startPath: "project",
+      lastPath: "project",
+      createdAt: 1,
+      updatedAt: 2,
+      messageCount: 1,
+      messages: [loadedUser],
+      activities: [],
+    });
+    store.getState().markRunStarted({ runId: "run-1", threadId: "thread-1" });
+    store.getState().applyRuntimeEvent(baseEvent("message.started", {
+      messageId: replayedUser.id,
+      messageType: "user",
+      message: replayedUser,
+    }, 1));
+
+    expect(store.getState().messageOrder).toEqual(["loaded-user"]);
+    expect(store.getState().messagesById["replayed-user"]).toBeUndefined();
+    expect(store.getState().messagesById["loaded-user"]?.content).toEqual(loadedUser.content);
+    expect(store.getState().timelineRows.map((row) => row.id)).toEqual([
+      "message:loaded-user",
+      "status:loaded-user",
     ]);
   });
 

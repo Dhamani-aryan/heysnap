@@ -108,6 +108,6 @@ const attachmentSignature = (message: Extract<AgentTranscriptMessage, { readonly
   message.content
     .filter((block) => block.type === "image" || block.type === "file")
     .map((block) => block.type === "file"
-      ? `file:${block.filename}:${block.mimeType}:${block.data.length}`
+      ? `file:${block.filename}:${block.mimeType}:${block.data?.length ?? 0}`
       : `image:${block.mimeType}:${block.data.length}`)
     .join("|");

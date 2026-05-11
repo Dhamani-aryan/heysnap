@@ -474,7 +474,7 @@ const findEquivalentMessageKey = (
       candidate?.role === "user" &&
       candidate.path === message.path &&
       getTextContent(candidate.content) === getTextContent(message.content) &&
-      contentAttachmentSignature(candidate.content) === contentAttachmentSignature(message.content)
+      userContentsCanReconcile(candidate.content, message.content)
     ) {
       return messageId;
     }
@@ -677,6 +677,23 @@ const coalesceDeltaEvents = (events: readonly AgentRunEvent[]): AgentRunEvent[] 
 };
 
 const mergeMessage = (previous: AgentMessage | undefined, next: AgentMessage): AgentMessage => {
+  if (previous?.role === "user" && next.role === "user") {
+    const previousAttachments = previous.content.filter((block) => block.type === "image" || block.type === "file");
+    const nextHasAttachments = next.content.some((block) => block.type === "image" || block.type === "file");
+
+    if (
+      previousAttachments.length > 0 &&
+      !nextHasAttachments &&
+      getTextContent(previous.content) === getTextContent(next.content)
+    ) {
+      return {
+        ...next,
+        path: previous.path,
+        content: [...next.content, ...previousAttachments],
+      };
+    }
+  }
+
   if (previous?.role === "assistant" && next.role === "assistant") {
     const previousText = getAssistantMarkdown(previous);
     const nextText = getAssistantMarkdown(next);
@@ -874,6 +891,13 @@ const contentAttachmentSignature = (content: AgentContent): string =>
   content
     .filter((block) => block.type === "image" || block.type === "file")
     .map((block) => block.type === "file"
-      ? `file:${block.filename}:${block.mimeType}:${block.data.length}`
+      ? `file:${block.filename}:${block.mimeType}:${block.data?.length ?? 0}`
       : `image:${block.mimeType}:${block.data.length}`)
     .join("|");
+
+const userContentsCanReconcile = (left: AgentContent, right: AgentContent): boolean => {
+  const leftSignature = contentAttachmentSignature(left);
+  const rightSignature = contentAttachmentSignature(right);
+
+  return leftSignature.length === 0 || rightSignature.length === 0 || leftSignature === rightSignature;
+};
