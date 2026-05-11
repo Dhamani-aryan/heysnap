@@ -57,7 +57,7 @@ export interface ComputerAccessSessionResponse {
   readonly routes: {
     readonly filesystemWebSocketUrl: string;
     readonly agentBaseUrl: string;
-    readonly capabilitiesWebSocketUrl?: string;
+    readonly capabilitiesBaseUrl?: string;
   };
 }
 

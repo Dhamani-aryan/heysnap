@@ -259,7 +259,7 @@ export const createComputerRoutes = (
       routes: {
         filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
         agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
-        capabilitiesWebSocketUrl: `/gateway/computers/${computer.id}/capabilities`,
+        capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
       },
     }, 201);
   });
