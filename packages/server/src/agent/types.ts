@@ -122,6 +122,7 @@ export interface AgentThreadSummary {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageCount: number;
+  readonly isStreaming?: boolean;
 }
 
 export interface AgentThreadGroup {
@@ -192,6 +193,13 @@ export interface SendMessageInput {
   readonly content: AgentContent;
 }
 
+export interface EditThreadUserMessageInput {
+  readonly threadId: string;
+  readonly path: string;
+  readonly content: AgentContent;
+  readonly numTurns: number;
+}
+
 export interface CancelRunInput {
   readonly threadId: string;
   readonly runId: string;
@@ -210,6 +218,7 @@ export interface IAgentHarness {
   retrieveThreads(input: RetrieveThreadsInput): Promise<RetrieveThreadsResult>;
   getThread(input: GetThreadInput): Promise<AgentThread>;
   sendMessage(input: SendMessageInput): AsyncIterable<AgentRunEvent>;
+  editThreadUserMessage?(input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent>;
   cancelRun?(input: CancelRunInput): Promise<void>;
 }
 
