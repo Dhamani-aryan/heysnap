@@ -74,6 +74,8 @@ RUN curl --fail --location --silent --show-error https://astral.sh/uv/install.sh
   && install -m 0755 "$temp_dir/supabase" /usr/local/bin/supabase \
   && rm -rf "$temp_dir"
 
+RUN curl -fsSL https://github.com/ank1015/xlsx-viewer-and-parser/releases/latest/download/install.sh | sh
+
 ENV NODE_PATH="/usr/local/lib/node_modules"
 ENV PATH="/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

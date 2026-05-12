@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft01Icon, Settings03Icon } from "@hugeicons/core-free-icons";
+import { Settings03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
 
@@ -18,20 +18,16 @@ const getImageSrc = (asset: ImageAsset): string => {
 export interface RemoteMachineCreateScreenProps {
   readonly error: string | null;
   readonly isSubmitting: boolean;
-  readonly onBack: () => void;
   readonly onCreateMachine: (input: { readonly name: string }) => Promise<void>;
   readonly onLogout: () => Promise<void>;
-  readonly showBackButton?: boolean;
   readonly user: CloudUser;
 }
 
 export function RemoteMachineCreateScreen({
   error,
   isSubmitting,
-  onBack,
   onCreateMachine,
   onLogout,
-  showBackButton = true,
   user,
 }: RemoteMachineCreateScreenProps): React.ReactElement {
   const machineName = createDefaultMachineName(user.username);
@@ -45,7 +41,7 @@ export function RemoteMachineCreateScreen({
   }, []);
 
   return (
-    <main className="cloud-shell cloud-remote-create-shell" data-has-back={showBackButton ? "true" : "false"}>
+    <main className="cloud-shell cloud-remote-create-shell">
       <header className="cloud-topbar">
         <div className="cloud-topbar-actions">
           <ThemeToggle />
@@ -60,14 +56,6 @@ export function RemoteMachineCreateScreen({
           </button>
         </div>
       </header>
-
-      {showBackButton ? (
-        <div className="cloud-remote-create-back-row">
-          <button className="cloud-remote-create-back" type="button" aria-label="Back to machines" onClick={onBack}>
-            <HugeiconsIcon icon={ArrowLeft01Icon} size={24} color="currentColor" strokeWidth={1.8} />
-          </button>
-        </div>
-      ) : null}
 
       <section
         className="cloud-local-onboarding cloud-remote-create-onboarding"

@@ -16,7 +16,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN corepack enable \
   && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
+  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && curl -fsSL https://github.com/ank1015/xlsx-viewer-and-parser/releases/latest/download/install.sh | sh \
   && npm install -g @openai/codex@0.128.0 \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*

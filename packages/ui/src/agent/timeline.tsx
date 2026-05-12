@@ -3,10 +3,9 @@
 import { CopyIcon, Edit03Icon, Pdf02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import { ChatMarkdown } from "./chat-markdown";
 import { getAssistantMarkdown, getTextContent, type AgentTimelineRow } from "./agent-store";
 import { useAgentRuntime } from "./agent-runtime";
 import type {
@@ -14,6 +13,10 @@ import type {
   FileContent,
   ImageContent,
 } from "./types";
+
+const ChatMarkdown = lazy(() =>
+  import("./chat-markdown").then((module) => ({ default: module.ChatMarkdown })),
+);
 
 export interface AgentTimelineProps {
   readonly currentPath: string;
@@ -369,13 +372,15 @@ const AssistantMessageBlock = memo(function AssistantMessageBlock({
     <div className="agent-message-row assistant group-assistant">
       {markdown.length > 0 ? (
         <div className="agent-assistant-markdown">
-          <ChatMarkdown
-            text={markdown}
-            cwd={currentPath}
-            isStreaming={!isTurnCompleted}
-            workspaceRoot={workspaceRoot}
-            onOpenFilePath={onOpenFilePath}
-          />
+          <Suspense fallback={<div className="chat-markdown" />}>
+            <ChatMarkdown
+              text={markdown}
+              cwd={currentPath}
+              isStreaming={!isTurnCompleted}
+              workspaceRoot={workspaceRoot}
+              onOpenFilePath={onOpenFilePath}
+            />
+          </Suspense>
         </div>
       ) : null}
       {isTurnCompleted && markdown.length > 0 ? (

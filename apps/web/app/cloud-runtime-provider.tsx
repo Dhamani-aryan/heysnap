@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudRuntimeProvider } from "@ank1015-app/ui";
+import { CloudRuntimeProvider } from "@ank1015-app/ui/cloud-runtime";
 
 export interface WebCloudRuntimeProviderProps {
   readonly children: React.ReactNode;

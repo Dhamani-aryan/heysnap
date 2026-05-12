@@ -2,17 +2,17 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { CloudDashboardApp, type CloudAppRoute, type CloudRouteChangeOptions } from "@ank1015-app/ui/cloud-dashboard-app";
+import { CloudApp, type CloudAppRoute, type CloudRouteChangeOptions } from "@ank1015-app/ui/cloud-app";
 
-export interface WebCloudAppProps {
+export interface WebCloudWorkspaceAppProps {
   readonly cloudServerUrl: string;
-  readonly route: CloudAppRoute;
+  readonly route: Extract<CloudAppRoute, { readonly view: "workspace" }>;
 }
 
-export function WebCloudApp({
+export function WebCloudWorkspaceApp({
   cloudServerUrl,
   route,
-}: WebCloudAppProps): React.ReactElement {
+}: WebCloudWorkspaceAppProps): React.ReactElement {
   const router = useRouter();
 
   const handleRouteChange = useCallback((
@@ -29,7 +29,7 @@ export function WebCloudApp({
   }, [router]);
 
   return (
-    <CloudDashboardApp
+    <CloudApp
       cloudServerUrl={cloudServerUrl}
       route={route}
       onRouteChange={handleRouteChange}
