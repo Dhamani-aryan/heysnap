@@ -493,7 +493,8 @@ function CloudAppContent({
         onShowOnboarding={showMachinesOnboarding}
         onRefresh={refreshMachines}
         onStartCreateMachine={startRemoteMachineCreate}
-        showOnboardingModal={!hasSeenMachinesOnboarding}
+        // showOnboardingModal={!hasSeenMachinesOnboarding}
+        showOnboardingModal={false}
         user={user}
       />
     );
