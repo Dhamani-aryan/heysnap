@@ -81,6 +81,7 @@ HELPER
   chmod 0755 "$helper_path"
 
   if command -v sudo >/dev/null 2>&1 && [ -d "$sudoers_dir" ]; then
+    chmod 0640 "$sudoers_dir/ank1015-agent-capabilities" 2>/dev/null || true
     cat >"$sudoers_dir/ank1015-agent-capabilities" <<SUDOERS
 agent ALL=(root) NOPASSWD: $helper_path
 SUDOERS
@@ -88,10 +89,74 @@ SUDOERS
   fi
 }
 
+rollback_current_link() {
+  local previous_target="$1"
+  local current_link
+  current_link="$(ank1015_machine_current_link)"
+
+  if [ -n "$previous_target" ] && [ -d "$previous_target" ]; then
+    point_current_link_at "$previous_target"
+    return 0
+  fi
+
+  rm -f "$current_link"
+}
+
+run_release_migrations() {
+  local version="$1"
+  local release_dir="$2"
+  local previous_target="${3:-}"
+  local migrations_dir applied_dir logs_dir script migration_id marker log_file
+  migrations_dir="$release_dir/migrations"
+
+  if [ ! -d "$migrations_dir" ]; then
+    return 0
+  fi
+
+  applied_dir="$(ank1015_machine_migrations_applied_dir)/$version"
+  logs_dir="$(ank1015_machine_migrations_logs_dir)/$version"
+  mkdir -p "$applied_dir" "$logs_dir"
+
+  for script in "$migrations_dir"/*.sh; do
+    if [ ! -e "$script" ]; then
+      continue
+    fi
+
+    migration_id="$(basename "$script")"
+    marker="$applied_dir/$migration_id.done"
+    log_file="$logs_dir/$migration_id.log"
+
+    if [ -f "$marker" ]; then
+      continue
+    fi
+
+    {
+      printf 'Running migration %s for release %s\n' "$migration_id" "$version"
+      printf 'Release directory: %s\n' "$release_dir"
+      if [ -n "$previous_target" ]; then
+        printf 'Previous release directory: %s\n' "$previous_target"
+      fi
+    } >"$log_file"
+
+    if ANK1015_RELEASE_VERSION="$version" \
+      ANK1015_RELEASE_DIR="$release_dir" \
+      ANK1015_PREVIOUS_RELEASE_DIR="$previous_target" \
+      ANK1015_MIGRATION_ID="$migration_id" \
+      bash "$script" >>"$log_file" 2>&1; then
+      date -u +"%Y-%m-%dT%H:%M:%SZ" >"$marker"
+      continue
+    fi
+
+    ank1015_machine_set_update_state "failed" "Release migration $migration_id failed for $version. See $log_file"
+    return 1
+  done
+}
+
 install_release() {
   local version="$1"
   local download_url="$2"
   local sha256="$3"
+  local previous_target="${4:-}"
   local release_dir archive temp_dir releases_dir current_link
   releases_dir="$(ank1015_machine_release_dir)"
   current_link="$(ank1015_machine_current_link)"
@@ -99,6 +164,10 @@ install_release() {
 
   if [ -f "$release_dir/dist/index.js" ]; then
     point_current_link_at "$release_dir"
+    if ! run_release_migrations "$version" "$release_dir" "$previous_target"; then
+      rollback_current_link "$previous_target"
+      return 1
+    fi
     update_machine_version "$version"
     install_capabilities_helper
     ank1015_machine_set_update_state "installed"
@@ -125,23 +194,30 @@ install_release() {
   mv "$temp_dir" "$release_dir"
   chown -R root:root "$release_dir" 2>/dev/null || true
   point_current_link_at "$release_dir"
+  if ! run_release_migrations "$version" "$release_dir" "$previous_target"; then
+    rollback_current_link "$previous_target"
+    return 1
+  fi
   update_machine_version "$version"
   install_capabilities_helper
   ank1015_machine_set_update_state "installed"
 }
 
 install_latest_if_needed() {
+  local previous_target
   if [ -f "$(ank1015_machine_current_link)/dist/index.js" ]; then
     ank1015_machine_set_update_state "idle"
     return 0
   fi
 
+  previous_target="$(readlink -f "$(ank1015_machine_current_link)" 2>/dev/null || true)"
   ank1015_machine_set_update_state "checking"
   latest_release
   install_release \
     "$(release_value '.latest.version')" \
     "$(release_value '.latest.downloadUrl')" \
-    "$(release_value '.latest.metadata.sha256')"
+    "$(release_value '.latest.metadata.sha256')" \
+    "$previous_target"
 }
 
 rollback_release() {
@@ -210,7 +286,9 @@ install_update_if_idle() {
   fi
 
   previous_target="$(readlink -f "$(ank1015_machine_current_link)" 2>/dev/null || true)"
-  install_release "$next_version" "$next_url" "$next_sha256"
+  if ! install_release "$next_version" "$next_url" "$next_sha256" "$previous_target"; then
+    return 1
+  fi
 
   if [ "${ANK1015_MACHINE_SUPERVISOR:-systemd}" = "process" ]; then
     ank1015_machine_set_update_state "installed"
@@ -250,6 +328,8 @@ main() {
 }
 
 if ! main "$@"; then
-  ank1015_machine_set_update_state "failed" "machine release command failed"
+  if [ "$(ank1015_machine_read_update_state)" != "failed" ]; then
+    ank1015_machine_set_update_state "failed" "machine release command failed"
+  fi
   exit 1
 fi
