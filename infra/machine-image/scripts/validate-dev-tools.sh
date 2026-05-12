@@ -41,6 +41,7 @@ vercel --version
 supabase --version
 codex --version
 image-gen --version
+heysnap-xlsxl --version
 
 ffmpeg -version
 gcc --version

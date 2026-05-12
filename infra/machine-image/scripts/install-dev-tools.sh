@@ -105,6 +105,7 @@ install_supabase() {
 
 install_yq
 install_supabase
+download https://github.com/ank1015/xlsx-viewer-and-parser/releases/latest/download/install.sh | sh
 
 python -m venv /opt/ank1015/venvs/default
 /opt/ank1015/venvs/default/bin/python -m pip install --upgrade pip setuptools wheel
