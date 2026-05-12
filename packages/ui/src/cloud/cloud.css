@@ -524,38 +524,6 @@ button {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.cloud-remote-create-shell[data-has-back="true"] {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
-.cloud-remote-create-back-row {
-  width: min(calc(100% - 64px), 1020px);
-  margin: 0 auto;
-  padding: 12px 0 0;
-}
-
-.cloud-remote-create-back {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  background: transparent;
-  color: #252629;
-  cursor: pointer;
-  padding: 0;
-}
-
-:root.dark .cloud-remote-create-back {
-  color: #e3e4e6;
-}
-
-.cloud-remote-create-back svg {
-  flex: 0 0 auto;
-}
-
 .cloud-remote-create-onboarding {
   align-self: stretch;
   padding: 0 24px 96px;
