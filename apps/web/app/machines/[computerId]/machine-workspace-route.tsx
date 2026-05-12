@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { usePathname } from "next/navigation";
 
-import { WebCloudApp } from "../../cloud-app-client";
+import { WebCloudWorkspaceApp } from "../../cloud-workspace-client";
 
 export type MachineWorkspacePanel = "chat" | "connectors";
 
@@ -31,7 +31,7 @@ export function MachineWorkspaceRoute({
         : null;
 
   return (
-    <WebCloudApp
+    <WebCloudWorkspaceApp
       cloudServerUrl={cloudServerUrl}
       route={{ view: "workspace", computerId, panel: activePanel, threadId }}
     />
