@@ -4,6 +4,7 @@ WORKDIR /app
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY patches patches
 COPY packages/cloud-server/package.json packages/cloud-server/package.json
 COPY packages/cloud-server/admin-ui/package.json packages/cloud-server/admin-ui/package.json
 RUN pnpm install --filter @ank1015-app/cloud-server... --filter @ank1015-app/cloud-server-admin-ui... --frozen-lockfile
