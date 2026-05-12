@@ -6,6 +6,7 @@ import {
   ArrowRight01Icon,
   ArrowLeft02Icon,
   Download05Icon,
+  File02Icon,
   FileUploadIcon,
   FolderAddIcon,
   Folder01Icon,
@@ -17,7 +18,7 @@ import {
   SidebarRightIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
 import { useAgentThreadGroupsQuery } from "../agent/agent-queries";
@@ -30,13 +31,44 @@ import {
 import { selectHasThreads } from "../agent/agent-thread-list-store";
 import type { AgentThreadGroup, AgentThreadSummary, AgentUiContext } from "../agent/types";
 import { CapabilitiesPanel } from "../cloud/capabilities-panel";
+import docxFileIconSrc from "../../../../apps/assets/files/docx_file_icon.png";
+import pdfFileIconSrc from "../../../../apps/assets/files/pdf_file_icon.png";
+import xlsxFileIconSrc from "../../../../apps/assets/files/xlsx_file_icon.png";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
-type DocxPreviewModule = typeof import("docx-preview");
-type MonacoEditorModule = typeof import("@monaco-editor/react");
+const HeySnapAudioPlayer = lazy(() =>
+  import("heysnap-web-viewers/audio").then((module) => ({ default: module.HeySnapAudioPlayer })),
+);
+const HeySnapCodeViewer = lazy(() =>
+  import("heysnap-web-viewers/code").then((module) => ({ default: module.HeySnapCodeViewer })),
+);
+const HeySnapDocxViewer = lazy(() =>
+  import("heysnap-web-viewers/docx").then((module) => ({ default: module.HeySnapDocxViewer })),
+);
+const HeySnapHtmlViewer = lazy(() =>
+  import("heysnap-web-viewers/html").then((module) => ({ default: module.HeySnapHtmlViewer })),
+);
+const HeySnapImageViewer = lazy(() =>
+  import("heysnap-web-viewers/image").then((module) => ({ default: module.HeySnapImageViewer })),
+);
+const HeySnapMarkdownViewer = lazy(() =>
+  import("heysnap-web-viewers/markdown").then((module) => ({ default: module.HeySnapMarkdownViewer })),
+);
+const HeySnapPdfViewer = lazy(() =>
+  import("heysnap-web-viewers/pdf").then((module) => ({ default: module.HeySnapPdfViewer })),
+);
+const HeySnapPPTViewer = lazy(() =>
+  import("heysnap-web-viewers/ppt").then((module) => ({ default: module.HeySnapPPTViewer })),
+);
+const HeySnapVideoViewer = lazy(() =>
+  import("heysnap-web-viewers/video").then((module) => ({ default: module.HeySnapVideoViewer })),
+);
+const HeySnapXlsxViewer = lazy(() =>
+  import("heysnap-web-viewers/xlsx").then((module) => ({ default: module.HeySnapXlsxViewer })),
+);
 
 const HISTORY_LIMIT = 64;
 const DEFAULT_LEFT_PANE_RATIO = 0.5;
@@ -44,6 +76,8 @@ const MIN_PANE_RATIO = 0.25;
 const MAX_PANE_RATIO = 0.75;
 const LEFT_PANE_RATIO_STORAGE_KEY = "filesystem-explorer:left-pane-ratio";
 const RIGHT_SIDEBAR_OPEN_STORAGE_KEY = "filesystem-explorer:right-sidebar-open";
+const PPT_VIEWER_SERVER_URL = "http://13.126.207.124/Kd5QihM3zhwV2WztLXAnBc6n07Goa6O3mByrs-rqWjU/ppt";
+const XLSX_ASSET_ID_HEADER = "x-heysnap-xlsx-asset-id";
 const CONTEXT_MENU_WIDTH = 200;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 const BACKGROUND_CONTEXT_MENU_HEIGHT = 148;
@@ -282,6 +316,42 @@ export function FilesystemExplorer({
   useEffect(() => {
     window.localStorage.setItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY, isRightSidebarOpen ? "true" : "false");
   }, [isRightSidebarOpen]);
+
+  useEffect(() => {
+    if (activeFilePath === null || openFileTabs.length < 2) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (
+        (event.key !== "ArrowLeft" && event.key !== "ArrowRight") ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        isEditableKeyboardTarget(event.target)
+      ) {
+        return;
+      }
+
+      const activeIndex = openFileTabs.findIndex((tab) => tab.path === activeFilePath);
+
+      if (activeIndex < 0) {
+        return;
+      }
+
+      event.preventDefault();
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const nextIndex = (activeIndex + direction + openFileTabs.length) % openFileTabs.length;
+      setActiveFilePath(openFileTabs[nextIndex]?.path ?? activeFilePath);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeFilePath, openFileTabs]);
 
   useEffect(() => {
     const initialPathForConnection = normalizeInitialFilesystemPath(initialPath);
@@ -938,6 +1008,7 @@ export function FilesystemExplorer({
         </div>
         <MachineStatusControl
           canSleepMachine={canSleepMachine}
+          compact={activeFileTab !== null}
           machineName={machineName}
           status={connectionStatus}
           onBack={onBackToMachines}
@@ -1250,12 +1321,14 @@ const formatSidebarChatDate = (timestamp: number): string => {
 
 const MachineStatusControl = ({
   canSleepMachine,
+  compact,
   machineName,
   status,
   onBack,
   onSleep,
 }: {
   readonly canSleepMachine: boolean;
+  readonly compact: boolean;
   readonly machineName: string;
   readonly status: FilesystemConnectionStatus;
   readonly onBack?: () => void;
@@ -1268,6 +1341,11 @@ const MachineStatusControl = ({
   const statusLabel = getFilesystemConnectionLabel(status);
   const isSleepDisabled = !canSleepMachine || onSleep === undefined || isSleeping;
   const isBackDisabled = onBack === undefined || isSleeping;
+  const buttonClassName = [
+    "machine-status-button",
+    isOpen ? "active" : "",
+    compact ? "icon-only" : "",
+  ].filter(Boolean).join(" ");
 
   useEffect(() => {
     if (!isOpen) {
@@ -1351,7 +1429,7 @@ const MachineStatusControl = ({
 
       <button
         type="button"
-        className={isOpen ? "machine-status-button active" : "machine-status-button"}
+        className={buttonClassName}
         aria-label={`${machineName}, ${statusLabel}`}
         title={`${machineName} · ${statusLabel}`}
         aria-expanded={isOpen}
@@ -1517,31 +1595,49 @@ const FileTab = ({
   readonly isActive: boolean;
   readonly onSelect: () => void;
   readonly onClose: () => void;
-}): React.ReactElement => (
-  <div className={isActive ? "file-tab active" : "file-tab"} role="tab" aria-selected={isActive}>
-    <button
-      type="button"
-      className="file-tab-activate"
-      title={tab.path}
-      onClick={onSelect}
-      tabIndex={isActive ? 0 : -1}
-    >
-      <span className="file-tab-title">{tab.name}</span>
-    </button>
-    <button
-      type="button"
-      className="file-tab-close"
-      aria-label={`Close ${tab.name}`}
-      title="Close tab"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClose();
-      }}
-    >
-      <CloseIcon />
-    </button>
-  </div>
-);
+}): React.ReactElement => {
+  const iconSrc = getTypedFileIconSrc(tab.name);
+  const className = [
+    "file-tab",
+    isActive ? "active" : "",
+    tab.name.length > 24 ? "long-name" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className={className} role="tab" aria-selected={isActive}>
+      <span className="file-tab-leading">
+        <span className="file-tab-file-icon" aria-hidden="true">
+          {iconSrc === null ? (
+            <HugeiconsIcon icon={File02Icon} size={16} color="currentColor" strokeWidth={1.8} />
+          ) : (
+            <img src={iconSrc} alt="" draggable={false} className="file-tab-type-icon" />
+          )}
+        </span>
+        <button
+          type="button"
+          className="file-tab-close"
+          aria-label={`Close ${tab.name}`}
+          title="Close tab"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+        >
+          <CloseIcon />
+        </button>
+      </span>
+      <button
+        type="button"
+        className="file-tab-activate"
+        title={tab.path}
+        onClick={onSelect}
+        tabIndex={isActive ? 0 : -1}
+      >
+        <span className="file-tab-title">{tab.name}</span>
+      </button>
+    </div>
+  );
+};
 
 const ToolbarButton = ({
   children,
@@ -1600,9 +1696,27 @@ const FileViewer = ({
     );
   }
 
+  if (isPptxFile(file.name)) {
+    return (
+      <PptViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isXlsxFile(file.name)) {
+    return (
+      <XlsxViewer
+        fileName={file.name}
+        xlsxUrl={buildFilesystemXlsxUrl(websocketUrl, file.path, fileVersion)}
+      />
+    );
+  }
+
   if (isOfficePdfPreviewFile(file.name)) {
     return (
-      <PreviewPdfViewer
+      <PdfViewer
         fileName={file.name}
         fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
       />
@@ -1622,6 +1736,24 @@ const FileViewer = ({
   if (isImageFile(file.name)) {
     return (
       <ImageViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isMarkdownFile(file.name)) {
+    return (
+      <MarkdownViewer
+        fileName={file.name}
+        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+      />
+    );
+  }
+
+  if (isHtmlFile(file.name)) {
+    return (
+      <HtmlViewer
         fileName={file.name}
         fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
       />
@@ -1711,90 +1843,38 @@ const PdfViewer = ({
 }: {
   readonly fileName: string;
   readonly fileUrl: string;
-}): React.ReactElement => (
-  <section className="pdf-viewer" aria-label={fileName}>
-    <iframe className="pdf-native-frame" src={fileUrl} title={fileName} />
-  </section>
-);
-
-const PdfViewerState = ({
-  message,
-  variant = "info",
-}: {
-  readonly message: string;
-  readonly variant?: "info" | "error";
-}): React.ReactElement => (
-  <div className={variant === "error" ? "pdf-viewer-state error" : "pdf-viewer-state"}>
-    <p>{message}</p>
-  </div>
-);
-
-const PreviewPdfViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
 }): React.ReactElement => {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const abortController = new AbortController();
-    let objectUrl: string | null = null;
-    let isCancelled = false;
-
-    setPdfUrl(null);
-    setError(null);
-
-    const fetchPreview = async (): Promise<void> => {
-      const response = await fetch(fileUrl, { signal: abortController.signal });
-
-      if (!response.ok) {
-        throw new Error(await readPreviewErrorMessage(response, fileUrl));
-      }
-
-      const blob = await response.blob();
-      objectUrl = URL.createObjectURL(blob);
-
-      if (!isCancelled) {
-        setPdfUrl(objectUrl);
-      }
-    };
-
-    void fetchPreview().catch((fetchError) => {
-      if (!isCancelled && !isAbortError(fetchError)) {
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to load preview.");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-
-      if (objectUrl !== null) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [fileUrl]);
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "application/pdf");
 
   if (error !== null) {
     return (
-      <section className="pdf-viewer" aria-label={fileName}>
-        <PdfViewerState message={error} variant="error" />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
       </section>
     );
   }
 
-  if (pdfUrl === null) {
+  if (file === null) {
     return (
-      <section className="pdf-viewer" aria-label={fileName}>
-        <PdfViewerState message="Preparing preview..." />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading PDF..." />
       </section>
     );
   }
 
-  return <PdfViewer fileName={fileName} fileUrl={pdfUrl} />;
+  return (
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading PDF viewer..." />}>
+        <HeySnapPdfViewer
+          src={file}
+          bodyBackground="var(--heysnap-document-viewer-body-background)"
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+          sidebarBackground="var(--heysnap-document-viewer-sidebar-background)"
+        />
+      </Suspense>
+    </section>
+  );
 };
 
 const DocxViewer = ({
@@ -1804,88 +1884,245 @@ const DocxViewer = ({
   readonly fileName: string;
   readonly fileUrl: string;
 }): React.ReactElement => {
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  const styleRef = useRef<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const { file, error } = useFetchedViewerFile(
+    fileName,
+    fileUrl,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  );
 
-  useEffect(() => {
-    const bodyContainer = bodyRef.current;
-    const styleContainer = styleRef.current;
+  if (error !== null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
 
-    if (bodyContainer === null || styleContainer === null) {
-      return;
-    }
-
-    const abortController = new AbortController();
-    let isCancelled = false;
-
-    bodyContainer.replaceChildren();
-    styleContainer.replaceChildren();
-    setStatus("loading");
-
-    const renderDocument = async (): Promise<void> => {
-      const [module, response] = await Promise.all([
-        import("docx-preview") as Promise<DocxPreviewModule>,
-        fetch(fileUrl, { signal: abortController.signal }),
-      ]);
-
-      if (!response.ok) {
-        throw new Error("Failed to load DOCX.");
-      }
-
-      const blob = await response.blob();
-
-      if (isCancelled) {
-        return;
-      }
-
-      await module.renderAsync(blob, bodyContainer, styleContainer, {
-        className: "docx-document",
-        inWrapper: true,
-      });
-
-      if (!isCancelled) {
-        setStatus("ready");
-      }
-    };
-
-    void renderDocument().catch((error) => {
-      if (!isCancelled && !isAbortError(error)) {
-        bodyContainer.replaceChildren();
-        styleContainer.replaceChildren();
-        setStatus("error");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-      bodyContainer.replaceChildren();
-      styleContainer.replaceChildren();
-    };
-  }, [fileUrl]);
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading DOCX..." />
+      </section>
+    );
+  }
 
   return (
-    <section className="docx-viewer" aria-label={fileName}>
-      <div ref={styleRef} className="docx-style-host" />
-      {status === "loading" ? <DocxViewerState message="Loading DOCX..." /> : null}
-      {status === "error" ? <DocxViewerState message="Failed to load DOCX." variant="error" /> : null}
-      <div ref={bodyRef} className="docx-body" aria-hidden={status !== "ready" ? "true" : undefined} />
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading DOCX viewer..." />}>
+        <HeySnapDocxViewer
+          src={file}
+          documentName={fileName}
+          bodyBackground="var(--heysnap-document-viewer-body-background)"
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+        />
+      </Suspense>
     </section>
   );
 };
 
-const DocxViewerState = ({
+const PptViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const { file, error } = useFetchedViewerFile(
+    fileName,
+    fileUrl,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  );
+
+  if (error !== null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading PPTX..." />
+      </section>
+    );
+  }
+
+  return (
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading PPTX viewer..." />}>
+        <HeySnapPPTViewer
+          src={file}
+          serverUrl={PPT_VIEWER_SERVER_URL}
+          documentName={fileName}
+          bodyBackground="var(--heysnap-document-viewer-body-background)"
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+          sidebarBackground="var(--heysnap-document-viewer-sidebar-background)"
+        />
+      </Suspense>
+    </section>
+  );
+};
+
+const XlsxViewer = ({
+  fileName,
+  xlsxUrl,
+}: {
+  readonly fileName: string;
+  readonly xlsxUrl: string;
+}): React.ReactElement => {
+  const { workbook, error } = useFetchedXlsxWorkbook(xlsxUrl);
+  const theme = useResolvedTheme();
+  const className = [
+    "heysnap-document-viewer",
+    "heysnap-xlsx-viewer",
+    theme === "dark" ? "theme-dark" : "theme-light",
+  ].join(" ");
+
+  if (error !== null) {
+    return (
+      <section className={className} aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (workbook === null) {
+    return (
+      <section className={className} aria-label={fileName}>
+        <DocumentViewerState message="Loading XLSX..." />
+      </section>
+    );
+  }
+
+  return (
+    <section className={className} aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading XLSX viewer..." />}>
+        <HeySnapXlsxViewer workbook={workbook} title={fileName} />
+      </Suspense>
+    </section>
+  );
+};
+
+const DocumentViewerState = ({
   message,
   variant = "info",
 }: {
   readonly message: string;
   readonly variant?: "info" | "error";
 }): React.ReactElement => (
-  <div className={variant === "error" ? "docx-viewer-state error" : "docx-viewer-state"}>
+  <div className={variant === "error" ? "document-viewer-state error" : "document-viewer-state"}>
     <p>{message}</p>
   </div>
 );
+
+const useFetchedViewerFile = (
+  fileName: string,
+  fileUrl: string,
+  fallbackMimeType: string,
+): {
+  readonly file: File | null;
+  readonly error: string | null;
+} => {
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    setFile(null);
+    setError(null);
+
+    const fetchFile = async (): Promise<void> => {
+      const response = await fetch(fileUrl, { signal: abortController.signal });
+
+      if (!response.ok) {
+        throw new Error(await readPreviewErrorMessage(response, fileUrl));
+      }
+
+      const blob = await response.blob();
+      const mimeType = blob.type.length > 0 && blob.type !== "application/octet-stream"
+        ? blob.type
+        : fallbackMimeType;
+      const viewerFile = new File([blob], fileName, {
+        type: mimeType,
+      });
+
+      if (!isCancelled) {
+        setFile(viewerFile);
+      }
+    };
+
+    void fetchFile().catch((fetchError) => {
+      if (!isCancelled && !isAbortError(fetchError)) {
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to load file.");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [fallbackMimeType, fileName, fileUrl]);
+
+  return { file, error };
+};
+
+const useFetchedXlsxWorkbook = (
+  xlsxUrl: string,
+): {
+  readonly workbook: unknown | null;
+  readonly error: string | null;
+} => {
+  const [workbook, setWorkbook] = useState<unknown | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    setWorkbook(null);
+    setError(null);
+
+    const fetchWorkbook = async (): Promise<void> => {
+      const response = await fetch(xlsxUrl, { signal: abortController.signal });
+
+      if (!response.ok) {
+        throw new Error(await readPreviewErrorMessage(response, xlsxUrl));
+      }
+
+      const assetId = response.headers.get(XLSX_ASSET_ID_HEADER);
+
+      if (assetId === null || assetId.length === 0) {
+        throw new Error("Server did not return XLSX asset metadata.");
+      }
+
+      const parsedWorkbook = await response.json() as unknown;
+      attachXlsxAssetUrls(parsedWorkbook, (assetPath) => buildFilesystemXlsxAssetUrl(xlsxUrl, assetId, assetPath));
+
+      if (!isCancelled) {
+        setWorkbook(parsedWorkbook);
+      }
+    };
+
+    void fetchWorkbook().catch((fetchError) => {
+      if (!isCancelled && !isAbortError(fetchError)) {
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to load XLSX.");
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [xlsxUrl]);
+
+  return { workbook, error };
+};
 
 const DelimitedTextViewer = ({
   fileName,
@@ -1999,44 +2236,39 @@ const ImageViewer = ({
   readonly fileName: string;
   readonly fileUrl: string;
 }): React.ReactElement => {
-  const [hasError, setHasError] = useState(false);
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, getImageMimeType(fileName));
 
-  useEffect(() => {
-    setHasError(false);
-  }, [fileUrl]);
-
-  if (hasError) {
+  if (error !== null) {
     return (
-      <section className="image-viewer" aria-label={fileName}>
-        <ImageViewerState message="Failed to load image." variant="error" />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading image..." />
       </section>
     );
   }
 
   return (
-    <section className="image-viewer" aria-label={fileName}>
-      <img
-        src={fileUrl}
-        alt={fileName}
-        className="image-viewer-image"
-        draggable={false}
-        onError={() => setHasError(true)}
-      />
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading image viewer..." />}>
+        <HeySnapImageViewer
+          src={file}
+          alt={fileName}
+          documentName={fileName}
+          bodyBackground="var(--heysnap-document-viewer-body-background)"
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+        />
+      </Suspense>
     </section>
   );
 };
-
-const ImageViewerState = ({
-  message,
-  variant = "info",
-}: {
-  readonly message: string;
-  readonly variant?: "info" | "error";
-}): React.ReactElement => (
-  <div className={variant === "error" ? "image-viewer-state error" : "image-viewer-state"}>
-    <p>{message}</p>
-  </div>
-);
 
 const PlainTextViewer = ({
   fileName,
@@ -2123,115 +2355,124 @@ const CodeViewer = ({
   readonly fileName: string;
   readonly fileUrl: string;
 }): React.ReactElement => {
-  const [code, setCode] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editorModule, setEditorModule] = useState<MonacoEditorModule | null>(null);
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "text/plain");
   const theme = useResolvedTheme();
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    void import("@monaco-editor/react")
-      .then((module) => {
-        if (!isCancelled) {
-          setEditorModule(module);
-        }
-      })
-      .catch((loadError) => {
-        if (!isCancelled) {
-          setError(toViewerErrorMessage(loadError, "Failed to load code editor."));
-        }
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const abortController = new AbortController();
-    let isCancelled = false;
-
-    setCode(null);
-    setError(null);
-
-    const loadCode = async (): Promise<void> => {
-      const response = await fetch(fileUrl, { signal: abortController.signal });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load code (${String(response.status)}).`);
-      }
-
-      const nextCode = await response.text();
-
-      if (!isCancelled) {
-        setCode(nextCode);
-      }
-    };
-
-    void loadCode().catch((loadError) => {
-      if (!isCancelled && !isAbortError(loadError)) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load code.");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-    };
-  }, [fileUrl]);
 
   if (error !== null) {
     return (
-      <section className="code-viewer" aria-label={fileName}>
-        <CodeViewerState message={error} variant="error" />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
       </section>
     );
   }
 
-  if (editorModule === null || code === null) {
+  if (file === null) {
     return (
-      <section className="code-viewer" aria-label={fileName}>
-        <CodeViewerState message="Loading code..." />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading code..." />
       </section>
     );
   }
-
-  const Editor = editorModule.default;
 
   return (
-    <section className="code-viewer" aria-label={fileName}>
-      <Editor
-        value={code}
-        language={getCodeLanguage(fileName)}
-        theme={theme === "dark" ? "vs-dark" : "vs"}
-        options={{
-          readOnly: true,
-          minimap: { enabled: false },
-          fontFamily: "var(--font-geist-mono), ui-monospace, Menlo, Monaco, Consolas, monospace",
-          fontSize: 12,
-          lineHeight: 19,
-          renderLineHighlight: "none",
-          scrollBeyondLastLine: false,
-          wordWrap: "on",
-          automaticLayout: true,
-        }}
-      />
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading code viewer..." />}>
+        <HeySnapCodeViewer
+          src={file}
+          documentName={fileName}
+          theme={theme === "dark" ? "heysnap-dark" : "heysnap-light"}
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+          bodyBackground="var(--heysnap-document-viewer-header-background)"
+        />
+      </Suspense>
     </section>
   );
 };
 
-const CodeViewerState = ({
-  message,
-  variant = "info",
+const MarkdownViewer = ({
+  fileName,
+  fileUrl,
 }: {
-  readonly message: string;
-  readonly variant?: "info" | "error";
-}): React.ReactElement => (
-  <div className={variant === "error" ? "code-viewer-state error" : "code-viewer-state"}>
-    <p>{message}</p>
-  </div>
-);
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "text/markdown");
+  const theme = useResolvedTheme();
+
+  if (error !== null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading markdown..." />
+      </section>
+    );
+  }
+
+  return (
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading markdown viewer..." />}>
+        <HeySnapMarkdownViewer
+          src={file}
+          documentName={fileName}
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+          bodyBackground="var(--heysnap-document-viewer-header-background)"
+          codeTheme={theme === "dark" ? "heysnap-dark" : "heysnap-light"}
+        />
+      </Suspense>
+    </section>
+  );
+};
+
+const HtmlViewer = ({
+  fileName,
+  fileUrl,
+}: {
+  readonly fileName: string;
+  readonly fileUrl: string;
+}): React.ReactElement => {
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "text/html");
+  const theme = useResolvedTheme();
+
+  if (error !== null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading HTML..." />
+      </section>
+    );
+  }
+
+  return (
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading HTML viewer..." />}>
+        <HeySnapHtmlViewer
+          src={file}
+          documentName={fileName}
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+          bodyBackground="var(--heysnap-document-viewer-header-background)"
+          codeTheme={theme === "dark" ? "heysnap-dark" : "heysnap-light"}
+        />
+      </Suspense>
+    </section>
+  );
+};
 
 const AudioViewer = ({
   fileName,
@@ -2240,31 +2481,35 @@ const AudioViewer = ({
   readonly fileName: string;
   readonly fileUrl: string;
 }): React.ReactElement => {
-  const [hasError, setHasError] = useState(false);
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, getAudioMimeType(fileName));
 
-  useEffect(() => {
-    setHasError(false);
-  }, [fileUrl]);
-
-  if (hasError) {
+  if (error !== null) {
     return (
-      <section className="media-viewer" aria-label={fileName}>
-        <MediaViewerState message="Failed to load audio." variant="error" />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading audio..." />
       </section>
     );
   }
 
   return (
-    <section className="media-viewer" aria-label={fileName}>
-      <div className="audio-player-shell">
-        <p>{fileName}</p>
-        <audio
-          src={fileUrl}
-          controls
-          className="audio-player"
-          onError={() => setHasError(true)}
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading audio player..." />}>
+        <HeySnapAudioPlayer
+          src={file}
+          documentName={fileName}
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+          bodyBackground="var(--heysnap-document-viewer-sidebar-background)"
         />
-      </div>
+      </Suspense>
     </section>
   );
 };
@@ -2276,43 +2521,37 @@ const VideoViewer = ({
   readonly fileName: string;
   readonly fileUrl: string;
 }): React.ReactElement => {
-  const [hasError, setHasError] = useState(false);
+  const { file, error } = useFetchedViewerFile(fileName, fileUrl, getVideoMimeType(fileName));
 
-  useEffect(() => {
-    setHasError(false);
-  }, [fileUrl]);
-
-  if (hasError) {
+  if (error !== null) {
     return (
-      <section className="media-viewer" aria-label={fileName}>
-        <MediaViewerState message="Failed to load video." variant="error" />
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message={error} variant="error" />
+      </section>
+    );
+  }
+
+  if (file === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={fileName}>
+        <DocumentViewerState message="Loading video..." />
       </section>
     );
   }
 
   return (
-    <section className="media-viewer" aria-label={fileName}>
-      <video
-        src={fileUrl}
-        controls
-        className="video-player"
-        onError={() => setHasError(true)}
-      />
+    <section className="heysnap-document-viewer" aria-label={fileName}>
+      <Suspense fallback={<DocumentViewerState message="Loading video player..." />}>
+        <HeySnapVideoViewer
+          src={file}
+          documentName={fileName}
+          headerBackground="var(--heysnap-document-viewer-header-background)"
+          headerForeground="var(--heysnap-document-viewer-header-foreground)"
+        />
+      </Suspense>
     </section>
   );
 };
-
-const MediaViewerState = ({
-  message,
-  variant = "info",
-}: {
-  readonly message: string;
-  readonly variant?: "info" | "error";
-}): React.ReactElement => (
-  <div className={variant === "error" ? "media-viewer-state error" : "media-viewer-state"}>
-    <p>{message}</p>
-  </div>
-);
 
 const DesktopSplitPane = ({
   children,
@@ -3108,7 +3347,8 @@ const EntryIcon = ({
   readonly entry: FilesystemEntry;
   readonly size?: number;
 }): React.ReactElement => {
-  const src = getAssetSrc(entry.type === "directory" ? folderIconSrc : fileIconSrc);
+  const typedFileIconSrc = entry.type === "file" ? getTypedFileIconSrc(entry.name) : null;
+  const src = getAssetSrc(entry.type === "directory" ? folderIconSrc : typedFileIconSrc ?? fileIconSrc);
 
   return (
     <img
@@ -3122,6 +3362,22 @@ const EntryIcon = ({
       }}
     />
   );
+};
+
+const getTypedFileIconSrc = (fileName: string): string | null => {
+  if (isPdfFile(fileName)) {
+    return getAssetSrc(pdfFileIconSrc);
+  }
+
+  if (isDocxFile(fileName)) {
+    return getAssetSrc(docxFileIconSrc);
+  }
+
+  if (isSpreadsheetFile(fileName)) {
+    return getAssetSrc(xlsxFileIconSrc);
+  }
+
+  return null;
 };
 
 const getAssetSrc = (asset: unknown): string => {
@@ -3195,11 +3451,11 @@ const InfoIcon = (): React.ReactElement => (
 );
 
 const CloseIcon = (): React.ReactElement => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
     <path
       d="m3.2 3.2 5.6 5.6M8.8 3.2 3.2 8.8"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="1.7"
       strokeLinecap="round"
     />
   </svg>
@@ -3443,8 +3699,17 @@ const isPdfFile = (fileName: string): boolean =>
 const isDocxFile = (fileName: string): boolean =>
   fileName.toLowerCase().endsWith(".docx");
 
+const isPptxFile = (fileName: string): boolean =>
+  fileName.toLowerCase().endsWith(".pptx");
+
+const isXlsxFile = (fileName: string): boolean =>
+  fileName.toLowerCase().endsWith(".xlsx");
+
+const isSpreadsheetFile = (fileName: string): boolean =>
+  /\.(xls|xlsx)$/iu.test(fileName);
+
 const isOfficePdfPreviewFile = (fileName: string): boolean =>
-  /\.(ppt|pptx|xls|xlsx)$/iu.test(fileName);
+  /\.(ppt|xls)$/iu.test(fileName);
 
 const isDelimitedTextFile = (fileName: string): boolean =>
   /\.(csv|tsv)$/iu.test(fileName);
@@ -3452,8 +3717,16 @@ const isDelimitedTextFile = (fileName: string): boolean =>
 const isImageFile = (fileName: string): boolean =>
   /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/iu.test(fileName);
 
+const isMarkdownFile = (fileName: string): boolean =>
+  /\.(md|markdown|mdx)$/iu.test(fileName);
+
+const isHtmlFile = (fileName: string): boolean =>
+  /\.html?$/iu.test(fileName);
+
 const isCodeFile = (fileName: string): boolean =>
-  /\.(c|cc|conf|cpp|cs|css|env|go|h|hpp|html?|ini|java|js|json|jsx|md|mjs|py|rb|rs|sh|sql|toml|ts|tsx|xml|ya?ml)$/iu.test(fileName);
+  /(^|\/)(dockerfile|makefile|\.dockerignore|\.editorconfig|\.eslintignore|\.eslintrc|\.gitignore|\.npmrc|\.prettierignore|\.prettierrc)$/iu.test(fileName) ||
+  /(^|\/)\.env(?:\..+)?$/iu.test(fileName) ||
+  /\.(bash|c|cc|cjs|cljs|clj|conf|cpp|cs|css|cxx|dart|env|erl|ex|exs|fish|fs|go|gql|graphql|h|handlebars|hbs|hh|hpp|ini|java|js|json|jsonc|jsx|kt|kts|less|lua|mjs|php|pl|proto|ps1|py|r|rb|rs|scala|scss|sh|sql|svelte|swift|toml|ts|tsx|vue|xml|ya?ml|zsh)$/iu.test(fileName);
 
 const isPlainTextFile = (fileName: string): boolean =>
   /\.(log|text|txt)$/iu.test(fileName);
@@ -3464,38 +3737,52 @@ const isAudioFile = (fileName: string): boolean =>
 const isVideoFile = (fileName: string): boolean =>
   /\.(m4v|mov|mp4|mpeg|mpg|ogv|webm)$/iu.test(fileName);
 
-const getCodeLanguage = (fileName: string): string => {
-  const extension = getFileExtension(fileName);
-  const languageByExtension: Record<string, string> = {
-    c: "c",
-    cc: "cpp",
-    cpp: "cpp",
-    cs: "csharp",
-    css: "css",
-    go: "go",
-    h: "cpp",
-    hpp: "cpp",
-    htm: "html",
-    html: "html",
-    java: "java",
-    js: "javascript",
-    json: "json",
-    jsx: "javascript",
-    md: "markdown",
-    mjs: "javascript",
-    py: "python",
-    rb: "ruby",
-    rs: "rust",
-    sh: "shell",
-    sql: "sql",
-    ts: "typescript",
-    tsx: "typescript",
-    xml: "xml",
-    yaml: "yaml",
-    yml: "yaml",
+const getImageMimeType = (fileName: string): string => {
+  const mimeTypeByExtension: Record<string, string> = {
+    avif: "image/avif",
+    bmp: "image/bmp",
+    gif: "image/gif",
+    ico: "image/x-icon",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    svg: "image/svg+xml",
+    webp: "image/webp",
   };
 
-  return languageByExtension[extension] ?? "plaintext";
+  return mimeTypeByExtension[getFileExtension(fileName)] ?? "application/octet-stream";
+};
+
+const getAudioMimeType = (fileName: string): string => {
+  const mimeTypeByExtension: Record<string, string> = {
+    aac: "audio/aac",
+    aif: "audio/aiff",
+    aiff: "audio/aiff",
+    flac: "audio/flac",
+    m4a: "audio/mp4",
+    mp3: "audio/mpeg",
+    oga: "audio/ogg",
+    ogg: "audio/ogg",
+    opus: "audio/ogg",
+    wav: "audio/wav",
+    weba: "audio/webm",
+  };
+
+  return mimeTypeByExtension[getFileExtension(fileName)] ?? "application/octet-stream";
+};
+
+const getVideoMimeType = (fileName: string): string => {
+  const mimeTypeByExtension: Record<string, string> = {
+    m4v: "video/mp4",
+    mov: "video/quicktime",
+    mp4: "video/mp4",
+    mpeg: "video/mpeg",
+    mpg: "video/mpeg",
+    ogv: "video/ogg",
+    webm: "video/webm",
+  };
+
+  return mimeTypeByExtension[getFileExtension(fileName)] ?? "application/octet-stream";
 };
 
 const getFileExtension = (fileName: string): string => {
@@ -3600,6 +3887,50 @@ const parseDelimitedText = (text: string, delimiter: "," | "\t"): string[][] => 
   return rows;
 };
 
+const attachXlsxAssetUrls = (
+  workbook: unknown,
+  assetUrlForPath: (assetPath: string) => string,
+): void => {
+  const root = toMutableRecord(workbook);
+  const workbookRecord = toMutableRecord(root?.["workbook"]);
+  const sheets = Array.isArray(workbookRecord?.["sheets"]) ? workbookRecord["sheets"] : [];
+
+  for (const sheetValue of sheets) {
+    const sheet = toMutableRecord(sheetValue);
+
+    if (sheet === null) {
+      continue;
+    }
+
+    const drawings = Array.isArray(sheet["drawings"]) ? sheet["drawings"] : [];
+    for (const drawingValue of drawings) {
+      const drawing = toMutableRecord(drawingValue);
+      const images = Array.isArray(drawing?.["images"]) ? drawing["images"] : [];
+      images.forEach((image) => attachXlsxAssetUrl(image, assetUrlForPath));
+    }
+
+    const images = Array.isArray(sheet["images"]) ? sheet["images"] : [];
+    images.forEach((image) => attachXlsxAssetUrl(image, assetUrlForPath));
+  }
+};
+
+const attachXlsxAssetUrl = (
+  imageValue: unknown,
+  assetUrlForPath: (assetPath: string) => string,
+): void => {
+  const image = toMutableRecord(imageValue);
+  const assetPath = image?.["assetPath"];
+
+  if (image === null || typeof assetPath !== "string" || assetPath.length === 0) {
+    return;
+  }
+
+  image["assetUrl"] = assetUrlForPath(assetPath);
+};
+
+const toMutableRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
+
 const readPreviewErrorMessage = async (response: Response, url: string): Promise<string> => {
   try {
     const body = await response.json() as {
@@ -3631,14 +3962,6 @@ const readPreviewErrorMessage = async (response: Response, url: string): Promise
   }
 
   return `Failed to load preview (${String(response.status)}).`;
-};
-
-const toViewerErrorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message.length > 0) {
-    return `${fallback}: ${error.message}`;
-  }
-
-  return fallback;
 };
 
 const formatBytes = (bytes: number): string => {
@@ -3710,6 +4033,55 @@ const buildFilesystemPreviewUrl = (
   if (version !== undefined) {
     url.searchParams.set("v", version);
   }
+
+  return url.toString();
+};
+
+const buildFilesystemXlsxUrl = (
+  filesystemWebsocketUrl: string,
+  path: string,
+  version?: string,
+): string => {
+  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const url = new URL(filesystemWebsocketUrl, baseUrl);
+
+  if (url.protocol === "ws:") {
+    url.protocol = "http:";
+  } else if (url.protocol === "wss:") {
+    url.protocol = "https:";
+  }
+
+  url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/xlsx");
+  url.searchParams.delete("path");
+  url.searchParams.delete("showHidden");
+  url.searchParams.delete("v");
+  url.searchParams.set("path", path);
+  if (version !== undefined) {
+    url.searchParams.set("v", version);
+  }
+
+  return url.toString();
+};
+
+const buildFilesystemXlsxAssetUrl = (
+  xlsxUrl: string,
+  assetId: string,
+  assetPath: string,
+): string => {
+  const url = new URL(xlsxUrl);
+  const encodedAssetPath = assetPath
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map(encodeURIComponent)
+    .join("/");
+
+  url.pathname = url.pathname.replace(
+    /\/filesystem\/xlsx\/?$/u,
+    `/filesystem/xlsx-assets/${encodeURIComponent(assetId)}/${encodedAssetPath}`,
+  );
+  url.searchParams.delete("path");
+  url.searchParams.delete("showHidden");
+  url.searchParams.delete("v");
 
   return url.toString();
 };
