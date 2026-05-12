@@ -29,13 +29,46 @@ require sha256sum
 FAKE_BIN="$TEMP_DIR/bin"
 MACHINE_ROOT="$TEMP_DIR/machine"
 RELEASE_SOURCE="$TEMP_DIR/release-source"
+RELEASE_SOURCE_NO_MIGRATIONS="$TEMP_DIR/release-source-no-migrations"
+RELEASE_SOURCE_FAILING="$TEMP_DIR/release-source-failing"
 ARCHIVE="$TEMP_DIR/machine-server-1.0.0.tar.gz"
+ARCHIVE_NO_MIGRATIONS="$TEMP_DIR/machine-server-1.1.0.tar.gz"
+ARCHIVE_FAILING="$TEMP_DIR/machine-server-2.0.0.tar.gz"
 CAPTURED_HEARTBEAT="$TEMP_DIR/heartbeat-payload.json"
-mkdir -p "$FAKE_BIN" "$MACHINE_ROOT" "$RELEASE_SOURCE/dist/capabilities"
+MIGRATION_LOG="$MACHINE_ROOT/migration-order.log"
+mkdir -p "$FAKE_BIN" "$MACHINE_ROOT" "$RELEASE_SOURCE/dist/capabilities" "$RELEASE_SOURCE/migrations"
 printf 'console.log("machine server")\n' >"$RELEASE_SOURCE/dist/index.js"
 printf 'console.log("helper")\n' >"$RELEASE_SOURCE/dist/capabilities/helper.js"
+cat >"$RELEASE_SOURCE/migrations/001-first.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s:%s:%s\n' "$ANK1015_RELEASE_VERSION" "$ANK1015_MIGRATION_ID" "$ANK1015_PREVIOUS_RELEASE_DIR" >>"$ANK1015_MACHINE_ROOT/migration-order.log"
+SCRIPT
+cat >"$RELEASE_SOURCE/migrations/002-second.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s:%s\n' "$ANK1015_RELEASE_VERSION" "$ANK1015_MIGRATION_ID" >>"$ANK1015_MACHINE_ROOT/migration-order.log"
+SCRIPT
 tar -czf "$ARCHIVE" -C "$RELEASE_SOURCE" .
 SHA256="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+
+mkdir -p "$RELEASE_SOURCE_NO_MIGRATIONS/dist/capabilities"
+printf 'console.log("machine server 1.1.0")\n' >"$RELEASE_SOURCE_NO_MIGRATIONS/dist/index.js"
+printf 'console.log("helper 1.1.0")\n' >"$RELEASE_SOURCE_NO_MIGRATIONS/dist/capabilities/helper.js"
+tar -czf "$ARCHIVE_NO_MIGRATIONS" -C "$RELEASE_SOURCE_NO_MIGRATIONS" .
+SHA256_NO_MIGRATIONS="$(sha256sum "$ARCHIVE_NO_MIGRATIONS" | awk '{print $1}')"
+
+mkdir -p "$RELEASE_SOURCE_FAILING/dist/capabilities" "$RELEASE_SOURCE_FAILING/migrations"
+printf 'console.log("machine server 2.0.0")\n' >"$RELEASE_SOURCE_FAILING/dist/index.js"
+printf 'console.log("helper 2.0.0")\n' >"$RELEASE_SOURCE_FAILING/dist/capabilities/helper.js"
+cat >"$RELEASE_SOURCE_FAILING/migrations/001-fail.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "intentional migration failure"
+exit 42
+SCRIPT
+tar -czf "$ARCHIVE_FAILING" -C "$RELEASE_SOURCE_FAILING" .
+SHA256_FAILING="$(sha256sum "$ARCHIVE_FAILING" | awk '{print $1}')"
 
 cat >"$FAKE_BIN/curl" <<SCRIPT
 #!/usr/bin/env bash
@@ -67,12 +100,28 @@ while [ "\$#" -gt 0 ]; do
 done
 case "\$url" in
   *"/releases/machine-server/latest"*)
-    cat >"\$output" <<JSON
+    if [[ "\$url" == *"currentVersion=1.1.0"* ]]; then
+      cat >"\$output" <<JSON
+{"latest":{"version":"2.0.0","downloadUrl":"https://downloads.example.com/machine-server-2.0.0.tar.gz","metadata":{"sha256":"$SHA256_FAILING"}},"currentVersion":"1.1.0","updateAvailable":true}
+JSON
+    elif [[ "\$url" == *"currentVersion=1.0.0"* ]]; then
+      cat >"\$output" <<JSON
+{"latest":{"version":"1.1.0","downloadUrl":"https://downloads.example.com/machine-server-1.1.0.tar.gz","metadata":{"sha256":"$SHA256_NO_MIGRATIONS"}},"currentVersion":"1.0.0","updateAvailable":true}
+JSON
+    else
+      cat >"\$output" <<JSON
 {"latest":{"version":"1.0.0","downloadUrl":"https://downloads.example.com/machine-server-1.0.0.tar.gz","metadata":{"sha256":"$SHA256"}},"currentVersion":null,"updateAvailable":false}
 JSON
+    fi
     ;;
   "https://downloads.example.com/machine-server-1.0.0.tar.gz")
     cp "$ARCHIVE" "\$output"
+    ;;
+  "https://downloads.example.com/machine-server-1.1.0.tar.gz")
+    cp "$ARCHIVE_NO_MIGRATIONS" "\$output"
+    ;;
+  "https://downloads.example.com/machine-server-2.0.0.tar.gz")
+    cp "$ARCHIVE_FAILING" "\$output"
     ;;
   "http://127.0.0.1:4000/status")
     cat <<'JSON'
@@ -150,14 +199,40 @@ sed -i.bak '/^ANK1015_MACHINE_SUPERVISOR=/d' "$ENV_FILE"
 test -f "$MACHINE_ROOT/machine-server/current/dist/index.js"
 test -f "$MACHINE_ROOT/agent-capabilities-helper"
 grep -q '^MACHINE_SERVER_VERSION=1.0.0$' "$ENV_FILE"
+test -f "$MACHINE_ROOT/machine-migrations/applied/1.0.0/001-first.sh.done"
+test -f "$MACHINE_ROOT/machine-migrations/applied/1.0.0/002-second.sh.done"
+test "$(cat "$MIGRATION_LOG")" = "$(printf '1.0.0:001-first.sh:\n1.0.0:002-second.sh')"
+
+before_migration_log="$(cat "$MIGRATION_LOG")"
+rm "$MACHINE_ROOT/machine-server/current"
+sed -i.bak '/^MACHINE_SERVER_VERSION=/d' "$ENV_FILE"
+"$ROOT_DIR/scripts/ank1015-machine-release" latest
+test "$(cat "$MIGRATION_LOG")" = "$before_migration_log"
+grep -q '^MACHINE_SERVER_VERSION=1.0.0$' "$ENV_FILE"
+
+"$ROOT_DIR/scripts/ank1015-machine-release" update
+grep -q '^MACHINE_SERVER_VERSION=1.1.0$' "$ENV_FILE"
+test "$(readlink -f "$MACHINE_ROOT/machine-server/current")" = "$(readlink -f "$MACHINE_ROOT/machine-server/releases/1.1.0")"
+test ! -d "$MACHINE_ROOT/machine-migrations/applied/1.1.0"
+
+if "$ROOT_DIR/scripts/ank1015-machine-release" update; then
+  echo "Expected failing migration to block release" >&2
+  exit 1
+fi
+grep -q '^MACHINE_SERVER_VERSION=1.1.0$' "$ENV_FILE"
+test "$(readlink -f "$MACHINE_ROOT/machine-server/current")" = "$(readlink -f "$MACHINE_ROOT/machine-server/releases/1.1.0")"
+test ! -f "$MACHINE_ROOT/machine-migrations/applied/2.0.0/001-fail.sh.done"
+test -f "$MACHINE_ROOT/machine-migrations/logs/2.0.0/001-fail.sh.log"
+grep -q 'intentional migration failure' "$MACHINE_ROOT/machine-migrations/logs/2.0.0/001-fail.sh.log"
+test "$(cat "$MACHINE_ROOT/machine-update-state")" = "failed"
 
 export ANK1015_HEARTBEAT_ONCE=1
 "$ROOT_DIR/scripts/ank1015-machine-heartbeat"
 test -f "$MACHINE_ROOT/machine-token"
 jq -e '.machineServerVersion == "1.0.0"' "$CAPTURED_HEARTBEAT" >/dev/null
-jq -e '.bootstrapVersion == "0.1.0"' "$CAPTURED_HEARTBEAT" >/dev/null
+jq -e '.bootstrapVersion == "0.1.1"' "$CAPTURED_HEARTBEAT" >/dev/null
 jq -e '.safeToRestart == true' "$CAPTURED_HEARTBEAT" >/dev/null
 jq -e '.activeSessions.total == 0' "$CAPTURED_HEARTBEAT" >/dev/null
-jq -e '.updateState == "installed"' "$CAPTURED_HEARTBEAT" >/dev/null
+jq -e '.updateState == "failed"' "$CAPTURED_HEARTBEAT" >/dev/null
 
 printf 'machine-bootstrap tests passed\n'

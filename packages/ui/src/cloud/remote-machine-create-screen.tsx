@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings03Icon } from "@hugeicons/core-free-icons";
+import { LogoutSquare01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
 
@@ -46,13 +46,13 @@ export function RemoteMachineCreateScreen({
         <div className="cloud-topbar-actions">
           <ThemeToggle />
           <button
-            aria-label="Settings"
+            aria-label="Logout"
             className="theme-toggle"
-            title="Settings"
+            title="Logout"
             type="button"
             onClick={() => void onLogout()}
           >
-            <HugeiconsIcon icon={Settings03Icon} size={18} color="currentColor" strokeWidth={1.8} />
+            <HugeiconsIcon icon={LogoutSquare01Icon} size={18} color="currentColor" strokeWidth={1.8} />
           </button>
         </div>
       </header>

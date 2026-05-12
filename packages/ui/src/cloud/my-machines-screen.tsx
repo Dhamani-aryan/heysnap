@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight02Icon, Cancel01Icon, PlusSignIcon, Settings03Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight02Icon, Cancel01Icon, LogoutSquare01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
 
@@ -61,12 +61,12 @@ export function MyMachinesScreen({
           <ThemeToggle />
           <button
             className="theme-toggle"
-            title="Settings"
+            title="Logout"
             type="button"
-            aria-label="Settings"
+            aria-label="Logout"
             onClick={() => void onLogout()}
           >
-            <HugeiconsIcon icon={Settings03Icon} size={18} color="currentColor" strokeWidth={1.8} />
+            <HugeiconsIcon icon={LogoutSquare01Icon} size={18} color="currentColor" strokeWidth={1.8} />
           </button>
         </div>
       </header>
@@ -76,9 +76,11 @@ export function MyMachinesScreen({
           <h1 className="cloud-machines-title">Computers</h1>
           <p className="cloud-machines-subtitle">
             Your personal, private, AI computers.{" "}
+            {/*
             <button className="cloud-machines-subtitle-link" type="button" onClick={onShowOnboarding}>
               Learn More.
             </button>
+            */}
           </p>
 
           <div className="cloud-machines-grid">
@@ -105,6 +107,7 @@ export function MyMachinesScreen({
         </div>
       </section>
 
+      {/*
       {showOnboardingModal ? (
         <div
           className="cloud-modal-backdrop cloud-machines-onboarding-backdrop"
@@ -174,6 +177,7 @@ export function MyMachinesScreen({
           </section>
         </div>
       ) : null}
+      */}
     </main>
   );
 }

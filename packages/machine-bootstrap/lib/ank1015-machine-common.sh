@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-ANK1015_MACHINE_BOOTSTRAP_VERSION="${ANK1015_MACHINE_BOOTSTRAP_VERSION:-0.1.0}"
+ANK1015_MACHINE_BOOTSTRAP_VERSION="${ANK1015_MACHINE_BOOTSTRAP_VERSION:-0.1.1}"
 
 ank1015_machine_root() {
   printf '%s\n' "${ANK1015_MACHINE_ROOT:-/opt/ank1015}"
@@ -50,6 +50,18 @@ ank1015_machine_current_link() {
 
 ank1015_machine_download_dir() {
   printf '%s\n' "${ANK1015_MACHINE_DOWNLOAD_DIR:-$(ank1015_machine_root)/downloads}"
+}
+
+ank1015_machine_migrations_dir() {
+  printf '%s\n' "${ANK1015_MACHINE_MIGRATIONS_DIR:-$(ank1015_machine_root)/machine-migrations}"
+}
+
+ank1015_machine_migrations_applied_dir() {
+  printf '%s\n' "$(ank1015_machine_migrations_dir)/applied"
+}
+
+ank1015_machine_migrations_logs_dir() {
+  printf '%s\n' "$(ank1015_machine_migrations_dir)/logs"
 }
 
 ank1015_machine_update_state_file() {
