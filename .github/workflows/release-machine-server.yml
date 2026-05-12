@@ -47,6 +47,13 @@ jobs:
       - name: Test machine bootstrap
         run: pnpm --filter @ank1015-app/machine-bootstrap test
 
+      - name: Validate machine migrations
+        run: |
+          set -euo pipefail
+          if compgen -G "packages/server/migrations/*.sh" >/dev/null; then
+            bash -n packages/server/migrations/*.sh
+          fi
+
       - name: Build machine server
         run: pnpm --filter @ank1015-app/server build
 
@@ -65,6 +72,9 @@ jobs:
           cp packages/server/package.json "$ARTIFACT_DIR/package.json"
           cp -R packages/server/dist "$ARTIFACT_DIR/dist"
           cp -R packages/server/skills "$ARTIFACT_DIR/skills"
+          if [ -d packages/server/migrations ]; then
+            cp -R packages/server/migrations "$ARTIFACT_DIR/migrations"
+          fi
 
           npm install --omit=dev --ignore-scripts --prefix "$ARTIFACT_DIR"
 
