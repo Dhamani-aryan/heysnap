@@ -15,7 +15,7 @@ import type { FilesystemRoot } from "./types.js";
 const execFileAsync = promisify(execFile);
 const PREVIEW_TIMEOUT_MS = 60_000;
 const PDF_EXTENSION = ".pdf";
-const SUPPORTED_OFFICE_PDF_PREVIEW_EXTENSIONS = new Set([".ppt", ".pptx", ".xls", ".xlsx"]);
+const SUPPORTED_OFFICE_PDF_PREVIEW_EXTENSIONS = new Set([".ppt", ".xls"]);
 
 export interface OfficePdfConversionInput {
   readonly sourcePath: string;

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { FilesystemPreviewOptions } from "../src/filesystem/preview.js";
 import { startServer, type RunningServer } from "../src/runtime.js";
 
 const openServers: RunningServer[] = [];
@@ -29,13 +30,12 @@ describe("filesystem preview", () => {
     expect(await response.text()).toBe("%PDF manual");
   }, 15_000);
 
-  it("converts xlsx files to PDF previews", async () => {
+  it("converts legacy xls files to PDF previews", async () => {
     const root = await createRoot();
-    const sourcePath = join(root, "budget.xlsx");
-    await writeFile(sourcePath, "xlsx bytes");
+    await writeFile(join(root, "budget.xls"), "xls bytes");
     const server = await startTestServer(root);
 
-    const response = await fetch(previewUrl(server, "budget.xlsx"));
+    const response = await fetch(previewUrl(server, "budget.xls"));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/pdf");
@@ -44,18 +44,16 @@ describe("filesystem preview", () => {
     expect(await response.text()).toBe("%PDF fake");
   });
 
-  it("converts pptx files to PDF previews", async () => {
+  it("rejects xlsx files from the PDF preview endpoint", async () => {
     const root = await createRoot();
-    const sourcePath = join(root, "deck.pptx");
-    await writeFile(sourcePath, "pptx bytes");
+    await writeFile(join(root, "budget.xlsx"), "xlsx bytes");
     const server = await startTestServer(root);
 
-    const response = await fetch(previewUrl(server, "deck.pptx"));
+    const response = await fetch(previewUrl(server, "budget.xlsx"));
+    const body = await response.json() as { readonly code: string };
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("application/pdf");
-    expect(response.headers.get("content-disposition")).toBe("inline; filename=\"deck.pdf\"");
-    expect(await response.text()).toBe("%PDF fake");
+    expect(response.status).toBe(415);
+    expect(body.code).toBe("UNSUPPORTED_PREVIEW_TYPE");
   });
 
   it("answers preview preflight requests", async () => {
@@ -89,21 +87,24 @@ const createRoot = async (): Promise<string> => {
   return root;
 };
 
-const startTestServer = async (filesystemRoot: string): Promise<RunningServer> => {
+const startTestServer = async (
+  filesystemRoot: string,
+  filesystemPreview: FilesystemPreviewOptions = {
+    convertOfficeToPdf: async () => Buffer.from("%PDF fake"),
+  },
+): Promise<RunningServer> => {
   const server = await startServer({
     port: 0,
     filesystemRoot,
-    filesystemPreview: {
-      convertOfficeToPdf: async () => Buffer.from("%PDF fake"),
-    },
+    filesystemPreview,
   });
   openServers.push(server);
   return server;
 };
 
-const previewUrl = (server: RunningServer, path: string): string => {
+const previewUrl = (server: RunningServer, path: string, format = "pdf"): string => {
   const url = new URL(server.urls.healthUrl.replace("/health", "/filesystem/preview"));
   url.searchParams.set("path", path);
-  url.searchParams.set("format", "pdf");
+  url.searchParams.set("format", format);
   return url.toString();
 };
