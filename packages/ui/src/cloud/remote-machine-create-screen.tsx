@@ -6,7 +6,7 @@ import { useEffect } from "react";
 
 import macLightImageUrl from "../../../../apps/assets/mac-light.png";
 import macImageUrl from "../../../../apps/assets/mac.png";
-import { ThemeToggle } from "../filesystem/theme-toggle";
+// import { ThemeToggle } from "../filesystem/theme-toggle";
 import type { CloudUser } from "./cloud-client";
 
 type ImageAsset = string | { readonly src: string };
@@ -44,7 +44,9 @@ export function RemoteMachineCreateScreen({
     <main className="cloud-shell cloud-remote-create-shell">
       <header className="cloud-topbar">
         <div className="cloud-topbar-actions">
+          {/*
           <ThemeToggle />
+          */}
           <button
             aria-label="Logout"
             className="theme-toggle"

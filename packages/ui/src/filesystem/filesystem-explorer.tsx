@@ -465,17 +465,20 @@ export function FilesystemExplorer({
     onSelectThread?.(thread);
   }, [onSelectThread, showChatPanel]);
 
-  const subscribeTo = useCallback(async (nextPath: string, shouldPushHistory: boolean): Promise<void> => {
+  const subscribeTo = useCallback(async (
+    nextPath: string,
+    shouldPushHistory: boolean,
+  ): Promise<FilesystemListing | undefined> => {
     setIsFetching(true);
     setListingError(null);
     setActiveFilePath(null);
-    await clientRef.current?.subscribe(nextPath);
+    const nextListing = await clientRef.current?.subscribe(nextPath);
     setSelectedPaths([]);
     setSelectionAnchorPath(null);
     setRenamingPath(null);
 
     if (!shouldPushHistory) {
-      return;
+      return nextListing;
     }
 
     setHistory((previous) => {
@@ -498,6 +501,7 @@ export function FilesystemExplorer({
 
       return bounded;
     });
+    return nextListing;
   }, [currentPath, historyIndex, listing]);
 
   const navigateTo = useCallback(
@@ -534,22 +538,63 @@ export function FilesystemExplorer({
       return;
     }
 
-    const tab: OpenFileTab = {
-      name: normalizedPath.split("/").filter(Boolean).at(-1) ?? normalizedPath,
-      path: normalizedPath,
-      size: 0,
-      updatedAt: new Date().toISOString(),
+    const openUnknownFileTab = (): void => {
+      const tab: OpenFileTab = {
+        name: normalizedPath.split("/").filter(Boolean).at(-1) ?? normalizedPath,
+        path: normalizedPath,
+        size: null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setOpenFileTabs((currentTabs) => {
+        if (currentTabs.some((currentTab) => currentTab.path === tab.path)) {
+          return currentTabs;
+        }
+
+        return [...currentTabs, tab];
+      });
+      setActiveFilePath(tab.path);
     };
 
-    setOpenFileTabs((currentTabs) => {
-      if (currentTabs.some((currentTab) => currentTab.path === tab.path)) {
-        return currentTabs;
+    const openResolvedEntry = (entry: FilesystemEntry): void => {
+      if (entry.type === "directory") {
+        navigateTo(entry.path);
+        return;
       }
 
-      return [...currentTabs, tab];
+      openFileTab(entry);
+    };
+
+    if (normalizedPath.length === 0) {
+      navigateTo("");
+      return;
+    }
+
+    const visibleEntry = listing?.entries.find((entry) => entry.path === normalizedPath);
+    if (visibleEntry !== undefined) {
+      openResolvedEntry(visibleEntry);
+      return;
+    }
+
+    const parentPath = getParentPath(normalizedPath);
+    void (async () => {
+      const parentListing =
+        listing?.path === parentPath
+          ? listing
+          : await subscribeTo(parentPath, true);
+      const targetEntry = parentListing?.entries.find((entry) => entry.path === normalizedPath);
+
+      if (targetEntry !== undefined) {
+        openResolvedEntry(targetEntry);
+        return;
+      }
+
+      openUnknownFileTab();
+    })().catch((error) => {
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to open item."));
+      setIsFetching(false);
     });
-    setActiveFilePath(tab.path);
-  }, []);
+  }, [listing, navigateTo, openFileTab, subscribeTo]);
 
   const closeFileTab = useCallback((path: string): void => {
     setOpenFileTabs((currentTabs) => {
@@ -3562,6 +3607,14 @@ const normalizeOpenFilePath = (rawPath: string): string | null => {
   }
 
   if (path.startsWith("/")) {
+    if (path === "/workspace") {
+      return "";
+    }
+    if (path.startsWith("/workspace/")) {
+      const relativePath = path.slice("/workspace/".length);
+      return !relativePath.split("/").includes("..") ? relativePath : null;
+    }
+
     const desktopIndex = path.indexOf("/Desktop/");
     if (desktopIndex < 0) {
       return null;
@@ -3577,6 +3630,15 @@ const normalizeOpenFilePath = (rawPath: string): string | null => {
   }
 
   return relativePath;
+};
+
+const getParentPath = (path: string): string => {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) {
+    return "";
+  }
+
+  return parts.slice(0, -1).join("/");
 };
 
 const syncOpenFileTabsFromEntries = (

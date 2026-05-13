@@ -10,7 +10,7 @@ import macLightImageUrl from "../../../../apps/assets/mac-light.png";
 import macImageUrl from "../../../../apps/assets/mac.png";
 import newMacLightImageUrl from "../../../../apps/assets/new-mac-light.png";
 import newMacImageUrl from "../../../../apps/assets/new-mac.png";
-import { ThemeToggle } from "../filesystem/theme-toggle";
+// import { ThemeToggle } from "../filesystem/theme-toggle";
 import type { CloudComputer, CloudUser } from "./cloud-client";
 
 type ImageAsset = string | { readonly src: string };
@@ -58,7 +58,9 @@ export function MyMachinesScreen({
     <main className="cloud-shell">
       <header className="cloud-topbar">
         <div className="cloud-topbar-actions">
+          {/*
           <ThemeToggle />
+          */}
           <button
             className="theme-toggle"
             title="Logout"

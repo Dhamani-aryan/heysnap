@@ -12,16 +12,17 @@ type DesktopWindowBridge = {
 
 const getInitialTheme = (): Theme => {
   if (typeof window === "undefined") {
-    return "light";
+    return "dark";
   }
 
-  const stored = window.localStorage.getItem("theme");
+  // const stored = window.localStorage.getItem("theme");
 
-  if (stored === "light" || stored === "dark") {
-    return stored;
-  }
+  // if (stored === "light" || stored === "dark") {
+  //   return stored;
+  // }
 
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return "dark";
 };
 
 export function ThemeToggle(): React.ReactElement {
@@ -53,7 +54,8 @@ export function ThemeToggle(): React.ReactElement {
       aria-label={`Switch to ${nextThemeLabel} theme`}
       title="Toggle theme"
       onClick={() => {
-        setTheme((current) => (current === "dark" ? "light" : "dark"));
+        // setTheme((current) => (current === "dark" ? "light" : "dark"));
+        setTheme("dark");
       }}
     >
       <HugeiconsIcon

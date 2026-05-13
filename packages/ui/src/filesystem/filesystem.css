@@ -2463,44 +2463,6 @@ button:disabled {
   word-break: break-word;
 }
 
-.chat-markdown-file-link {
-  position: relative;
-  top: 2px;
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.045);
-  color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.1;
-  padding: 2px 6px;
-  text-decoration: none;
-  vertical-align: text-bottom;
-}
-
-:root.dark .chat-markdown-file-link {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.chat-markdown-file-icon {
-  width: 8px;
-  height: 10px;
-  border-radius: 1px;
-  border: 1px solid currentColor;
-  opacity: 0.55;
-}
-
-.chat-markdown-file-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .chat-markdown-file-menu {
   position: fixed;
   z-index: 1000;
@@ -3097,7 +3059,7 @@ button:disabled {
   align-items: center;
   gap: 6px;
   border-radius: 6px;
-  color: #0064e1;
+  color: #4f6f9f;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 500;
@@ -3106,7 +3068,7 @@ button:disabled {
 }
 
 .prompt-folder-chip:hover {
-  background: rgba(0, 100, 225, 0.1);
+  background: rgba(79, 111, 159, 0.1);
 }
 
 .prompt-folder-chip span {
@@ -3131,11 +3093,11 @@ button:disabled {
 }
 
 :root.dark .prompt-folder-chip {
-  color: #5fa2ff;
+  color: #8aa7d6;
 }
 
 :root.dark .prompt-folder-chip:hover {
-  background: rgba(0, 100, 225, 0.18);
+  background: rgba(138, 167, 214, 0.16);
 }
 
 :root.dark .prompt-attachment-button:focus-visible,
