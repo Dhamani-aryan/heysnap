@@ -38,6 +38,7 @@ export interface CloudAppProps {
   readonly cloudServerUrl?: string;
   readonly route?: CloudAppRoute;
   readonly onRouteChange?: (route: CloudAppRoute, options?: CloudRouteChangeOptions) => void;
+  readonly onMachineCreateStarted?: () => void;
   readonly storageKey?: string;
 }
 
@@ -105,6 +106,7 @@ export function CloudAppCore(props: CloudAppCoreProps): React.ReactElement {
 function CloudAppContent({
   route,
   onRouteChange,
+  onMachineCreateStarted,
   renderWorkspace,
   renderWorkspaceLoader,
 }: CloudAppCoreProps): React.ReactElement {
@@ -280,6 +282,7 @@ function CloudAppContent({
   const createMachine = async (input: { readonly name: string }): Promise<void> => {
     try {
       await createMachineMutation.mutateAsync(input);
+      onMachineCreateStarted?.();
       changeRoute({ view: "machines" }, { replace: true });
     } catch {
       // The mutation stores the error for the form.

@@ -5,6 +5,7 @@ import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
 
 import heysnapIcon from "../../assets/heysnap.ico";
+import { AppToaster } from "./app-toaster";
 import { WebCloudRuntimeProvider } from "./cloud-runtime-provider";
 
 const cloudServerUrl = process.env.NEXT_PUBLIC_CLOUD_SERVER_URL?.trim() || "https://api.heysnap.xyz";
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <WebCloudRuntimeProvider cloudServerUrl={cloudServerUrl}>
           {children}
         </WebCloudRuntimeProvider>
+        <AppToaster />
       </body>
     </html>
   );

@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { CloudDashboardApp, type CloudAppRoute, type CloudRouteChangeOptions } from "@ank1015-app/ui/cloud-dashboard-app";
+import { toast } from "sonner";
 
 export interface WebCloudAppProps {
   readonly cloudServerUrl: string;
@@ -28,11 +29,18 @@ export function WebCloudApp({
     router.push(nextPath);
   }, [router]);
 
+  const handleMachineCreateStarted = useCallback((): void => {
+    toast("Welcome!", {
+      description: "Creating a computer can take couple of minutes",
+    });
+  }, []);
+
   return (
     <CloudDashboardApp
       cloudServerUrl={cloudServerUrl}
       route={route}
       onRouteChange={handleRouteChange}
+      onMachineCreateStarted={handleMachineCreateStarted}
       storageKey="ank1015:web-session-token"
     />
   );
