@@ -1,0 +1,7 @@
+{
+  "id": "web",
+  "label": "Web",
+  "version": "1.0.0",
+  "description": "A small, agent-friendly CLI for working with the web over apis. Exposes - search, scrape and research commands.",
+  "activeByDefault": true
+}
