@@ -21,6 +21,7 @@ MACHINE_SERVER_CHANNEL=stable
 AI_GATEWAY_AZURE_BASE_URL=https://...
 AI_GATEWAY_AZURE_IMAGES_BASE_URL=https://.../openai/deployments/gpt-image-2?api-version=2024-02-01
 AI_GATEWAY_AZURE_API_KEY=...
+FIRECRAWL_API_KEY=...
 ```
 
 Build the Docker image from the repo root:
@@ -52,6 +53,7 @@ docker run --rm -p 4100:4100 \
   -e AI_GATEWAY_AZURE_BASE_URL=https://... \
   -e AI_GATEWAY_AZURE_IMAGES_BASE_URL=https://.../openai/deployments/gpt-image-2?api-version=2024-02-01 \
   -e AI_GATEWAY_AZURE_API_KEY=... \
+  -e FIRECRAWL_API_KEY=... \
   ank1015-cloud-server
 ```
 
