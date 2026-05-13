@@ -184,6 +184,10 @@ export ANK1015_MACHINE_ROOT="$MACHINE_ROOT"
 export ANK1015_MACHINE_ENV_FILE="$ENV_FILE"
 export ANK1015_MACHINE_COMMON_SH="$ROOT_DIR/lib/ank1015-machine-common.sh"
 export ANK1015_SUDOERS_DIR="$TEMP_DIR/sudoers"
+export ANK1015_FILESYSTEM_ROOT="$MACHINE_ROOT/workspace"
+
+# shellcheck disable=SC1090
+. "$ANK1015_MACHINE_COMMON_SH"
 
 dry_run_output="$(ANK1015_BOOTSTRAP_DRY_RUN=1 "$ROOT_DIR/scripts/ank1015-machine-bootstrap")"
 test "$dry_run_output" = "supervisor=systemd"
@@ -194,6 +198,11 @@ ENV
 dry_run_output="$(ANK1015_BOOTSTRAP_DRY_RUN=1 "$ROOT_DIR/scripts/ank1015-machine-bootstrap")"
 test "$dry_run_output" = "supervisor=process"
 sed -i.bak '/^ANK1015_MACHINE_SUPERVISOR=/d' "$ENV_FILE"
+
+ank1015_machine_seed_workspace_defaults
+test -d "$MACHINE_ROOT/workspace/Welcome"
+test -f "$MACHINE_ROOT/workspace/get_started.md"
+grep -q '# Welcome to Snap' "$MACHINE_ROOT/workspace/get_started.md"
 
 "$ROOT_DIR/scripts/ank1015-machine-release" latest
 test -f "$MACHINE_ROOT/machine-server/current/dist/index.js"

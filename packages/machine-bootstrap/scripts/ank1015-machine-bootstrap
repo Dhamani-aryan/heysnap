@@ -160,6 +160,7 @@ run_process_supervisor() {
 }
 
 ensure_user_and_directories
+ank1015_machine_seed_workspace_defaults
 chmod 0640 "$(ank1015_machine_env_file)"
 chown root:ank1015 "$(ank1015_machine_env_file)" 2>/dev/null || true
 ank1015_machine_set_update_state "idle"
