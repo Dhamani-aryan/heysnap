@@ -34,6 +34,29 @@ describe("markdown file links", () => {
     });
   });
 
+  it("resolves machine /workspace links as workspace-relative file targets", () => {
+    expect(resolveMarkdownFileLinkMeta("/workspace/Welcome/get_started.md", "", undefined)).toMatchObject({
+      targetPath: "Welcome/get_started.md",
+      fullPath: "/workspace/Welcome/get_started.md",
+      basename: "get_started.md",
+    });
+    expect(resolveMarkdownFileLinkMeta("/workspace", "", undefined)).toMatchObject({
+      targetPath: "",
+      fullPath: "/workspace",
+      basename: "",
+    });
+  });
+
+  it("resolves same-app /workspace urls as workspace-relative file targets", () => {
+    expect(
+      resolveMarkdownFileLinkMeta("http://localhost:3000/workspace/2024-calendar-planner-v2%20(1).xlsx", "", undefined),
+    ).toMatchObject({
+      targetPath: "2024-calendar-planner-v2 (1).xlsx",
+      fullPath: "/workspace/2024-calendar-planner-v2 (1).xlsx",
+      basename: "2024-calendar-planner-v2 (1).xlsx",
+    });
+  });
+
   it("decodes file URIs before resolving link metadata", () => {
     const href = "file:///Users/notacoder/Desktop/agents/ank1015-app/packages/ui/src/agent/agent-panel.tsx#L42";
 

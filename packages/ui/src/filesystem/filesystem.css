@@ -2463,44 +2463,6 @@ button:disabled {
   word-break: break-word;
 }
 
-.chat-markdown-file-link {
-  position: relative;
-  top: 2px;
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.045);
-  color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.1;
-  padding: 2px 6px;
-  text-decoration: none;
-  vertical-align: text-bottom;
-}
-
-:root.dark .chat-markdown-file-link {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.chat-markdown-file-icon {
-  width: 8px;
-  height: 10px;
-  border-radius: 1px;
-  border: 1px solid currentColor;
-  opacity: 0.55;
-}
-
-.chat-markdown-file-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .chat-markdown-file-menu {
   position: fixed;
   z-index: 1000;

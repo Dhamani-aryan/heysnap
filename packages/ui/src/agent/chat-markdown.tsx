@@ -11,7 +11,16 @@ import {
   type PluginConfig,
   type UrlTransform,
 } from "streamdown";
-import { memo, useCallback, useEffect, useMemo, useState, type ComponentProps, type MouseEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref, type MarkdownFileLinkMeta } from "./markdown-links";
 
@@ -67,8 +76,10 @@ export const ChatMarkdown = memo(function ChatMarkdown({
     () => ({
       a({ node: _node, href, children, ...props }: ComponentProps<"a"> & { readonly node?: unknown }) {
         const normalizedHref = href ? rewriteMarkdownFileUriHref(href) ?? href : "";
-        const meta = normalizedHref.length > 0 ? fileLinkMetaByHref.get(normalizedHref) : undefined;
-        if (meta === undefined) {
+        const meta = normalizedHref.length > 0
+          ? fileLinkMetaByHref.get(normalizedHref) ?? resolveMarkdownFileLinkMeta(normalizedHref, cwd, workspaceRoot)
+          : null;
+        if (meta === null) {
           return (
             <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
               {children}
@@ -81,11 +92,14 @@ export const ChatMarkdown = memo(function ChatMarkdown({
             href={href ?? meta.targetPath}
             meta={meta}
             onOpenFilePath={onOpenFilePath}
-          />
+            {...props}
+          >
+            {children}
+          </MarkdownFileLink>
         );
       },
     }),
-    [fileLinkMetaByHref, onOpenFilePath],
+    [cwd, fileLinkMetaByHref, onOpenFilePath, workspaceRoot],
   );
 
   return (
@@ -116,11 +130,15 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   meta,
   onOpenFilePath,
+  children,
+  className,
+  ...props
 }: {
   readonly href: string;
   readonly meta: MarkdownFileLinkMeta;
   readonly onOpenFilePath?: (path: string) => void;
-}) {
+  readonly children: ReactNode;
+} & Omit<ComponentProps<"a">, "children" | "href" | "onClick" | "onContextMenu">) {
   const [menu, setMenu] = useState<{ readonly x: number; readonly y: number } | null>(null);
 
   useEffect(() => {
@@ -146,7 +164,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     <>
       <a
         href={href}
-        className="chat-markdown-file-link"
+        className={className === undefined ? "chat-markdown-file-link" : `${className} chat-markdown-file-link`}
+        {...props}
         title={meta.displayPath}
         onClick={(event) => {
           event.preventDefault();
@@ -157,8 +176,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           setMenu({ x: event.clientX, y: event.clientY });
         }}
       >
-        <span className="chat-markdown-file-icon" aria-hidden="true" />
-        <span className="chat-markdown-file-label">{formatFileLinkLabel(meta)}</span>
+        {children}
       </a>
       {menu === null ? null : (
         <div className="chat-markdown-file-menu" style={{ left: menu.x, top: menu.y }} role="menu">
@@ -178,12 +196,4 @@ const extractMarkdownLinkHrefs = (text: string): string[] => {
     if (href) hrefs.push(href);
   }
   return hrefs;
-};
-
-const formatFileLinkLabel = (meta: MarkdownFileLinkMeta): string => {
-  const parts = [meta.basename];
-  if (meta.line !== undefined) {
-    parts.push(`L${String(meta.line)}${meta.column === undefined ? "" : `:C${String(meta.column)}`}`);
-  }
-  return parts.join(" - ");
 };

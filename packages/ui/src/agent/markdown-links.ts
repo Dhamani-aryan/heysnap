@@ -34,7 +34,7 @@ export const resolveMarkdownFileLinkMeta = (
     return null;
   }
 
-  const rewritten = rewriteMarkdownFileUriHref(href) ?? href;
+  const rewritten = toWorkspaceHref(href);
   const parsed = splitLineColumn(rewritten);
   const targetPath = toClientPath(parsed.path, cwd, workspaceRoot);
 
@@ -57,7 +57,32 @@ export const resolveMarkdownFileLinkMeta = (
 };
 
 const isExternalHref = (href: string): boolean =>
-  /^[a-z][a-z0-9+.-]*:/iu.test(href) && !href.startsWith(FILE_URI_PREFIX);
+  /^[a-z][a-z0-9+.-]*:/iu.test(href) && !href.startsWith(FILE_URI_PREFIX) && toWorkspaceUrlPath(href) === null;
+
+const toWorkspaceHref = (href: string): string => rewriteMarkdownFileUriHref(href) ?? toWorkspaceUrlPath(href) ?? decodePath(href);
+
+const toWorkspaceUrlPath = (href: string): string | null => {
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    return url.pathname === "/workspace" || url.pathname.startsWith("/workspace/")
+      ? `${decodePath(url.pathname)}${url.hash}`
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const decodePath = (value: string): string => {
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
+};
 
 const splitLineColumn = (value: string): { readonly path: string; readonly line?: number; readonly column?: number } => {
   const hashMatch = value.match(/^(.*)#L(\d+)(?:C(\d+))?$/u);
@@ -98,6 +123,13 @@ const toClientPath = (
     }
     if (normalizedRoot !== undefined && path.startsWith(`${normalizedRoot}/`)) {
       return normalizeRelativePath(path.slice(normalizedRoot.length + 1));
+    }
+
+    if (path === "/workspace") {
+      return "";
+    }
+    if (path.startsWith("/workspace/")) {
+      return normalizeRelativePath(path.slice("/workspace/".length));
     }
 
     const desktopIndex = path.indexOf("/Desktop/");
