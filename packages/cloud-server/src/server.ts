@@ -13,6 +13,7 @@ import { createAuthRoutes } from "./auth/routes.js";
 import type { CloudServerConfig } from "./config.js";
 import { createComputerRoutes } from "./control-plane/computers.js";
 import type { CloudStore } from "./db/types.js";
+import { createFirecrawlGatewayRoutes } from "./firecrawl-gateway/routes.js";
 import { GatewayAccessService } from "./gateway/access-sessions.js";
 import { createMachineRoutes } from "./machines/routes.js";
 import { AwsEc2Provisioner } from "./provisioning/aws-ec2-provisioner.js";
@@ -111,6 +112,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   });
   app.route("/machines", createMachineRoutes(options.store, options.config));
   app.route("/llm", createAiGatewayRoutes(options.store, options.config));
+  app.route("/firecrawl", createFirecrawlGatewayRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));
 
   app.notFound((context) => context.json({

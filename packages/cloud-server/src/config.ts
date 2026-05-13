@@ -20,6 +20,8 @@ export interface CloudServerConfig {
   readonly aiGatewayAzureApiKey?: string;
   readonly aiGatewayCaptureBodies?: boolean;
   readonly aiGatewayCaptureBodyMaxBytes?: number;
+  readonly firecrawlBaseUrl?: string;
+  readonly firecrawlApiKey?: string;
   readonly allowedOrigins: readonly string[];
   readonly adminToken: string;
 }
@@ -51,6 +53,8 @@ export const getCloudServerConfig = (
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
   aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
+  firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
+  firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS),
   adminToken: readRequiredEnv(env, "CLOUD_SERVER_ADMIN_TOKEN"),
 });
@@ -79,6 +83,8 @@ export const getDevelopmentCloudServerConfig = (
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
   aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, true),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
+  firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
+  firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS, [
     "http://localhost:3000",
     "http://127.0.0.1:3000",

@@ -54,6 +54,7 @@ For the full local Docker machine workflow, use the root commands documented in
 - `POST /llm/openai/v1/responses`
 - `POST /llm/openai/v1/images/generations`
 - `POST /llm/openai/v1/images/edits`
+- `HTTP /firecrawl/*`
 - `GET /admin/ai-usage`
 - `GET /admin/ai-usage/summary`
 - `GET /releases/desktop/latest`
@@ -103,6 +104,17 @@ already selected by the URL. For multipart edits, OpenAI-style repeated
 Optional debug body capture is disabled by default. Enable it with
 `AI_GATEWAY_CAPTURE_BODIES=true`; captured headers are redacted and bodies are
 capped by `AI_GATEWAY_CAPTURE_BODY_MAX_BYTES`.
+
+## Firecrawl Gateway
+
+Cloud machines can send Firecrawl API requests to `/firecrawl/*` with their
+machine token as either the `Authorization: Bearer <machine-token>` header or
+the existing gateway-style `api-key` header. Cloud-server authenticates the
+machine token, replaces Firecrawl credentials with `Authorization: Bearer
+$FIRECRAWL_API_KEY`, forwards the original method, path, query, body, and
+non-secret headers to `FIRECRAWL_BASE_URL` (default
+`https://api.firecrawl.dev`), then streams the response back without AI usage
+logging.
 
 ## Deployment
 
