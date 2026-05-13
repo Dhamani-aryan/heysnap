@@ -117,9 +117,15 @@ export class FilesystemClient {
     this.options.onConnectionStatus?.("closed");
   }
 
-  subscribe(path?: string): Promise<void> {
+  subscribe(path?: string): Promise<FilesystemListing> {
     this.subscribedPath = path ?? "";
-    return this.request({ type: "subscribe", requestId: this.nextRequestId(), path }).then(() => undefined);
+    return this.request({ type: "subscribe", requestId: this.nextRequestId(), path }).then((listing) => {
+      if (isFilesystemListing(listing)) {
+        return listing;
+      }
+
+      throw new Error("Filesystem subscription returned an invalid listing.");
+    });
   }
 
   createFolder(path?: string): Promise<unknown> {
@@ -404,3 +410,12 @@ export class FilesystemClient {
     }
   }
 }
+
+const isFilesystemListing = (value: unknown): value is FilesystemListing => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return typeof record["path"] === "string" && Array.isArray(record["entries"]);
+};
