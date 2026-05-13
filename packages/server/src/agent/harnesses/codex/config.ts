@@ -54,6 +54,10 @@ browser_use = false
 browser_use_external = false
 computer_use = false
 
+[tools]
+web_search = false
+
+
 [model_providers.azure]
 name = "Azure"
 base_url = "${baseUrl}/llm/openai/v1"
