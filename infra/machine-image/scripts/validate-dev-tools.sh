@@ -40,6 +40,7 @@ gh --version
 vercel --version
 supabase --version
 codex --version
+npx --no-install @heysnap-ai/web --help >/dev/null
 image-gen --version
 heysnap-xlsxl --help >/dev/null
 
