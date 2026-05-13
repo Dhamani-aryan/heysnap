@@ -2,9 +2,10 @@
 set -euo pipefail
 
 workspace="${ANK1015_FILESYSTEM_ROOT:-/workspace}"
+welcome_dir="$workspace/Welcome"
 get_started="$workspace/get_started.md"
 
-mkdir -p "$workspace"
+mkdir -p "$workspace" "$welcome_dir"
 
 if [ ! -f "$get_started" ]; then
   cat >"$get_started" <<'MARKDOWN'
@@ -20,9 +21,10 @@ Plese me call as soon as you see a bug or a feature you would like to have.
 MARKDOWN
 fi
 
-chmod 0755 "$workspace" 2>/dev/null || true
+chmod 0755 "$workspace" "$welcome_dir" 2>/dev/null || true
 chmod 0644 "$get_started" 2>/dev/null || true
 
 if id -u agent >/dev/null 2>&1; then
+  chown agent:agent "$welcome_dir" 2>/dev/null || true
   chown agent:agent "$get_started" 2>/dev/null || true
 fi
