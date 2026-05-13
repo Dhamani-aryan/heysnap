@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -98,6 +98,10 @@ export const runLocalReleasePublisher = async () => {
   cpSync(resolve(repoRoot, "packages/server/package.json"), join(plan.stageDir, "package.json"));
   cpSync(resolve(repoRoot, "packages/server/dist"), join(plan.stageDir, "dist"), { recursive: true });
   cpSync(resolve(repoRoot, "packages/server/skills"), join(plan.stageDir, "skills"), { recursive: true });
+  const migrationsDir = resolve(repoRoot, "packages/server/migrations");
+  if (existsSync(migrationsDir)) {
+    cpSync(migrationsDir, join(plan.stageDir, "migrations"), { recursive: true });
+  }
 
   run("npm", ["install", "--omit=dev", "--ignore-scripts", "--prefix", plan.stageDir], { stdio: "inherit" });
   run("tar", ["-czf", plan.archivePath, "-C", plan.stageDir, "."], { stdio: "inherit" });
