@@ -124,7 +124,7 @@ What it does:
 - Runs machine-server typecheck and tests.
 - Builds `packages/server`.
 - Packages a `linux-x64` host artifact tarball with production runtime
-  dependencies.
+  dependencies and any `packages/server/migrations/*.sh` scripts.
 - Uploads the tarball to S3.
 - Publishes the cloud release manifest through:
   `POST /admin/releases/machine-server`
@@ -139,6 +139,8 @@ Runtime update behavior:
 - If `safeToRestart` is true, the machine bootstrap downloads the release tarball,
   verifies `metadata.sha256`, switches `/opt/ank1015/machine-server/current`,
   and restarts `ank1015-machine-server.service`.
+- Release migrations from `packages/server/migrations/*.sh` run as root once
+  per release version before the machine-server restart.
 - If sessions are active, the update is deferred to a later heartbeat.
 
 Electron embeds the machine server in the desktop app. Local desktop

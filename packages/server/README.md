@@ -62,10 +62,11 @@ gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
   -f notes='Release notes'
 ```
 
-The workflow packages `dist/` and production runtime dependencies into a
-tarball, uploads it to S3, publishes the cloud-server machine-server release
-manifest, and updates the cloud-server provisioning defaults for stable
-releases. Existing VM supervisors download, verify, and restart only when
+The workflow packages `dist/`, production runtime dependencies, and
+`migrations/*.sh` into a tarball, uploads it to S3, publishes the cloud-server
+machine-server release manifest, and updates the cloud-server provisioning
+defaults for stable releases. Existing VM supervisors download, verify, run
+release migrations as root once per release version, and restart only when
 `/status.safeToRestart` is true.
 
 The Electron local machine embeds this package directly, so local desktop
