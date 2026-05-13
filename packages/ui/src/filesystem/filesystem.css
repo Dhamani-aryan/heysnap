@@ -3059,7 +3059,7 @@ button:disabled {
   align-items: center;
   gap: 6px;
   border-radius: 6px;
-  color: #0064e1;
+  color: #4f6f9f;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 500;
@@ -3068,7 +3068,7 @@ button:disabled {
 }
 
 .prompt-folder-chip:hover {
-  background: rgba(0, 100, 225, 0.1);
+  background: rgba(79, 111, 159, 0.1);
 }
 
 .prompt-folder-chip span {
@@ -3093,11 +3093,11 @@ button:disabled {
 }
 
 :root.dark .prompt-folder-chip {
-  color: #5fa2ff;
+  color: #8aa7d6;
 }
 
 :root.dark .prompt-folder-chip:hover {
-  background: rgba(0, 100, 225, 0.18);
+  background: rgba(138, 167, 214, 0.16);
 }
 
 :root.dark .prompt-attachment-button:focus-visible,

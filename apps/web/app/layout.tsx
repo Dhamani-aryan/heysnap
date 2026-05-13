@@ -30,13 +30,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: `
 (() => {
   try {
-    const stored = window.localStorage.getItem("theme");
-    const theme = stored === "light" || stored === "dark"
-      ? stored
-      : window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-    document.documentElement.classList.toggle("dark", theme === "dark");
+    // const stored = window.localStorage.getItem("theme");
+    // const theme = stored === "light" || stored === "dark"
+    //   ? stored
+    //   : window.matchMedia("(prefers-color-scheme: dark)").matches
+    //     ? "dark"
+    //     : "light";
+    const theme = "dark";
+    document.documentElement.classList.add("dark");
     document.documentElement.style.colorScheme = theme;
   } catch {
   }
