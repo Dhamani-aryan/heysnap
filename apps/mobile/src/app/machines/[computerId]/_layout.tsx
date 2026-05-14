@@ -1,9 +1,15 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
+import { Redirect, useLocalSearchParams, withLayoutContext } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
 import { MobileMachineWorkspaceProvider } from '@/components/mobile-machine-workspace-provider';
 import { Colors } from '@/constants/theme';
+
+const { Navigator } = createMaterialTopTabNavigator();
+// Expo Router wrapper so file-based routes (`index.tsx`, `agent.tsx`) become
+// the two pages of a horizontal swipe pager. The tab bar itself is hidden;
+// users navigate by swiping the screen left/right.
+const SwipeTabs = withLayoutContext(Navigator);
 
 export default function MachineLayout() {
   const scheme = useColorScheme();
@@ -18,21 +24,16 @@ export default function MachineLayout() {
 
   return (
     <MobileMachineWorkspaceProvider computerId={computerId}>
-      <NativeTabs
-        backgroundColor={colors.background}
-        indicatorColor={colors.backgroundElement}
-        labelVisibilityMode="unlabeled"
-        labelStyle={{ selected: { color: colors.text } }}>
-        <NativeTabs.Trigger name="index">
-          <NativeTabs.Trigger.Label hidden>Files</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon sf="folder" md="folder" />
-        </NativeTabs.Trigger>
-
-        <NativeTabs.Trigger name="agent">
-          <NativeTabs.Trigger.Label hidden>Agent</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon sf="message" md="chat" />
-        </NativeTabs.Trigger>
-      </NativeTabs>
+      <SwipeTabs
+        tabBar={() => null}
+        screenOptions={{
+          swipeEnabled: true,
+          lazy: false,
+          sceneStyle: { backgroundColor: colors.background },
+        }}>
+        <SwipeTabs.Screen name="index" />
+        <SwipeTabs.Screen name="agent" />
+      </SwipeTabs>
     </MobileMachineWorkspaceProvider>
   );
 }
