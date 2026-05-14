@@ -25,6 +25,7 @@ sandbox_mode = "danger-full-access"
 include_permissions_instructions = false
 include_apps_instructions = false
 instructions = ${JSON.stringify(CODEX_USER_INSTRUCTIONS)}
+web_search = "disabled"
 
 [features]
 # Disable plugin system and plugin cache/sync behavior.
@@ -37,10 +38,6 @@ in_app_browser = false
 browser_use = false
 browser_use_external = false
 computer_use = false
-
-[tools]
-web_search = false
-
 
 [model_providers.azure]
 name = "Azure"
