@@ -22,7 +22,7 @@ type FilesystemBodyProps = {
   isLoading: boolean;
   palette: FilePalette;
   styles: FileStyles;
-  onOpenDirectory: (path: string) => void;
+  onOpenEntry: (entry: FilesystemEntry) => void;
   onRenameEntry: (entry: FilesystemEntry) => void;
 };
 
@@ -33,7 +33,7 @@ export function FilesystemBody({
   isLoading,
   palette,
   styles,
-  onOpenDirectory,
+  onOpenEntry,
   onRenameEntry,
 }: FilesystemBodyProps) {
   const handleTrashEntry = useCallback((entry: FilesystemEntry) => {
@@ -108,7 +108,7 @@ export function FilesystemBody({
           entry={entry}
           palette={palette}
           styles={styles}
-          onOpenDirectory={onOpenDirectory}
+          onOpenEntry={onOpenEntry}
           onRenameEntry={onRenameEntry}
           onShowInfo={handleShowInfo}
           onTrashEntry={handleTrashEntry}
@@ -146,7 +146,7 @@ type FinderItemProps = {
   entry: FilesystemEntry;
   palette: FilePalette;
   styles: FileStyles;
-  onOpenDirectory: (path: string) => void;
+  onOpenEntry: (entry: FilesystemEntry) => void;
   onRenameEntry: (entry: FilesystemEntry) => void;
   onShowInfo: (entry: FilesystemEntry) => void;
   onTrashEntry: (entry: FilesystemEntry) => void;
@@ -156,24 +156,14 @@ const FinderItem = memo(function FinderItem({
   entry,
   palette,
   styles,
-  onOpenDirectory,
+  onOpenEntry,
   onRenameEntry,
   onShowInfo,
   onTrashEntry,
 }: FinderItemProps) {
   const isDirectory = entry.type === 'directory';
 
-  const handlePress = useCallback(() => {
-    if (isDirectory) {
-      onOpenDirectory(entry.path);
-    }
-  }, [entry.path, isDirectory, onOpenDirectory]);
-
-  const handleOpen = useCallback(() => {
-    if (isDirectory) {
-      onOpenDirectory(entry.path);
-    }
-  }, [entry.path, isDirectory, onOpenDirectory]);
+  const handleOpen = useCallback(() => onOpenEntry(entry), [entry, onOpenEntry]);
 
   const handleRename = useCallback(() => onRenameEntry(entry), [entry, onRenameEntry]);
   const handleInfo = useCallback(() => onShowInfo(entry), [entry, onShowInfo]);
@@ -184,9 +174,9 @@ const FinderItem = memo(function FinderItem({
   const tileStyle = useMemo(
     () => ({ pressed }: { pressed: boolean }) => [
       styles.finderItem,
-      pressed && isDirectory ? styles.finderItemPressed : null,
+      pressed ? styles.finderItemPressed : null,
     ],
-    [isDirectory, styles.finderItem, styles.finderItemPressed],
+    [styles.finderItem, styles.finderItemPressed],
   );
 
   return (
@@ -198,7 +188,7 @@ const FinderItem = memo(function FinderItem({
               <Pressable
                 accessibilityLabel={`${isDirectory ? 'Folder' : 'File'}: ${entry.name}`}
                 accessibilityRole="button"
-                onPress={handlePress}
+                onPress={handleOpen}
                 style={tileStyle}>
                 <View style={styles.finderItemIcon}>
                   <ExpoImage
@@ -218,12 +208,7 @@ const FinderItem = memo(function FinderItem({
             </RNHostView>
           </ContextMenu.Trigger>
           <ContextMenu.Items>
-            <Button
-              label="Open"
-              systemImage="eye"
-              modifiers={!isDirectory ? DISABLED_MENU_ITEM_MODIFIERS : undefined}
-              onPress={handleOpen}
-            />
+            <Button label="Open" systemImage="eye" onPress={handleOpen} />
             <Button label="Rename" systemImage="pencil" onPress={handleRename} />
             <Button label="Get Info" systemImage="info.circle" onPress={handleInfo} />
             <Divider />

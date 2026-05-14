@@ -8,6 +8,7 @@ import { createFileStyles, filePalettes } from '@/components/machine-files/file-
 import { validateFilesystemName } from '@/components/machine-files/file-utils';
 import { FilesystemBody } from '@/components/machine-files/filesystem-body';
 import { NameSheet, type NameDialogState } from '@/components/machine-files/name-sheet';
+import { FilePreviewModal } from '@/components/machine-files/file-preview-modal';
 import { ThemedView } from '@/components/themed-view';
 import { useMobileMachineWorkspace } from '@/components/mobile-machine-workspace-provider';
 
@@ -30,6 +31,7 @@ export default function MachineScreen() {
     currentPath,
     error,
     filesystemClient,
+    filesystemWebsocketUrl,
     goBack,
     goForward,
     isLoading,
@@ -38,9 +40,17 @@ export default function MachineScreen() {
   } = useMobileMachineWorkspace();
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [isNameSubmitting, setIsNameSubmitting] = useState(false);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
 
   const entries = listing?.entries ?? EMPTY_ENTRIES;
   const isInitialLoading = isLoading && listing === null;
+
+  const previewEntry = useMemo<FilesystemEntry | null>(() => {
+    if (previewPath === null) {
+      return null;
+    }
+    return entries.find((candidate) => candidate.path === previewPath) ?? null;
+  }, [entries, previewPath]);
 
   const openCreateFolderDialog = useCallback(() => {
     setNameDialog({ mode: 'create-folder', initialName: DEFAULT_NEW_FOLDER_NAME });
@@ -53,6 +63,18 @@ export default function MachineScreen() {
   const closeNameDialog = useCallback(() => {
     setNameDialog((current) => (isNameSubmitting ? current : null));
   }, [isNameSubmitting]);
+
+  const openPreview = useCallback((entry: FilesystemEntry) => {
+    if (entry.type === 'directory') {
+      navigateTo(entry.path);
+      return;
+    }
+    setPreviewPath(entry.path);
+  }, [navigateTo]);
+
+  const closePreview = useCallback(() => {
+    setPreviewPath(null);
+  }, []);
 
   const submitNameDialog = useCallback(
     async (rawName: string) => {
@@ -125,7 +147,7 @@ export default function MachineScreen() {
         isLoading={isInitialLoading}
         palette={palette}
         styles={styles}
-        onOpenDirectory={navigateTo}
+        onOpenEntry={openPreview}
         onRenameEntry={openRenameDialog}
       />
 
@@ -137,6 +159,13 @@ export default function MachineScreen() {
         onCancel={closeNameDialog}
         onDismiss={closeNameDialog}
         onSubmit={handleSheetSubmit}
+      />
+
+      <FilePreviewModal
+        entry={previewEntry}
+        filesystemWebsocketUrl={filesystemWebsocketUrl}
+        palette={palette}
+        onClose={closePreview}
       />
     </ThemedView>
   );
