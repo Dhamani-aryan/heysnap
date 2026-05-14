@@ -122,15 +122,15 @@ const renderViewer = ({ name, path, websocketUrl, version }: FilePreviewProps): 
   }
 
   if (isMarkdownFile(name)) {
-    return <HeySnapMarkdownViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="dark" />;
+    return <HeySnapMarkdownViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="heysnap-dark" />;
   }
 
   if (isHtmlFile(name)) {
-    return <HeySnapHtmlViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="dark" />;
+    return <HeySnapHtmlViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="heysnap-dark" />;
   }
 
   if (isCodeFile(name) || isPlainTextFile(name)) {
-    return <HeySnapCodeViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} theme="dark" />;
+    return <HeySnapCodeViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} theme="heysnap-dark" />;
   }
 
   if (isAudioFile(name)) {
