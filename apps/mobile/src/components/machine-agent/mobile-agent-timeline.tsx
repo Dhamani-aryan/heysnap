@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
+  Keyboard,
   Pressable,
   StyleSheet,
   View,
@@ -72,6 +73,17 @@ export function MobileAgentTimeline({ palette }: MobileAgentTimelineProps) {
     prevRowCountRef.current = rows.length;
   }, [rows.length]);
 
+  // When the keyboard opens, scroll the timeline so the last message sits
+  // just above the keyboard instead of being hidden by it.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => {
+      sub.remove();
+    };
+  }, []);
+
   const renderItem = (info: ListRenderItemInfo<AgentTimelineRow>) => (
     <TimelineRow row={info.item} palette={palette} />
   );
@@ -87,7 +99,6 @@ export function MobileAgentTimeline({ palette }: MobileAgentTimelineProps) {
       ListFooterComponent={<View style={styles.footerSpacer} />}
       onContentSizeChange={handleContentSizeChange}
       keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
       removeClippedSubviews={false}
     />
   );
