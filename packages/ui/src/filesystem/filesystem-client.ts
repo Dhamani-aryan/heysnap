@@ -128,8 +128,8 @@ export class FilesystemClient {
     });
   }
 
-  createFolder(path?: string): Promise<unknown> {
-    return this.request({ type: "createFolder", requestId: this.nextRequestId(), path });
+  createFolder(path?: string, name?: string): Promise<unknown> {
+    return this.request({ type: "createFolder", requestId: this.nextRequestId(), path, name });
   }
 
   upload(path: string | undefined, files: FilesystemUploadFile[]): Promise<unknown> {
