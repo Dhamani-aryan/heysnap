@@ -5,12 +5,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { CloudApiError } from "../cloud-client";
 import { useCloudRuntime } from "../cloud-runtime";
-import {
-  readStoredToken,
-  removeStoredBoolean,
-  removeStoredToken,
-  writeStoredToken,
-} from "../state/cloud-storage";
 
 export const MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX = ":machines-onboarding-shown";
 
@@ -24,64 +18,75 @@ export const isAuthFailure = (error: unknown): boolean =>
   );
 
 export const useClearCloudSession = (input?: { readonly redirectToLogin?: () => void }) => {
-  const { accessStore, authStore, machinesStore, storageKey } = useCloudRuntime();
+  const { accessStore, authStore, machinesStore, storage, storageKey } = useCloudRuntime();
   const queryClient = useQueryClient();
   const redirectToLogin = input?.redirectToLogin;
 
   return useCallback(() => {
-    removeStoredToken(storageKey);
-    removeStoredBoolean(`${storageKey}${MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX}`);
+    void storage.removeToken(storageKey);
+    void storage.removeBoolean(`${storageKey}${MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX}`);
     authStore.getState().clear();
     machinesStore.getState().reset();
     accessStore.getState().reset();
     queryClient.clear();
     redirectToLogin?.();
-  }, [accessStore, authStore, machinesStore, queryClient, redirectToLogin, storageKey]);
+  }, [accessStore, authStore, machinesStore, queryClient, redirectToLogin, storage, storageKey]);
 };
 
 export const useBootstrapAuth = (input?: { readonly onAuthFailure?: () => void }): void => {
-  const { authStore, client, storageKey } = useCloudRuntime();
+  const { authStore, client, storage, storageKey } = useCloudRuntime();
   const clearSession = useClearCloudSession({ redirectToLogin: input?.onAuthFailure });
 
   useEffect(() => {
-    const storedToken = readStoredToken(storageKey);
-
-    if (storedToken === null) {
-      authStore.getState().clear();
-      return;
-    }
-
     let isCurrent = true;
-    authStore.getState().setChecking(storedToken);
 
-    void client.me(storedToken)
-      .then((response) => {
-        if (isCurrent) {
-          authStore.getState().setAuthenticatedSession({
-            token: storedToken,
-            user: response.user,
-          });
+    void Promise.resolve(storage.readToken(storageKey))
+      .then((storedToken) => {
+        if (!isCurrent) {
+          return;
         }
+
+        if (storedToken === null) {
+          authStore.getState().clear();
+          return;
+        }
+
+        authStore.getState().setChecking(storedToken);
+
+        void client.me(storedToken)
+          .then((response) => {
+            if (isCurrent) {
+              authStore.getState().setAuthenticatedSession({
+                token: storedToken,
+                user: response.user,
+              });
+            }
+          })
+          .catch(() => {
+            if (isCurrent) {
+              clearSession();
+            }
+          });
       })
       .catch(() => {
         if (isCurrent) {
-          clearSession();
+          authStore.getState().clear();
         }
       });
 
     return () => {
       isCurrent = false;
     };
-  }, [authStore, clearSession, client, storageKey]);
+  }, [authStore, clearSession, client, storage, storageKey]);
 };
 
 export const useLoginMutation = () => {
-  const { authStore, client, storageKey } = useCloudRuntime();
+  const { authStore, client, storage, storageKey } = useCloudRuntime();
 
   return useMutation({
     mutationFn: (input: { readonly email: string; readonly password: string }) => client.login(input),
     onSuccess: (response) => {
-      writeStoredToken(storageKey, response.session.token);
+      void storage.writeToken(storageKey, response.session.token);
       authStore.getState().setPendingLoginSession({
         token: response.session.token,
         user: response.user,

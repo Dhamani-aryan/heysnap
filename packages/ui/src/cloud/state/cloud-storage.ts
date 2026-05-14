@@ -1,5 +1,14 @@
 "use client";
 
+export interface CloudSessionStorage {
+  readonly readToken: (storageKey: string) => string | null | Promise<string | null>;
+  readonly writeToken: (storageKey: string, token: string) => void | Promise<void>;
+  readonly removeToken: (storageKey: string) => void | Promise<void>;
+  readonly readBoolean: (storageKey: string) => boolean | Promise<boolean>;
+  readonly writeBoolean: (storageKey: string, value: boolean) => void | Promise<void>;
+  readonly removeBoolean: (storageKey: string) => void | Promise<void>;
+}
+
 export const readStoredToken = (storageKey: string): string | null => {
   if (typeof window === "undefined") {
     return null;
@@ -71,4 +80,13 @@ export const removeStoredBoolean = (storageKey: string): void => {
   } catch {
     // Nothing else to clear.
   }
+};
+
+export const browserCloudSessionStorage: CloudSessionStorage = {
+  readToken: readStoredToken,
+  writeToken: writeStoredToken,
+  removeToken: removeStoredToken,
+  readBoolean: readStoredBoolean,
+  writeBoolean: writeStoredBoolean,
+  removeBoolean: removeStoredBoolean,
 };
