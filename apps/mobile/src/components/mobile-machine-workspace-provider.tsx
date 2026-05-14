@@ -32,8 +32,10 @@ type MobileMachineWorkspaceContextValue = {
   isLoading: boolean;
   listing: FilesystemListing | null;
   navigateTo: (path: string) => void;
+  openFilePath: string | null;
   refresh: () => Promise<void>;
   session: MachineWorkspaceSessionState;
+  setOpenFilePath: (path: string | null) => void;
   viewState: FilesystemViewState | null;
 };
 
@@ -59,6 +61,7 @@ export function MobileMachineWorkspaceProvider({
   const [filesystemError, setFilesystemError] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
 
   const currentPath = listing?.path ?? '';
   const currentDirectoryName = listing?.name ?? 'workspace';
@@ -221,11 +224,13 @@ export function MobileMachineWorkspaceProvider({
     isLoading: machinesIsFetching || session.isLoading || isFilesystemLoading,
     listing,
     navigateTo,
+    openFilePath,
     refresh: async () => {
       await machinesRefetch();
       await filesystemClient?.subscribe('');
     },
     session,
+    setOpenFilePath,
     viewState,
   }), [
     agentBaseUrl,
@@ -245,6 +250,7 @@ export function MobileMachineWorkspaceProvider({
     machinesIsFetching,
     machinesRefetch,
     navigateTo,
+    openFilePath,
     session,
     viewState,
   ]);
