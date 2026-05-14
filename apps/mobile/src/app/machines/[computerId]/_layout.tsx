@@ -21,15 +21,16 @@ export default function MachineLayout() {
       <NativeTabs
         backgroundColor={colors.background}
         indicatorColor={colors.backgroundElement}
+        labelVisibilityMode="unlabeled"
         labelStyle={{ selected: { color: colors.text } }}>
         <NativeTabs.Trigger name="index">
-          <NativeTabs.Trigger.Label>Files</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Label hidden>Files</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon sf="folder" md="folder" />
         </NativeTabs.Trigger>
 
         <NativeTabs.Trigger name="agent">
-          <NativeTabs.Trigger.Label>Agent</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon sf="bubble.left.and.bubble.right" md="chat" />
+          <NativeTabs.Trigger.Label hidden>Agent</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf="message" md="chat" />
         </NativeTabs.Trigger>
       </NativeTabs>
     </MobileMachineWorkspaceProvider>
