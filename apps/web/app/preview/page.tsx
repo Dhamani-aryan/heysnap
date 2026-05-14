@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FilePreview } from "@ank1015-app/ui/file-preview";
 
@@ -24,6 +24,18 @@ type PreviewMessage =
     };
 
 export default function PreviewPage(): React.ReactElement {
+  return (
+    <Suspense fallback={(
+      <main style={shellStyle}>
+        <div style={messageStyle}>Loading preview...</div>
+      </main>
+    )}>
+      <PreviewPageContent />
+    </Suspense>
+  );
+}
+
+function PreviewPageContent(): React.ReactElement {
   const searchParams = useSearchParams();
   const initial = useMemo<PreviewState | null>(() => {
     const websocketUrl = searchParams.get("websocketUrl");
