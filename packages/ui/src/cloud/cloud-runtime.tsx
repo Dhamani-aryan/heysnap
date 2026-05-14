@@ -16,11 +16,13 @@ import {
   type MachineAccessState,
   type MachineAccessStore,
 } from "./state/machine-access-store";
+import { browserCloudSessionStorage, type CloudSessionStorage } from "./state/cloud-storage";
 
 export interface CloudRuntimeProviderProps {
   readonly children: React.ReactNode;
   readonly cloudServerUrl: string;
   readonly storageKey: string;
+  readonly storage?: CloudSessionStorage;
 }
 
 export interface CloudRuntime {
@@ -30,6 +32,7 @@ export interface CloudRuntime {
   readonly authStore: CloudAuthStore;
   readonly machinesStore: CloudMachinesStore;
   readonly accessStore: MachineAccessStore;
+  readonly storage: CloudSessionStorage;
 }
 
 const CloudRuntimeContext = createContext<CloudRuntime | null>(null);
@@ -37,6 +40,7 @@ const CloudRuntimeContext = createContext<CloudRuntime | null>(null);
 export function CloudRuntimeProvider({
   children,
   cloudServerUrl,
+  storage = browserCloudSessionStorage,
   storageKey,
 }: CloudRuntimeProviderProps): React.ReactElement {
   const [queryClient] = useState(() =>
@@ -60,10 +64,11 @@ export function CloudRuntimeProvider({
     client,
     cloudServerUrl,
     storageKey,
+    storage,
     authStore,
     machinesStore,
     accessStore,
-  }), [accessStore, authStore, client, cloudServerUrl, machinesStore, storageKey]);
+  }), [accessStore, authStore, client, cloudServerUrl, machinesStore, storage, storageKey]);
 
   return (
     <QueryClientProvider client={queryClient}>

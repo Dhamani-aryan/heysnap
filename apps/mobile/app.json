@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "HeySnap",
+    "slug": "heysnap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icons/ios/ios-light.png",
+    "scheme": "heysnap",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": {
+        "light": "./assets/icons/ios/ios-light.png",
+        "dark": "./assets/icons/ios/ios-dark.png",
+        "tinted": "./assets/icons/ios/ios-tinted.png"
+      },
+      "bundleIdentifier": "com.heysnap.app",
+      "supportsTablet": true,
+      "appleTeamId": "P4T94TYPCJ"
+    },
+    "android": {
+      "package": "com.heysnap.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f0f11",
+        "foregroundImage": "./assets/icons/android/adaptive-icon.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "image": "./assets/splash-screen/splash-icon-light.png",
+          "imageWidth": 200,
+          "dark": {
+            "backgroundColor": "#0f0f11",
+            "image": "./assets/splash-screen/splash-icon-dark.png"
+          },
+          "android": {
+            "backgroundColor": "#0f0f11",
+            "image": "./assets/splash-screen/splash-icon-dark.png",
+            "imageWidth": 200
+          }
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
