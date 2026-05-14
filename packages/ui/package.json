@@ -9,6 +9,7 @@
     "./cloud-dashboard-app": "./src/cloud/cloud-dashboard-app.tsx",
     "./cloud-hooks": "./src/cloud/cloud-hooks.ts",
     "./cloud-runtime": "./src/cloud/cloud-runtime.tsx",
+    "./file-preview": "./src/filesystem/file-preview.tsx",
     "./filesystem-client": "./src/filesystem/filesystem-client.ts",
     "./filesystem-types": "./src/filesystem/types.ts",
     "./cloud.css": "./src/cloud/cloud.css",
