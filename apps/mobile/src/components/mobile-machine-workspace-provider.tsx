@@ -1,6 +1,22 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
+import { AgentRuntimeProvider } from '@ank1015-app/ui/agent-hooks';
 import { FilesystemClient, type FilesystemConnectionStatus } from '@ank1015-app/ui/filesystem-client';
-import type { FilesystemListing, FilesystemViewState } from '@ank1015-app/ui/filesystem-types';
+import type {
+  FilesystemEntry,
+  FilesystemListing,
+  FilesystemViewState,
+} from '@ank1015-app/ui/filesystem-types';
 import {
   useCloudAuthStore,
   useCloudMachinesStore,
@@ -32,13 +48,32 @@ type MobileMachineWorkspaceContextValue = {
   isLoading: boolean;
   listing: FilesystemListing | null;
   navigateTo: (path: string) => void;
+  openFile: (path: string) => void;
+  openFileEntry: FilesystemEntry | null;
+  openFilePath: string | null;
   refresh: () => Promise<void>;
+  selectedAgentThreadId: string | null;
   session: MachineWorkspaceSessionState;
+  closeOpenFile: () => void;
+  setSelectedAgentThreadId: Dispatch<SetStateAction<string | null>>;
+  setOpenFilePath: (path: string | null) => void;
   viewState: FilesystemViewState | null;
 };
 
 const MobileMachineWorkspaceContext = createContext<MobileMachineWorkspaceContextValue | null>(null);
 const HISTORY_LIMIT = 64;
+const isFilesystemConnectionErrorMessage = (message: string): boolean =>
+  message === 'Filesystem connection failed.' ||
+  message === 'Filesystem connection closed.' ||
+  message === 'Filesystem connection is not open.';
+
+const toFilesystemErrorMessage = (message: string | null): string | null => {
+  if (message === null || isFilesystemConnectionErrorMessage(message)) {
+    return null;
+  }
+
+  return message;
+};
 
 export function MobileMachineWorkspaceProvider({
   children,
@@ -59,9 +94,13 @@ export function MobileMachineWorkspaceProvider({
   const [filesystemError, setFilesystemError] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [openFileEntry, setOpenFileEntry] = useState<FilesystemEntry | null>(null);
+  const [selectedAgentThreadId, setSelectedAgentThreadId] = useState<string | null>(null);
+  const openFileRequestRef = useRef(0);
 
   const currentPath = listing?.path ?? '';
   const currentDirectoryName = listing?.name ?? 'workspace';
+  const openFilePath = openFileEntry?.path ?? null;
 
   const filesystemWebsocketUrl = useMemo(() => {
     if (session.accessSession === null) {
@@ -88,6 +127,10 @@ export function MobileMachineWorkspaceProvider({
   }, [client.baseUrl, session.accessSession]);
 
   useEffect(() => {
+    setSelectedAgentThreadId(null);
+  }, [computerId]);
+
+  useEffect(() => {
     if (authStatus !== 'authenticated' || filesystemWebsocketUrl === null) {
       setFilesystemClient(null);
       setConnectionStatus('closed');
@@ -96,6 +139,7 @@ export function MobileMachineWorkspaceProvider({
       setIsFilesystemLoading(false);
       setHistory([]);
       setHistoryIndex(-1);
+      setOpenFileEntry(null);
       return;
     }
 
@@ -105,12 +149,57 @@ export function MobileMachineWorkspaceProvider({
     setFilesystemError(null);
     setHistory([]);
     setHistoryIndex(-1);
+    setOpenFileEntry(null);
 
     let hasReceivedListing = false;
     const nextClient = new FilesystemClient(filesystemWebsocketUrl, {
       initialPath: '',
       onConnectionStatus: setConnectionStatus,
-      onError: setFilesystemError,
+      onError: (message) => {
+        setFilesystemError(toFilesystemErrorMessage(message));
+      },
+      onFileUpdates: ({ entries: updatedEntries }) => {
+        if (updatedEntries.length === 0) {
+          return;
+        }
+
+        const updatedEntriesByPath = new Map(
+          updatedEntries.map((entry) => [entry.path, entry]),
+        );
+
+        setOpenFileEntry((currentEntry) => {
+          if (currentEntry === null) {
+            return null;
+          }
+
+          const updatedEntry = updatedEntriesByPath.get(currentEntry.path);
+          if (updatedEntry !== undefined) {
+            return updatedEntry.type === 'file' ? updatedEntry : null;
+          }
+
+          return currentEntry;
+        });
+
+        setListing((currentListing) => {
+          if (currentListing === null) {
+            return currentListing;
+          }
+
+          let didChange = false;
+          const nextEntries = currentListing.entries.map((entry) => {
+            const updatedEntry = updatedEntriesByPath.get(entry.path);
+
+            if (updatedEntry === undefined) {
+              return entry;
+            }
+
+            didChange = true;
+            return updatedEntry;
+          });
+
+          return didChange ? { ...currentListing, entries: nextEntries } : currentListing;
+        });
+      },
       onListing: (nextListing) => {
         const isInitialListing = !hasReceivedListing;
         hasReceivedListing = true;
@@ -139,6 +228,16 @@ export function MobileMachineWorkspaceProvider({
       ));
     };
   }, [authStatus, filesystemWebsocketUrl]);
+
+  useEffect(() => {
+    const paths = openFilePath === null ? [] : [openFilePath];
+
+    void filesystemClient?.watchFiles(paths).catch((error) => {
+      setFilesystemError(toFilesystemErrorMessage(
+        error instanceof Error ? error.message : 'Failed to watch open file.',
+      ));
+    });
+  }, [filesystemClient, openFilePath]);
 
   const subscribeTo = useCallback(async (
     path: string,
@@ -181,6 +280,79 @@ export function MobileMachineWorkspaceProvider({
     });
   }, [subscribeTo]);
 
+  const closeOpenFile = useCallback((): void => {
+    openFileRequestRef.current += 1;
+    setOpenFileEntry(null);
+  }, []);
+
+  const openFile = useCallback((path: string): void => {
+    const normalizedPath = normalizeOpenFilePath(path);
+    const requestId = openFileRequestRef.current + 1;
+    openFileRequestRef.current = requestId;
+    setOpenFileEntry(null);
+
+    if (normalizedPath === null) {
+      return;
+    }
+
+    const commitOpenFileEntry = (entry: FilesystemEntry): void => {
+      setTimeout(() => {
+        if (openFileRequestRef.current === requestId) {
+          setOpenFileEntry(entry);
+        }
+      }, 0);
+    };
+
+    const openResolvedEntry = (entry: FilesystemEntry): void => {
+      if (entry.type === 'directory') {
+        navigateTo(entry.path);
+        return;
+      }
+
+      commitOpenFileEntry(entry);
+    };
+
+    if (normalizedPath.length === 0) {
+      navigateTo('');
+      return;
+    }
+
+    const visibleEntry = listing?.entries.find((entry) => entry.path === normalizedPath);
+    if (visibleEntry !== undefined) {
+      openResolvedEntry(visibleEntry);
+      return;
+    }
+
+    const parentPath = getParentPath(normalizedPath);
+    void (async () => {
+      const parentListing =
+        listing?.path === parentPath
+          ? listing
+          : await subscribeTo(parentPath, true);
+      const targetEntry = parentListing?.entries.find((entry) => entry.path === normalizedPath);
+
+      if (targetEntry !== undefined) {
+        openResolvedEntry(targetEntry);
+        return;
+      }
+
+      commitOpenFileEntry(createUnknownFileEntry(normalizedPath));
+    })().catch((error) => {
+      if (openFileRequestRef.current === requestId) {
+        setFilesystemError(error instanceof Error ? error.message : 'Failed to open file.');
+      }
+    });
+  }, [listing, navigateTo, subscribeTo]);
+
+  const setOpenFilePath = useCallback((path: string | null): void => {
+    if (path === null) {
+      closeOpenFile();
+      return;
+    }
+
+    openFile(path);
+  }, [closeOpenFile, openFile]);
+
   const goBack = useCallback((): void => {
     if (historyIndex <= 0) {
       return;
@@ -221,11 +393,18 @@ export function MobileMachineWorkspaceProvider({
     isLoading: machinesIsFetching || session.isLoading || isFilesystemLoading,
     listing,
     navigateTo,
+    openFile,
+    openFileEntry,
+    openFilePath,
     refresh: async () => {
       await machinesRefetch();
       await filesystemClient?.subscribe('');
     },
+    selectedAgentThreadId,
     session,
+    closeOpenFile,
+    setSelectedAgentThreadId,
+    setOpenFilePath,
     viewState,
   }), [
     agentBaseUrl,
@@ -245,14 +424,30 @@ export function MobileMachineWorkspaceProvider({
     machinesIsFetching,
     machinesRefetch,
     navigateTo,
+    openFile,
+    openFileEntry,
+    openFilePath,
+    selectedAgentThreadId,
     session,
+    closeOpenFile,
+    setOpenFilePath,
     viewState,
   ]);
 
-  return (
+  const contextContent = (
     <MobileMachineWorkspaceContext.Provider value={value}>
       {children}
     </MobileMachineWorkspaceContext.Provider>
+  );
+
+  if (agentBaseUrl === null) {
+    return contextContent;
+  }
+
+  return (
+    <AgentRuntimeProvider key={computerId} agentBaseUrl={agentBaseUrl}>
+      {contextContent}
+    </AgentRuntimeProvider>
   );
 }
 
@@ -301,3 +496,42 @@ const createInitialNavigationHistory = (path: string): string[] => {
     ...segments.map((_, index) => segments.slice(0, index + 1).join('/')),
   ];
 };
+
+const normalizeOpenFilePath = (path: string): string | null => {
+  const parts: string[] = [];
+
+  for (const part of path.trim().replaceAll('\\', '/').split('/')) {
+    if (part.length === 0 || part === '.') {
+      continue;
+    }
+
+    if (part === '..') {
+      if (parts.length === 0) {
+        return null;
+      }
+
+      parts.pop();
+      continue;
+    }
+
+    parts.push(part);
+  }
+
+  return parts.join('/');
+};
+
+const getParentPath = (path: string): string => {
+  const segments = path.split('/').filter((segment) => segment.length > 0);
+  segments.pop();
+  return segments.join('/');
+};
+
+const createUnknownFileEntry = (path: string): FilesystemEntry => ({
+  name: path.split('/').filter(Boolean).at(-1) ?? path,
+  path,
+  type: 'file',
+  size: null,
+  updatedAt: new Date().toISOString(),
+  isHidden: false,
+  isSymlink: false,
+});

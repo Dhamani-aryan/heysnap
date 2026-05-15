@@ -122,15 +122,15 @@ const renderViewer = ({ name, path, websocketUrl, version }: FilePreviewProps): 
   }
 
   if (isMarkdownFile(name)) {
-    return <HeySnapMarkdownViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="dark" />;
+    return <HeySnapMarkdownViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="heysnap-dark" />;
   }
 
   if (isHtmlFile(name)) {
-    return <HeySnapHtmlViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="dark" />;
+    return <HeySnapHtmlViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="heysnap-dark" />;
   }
 
   if (isCodeFile(name) || isPlainTextFile(name)) {
-    return <HeySnapCodeViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} theme="dark" />;
+    return <HeySnapCodeViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} theme="heysnap-dark" />;
   }
 
   if (isAudioFile(name)) {
@@ -268,7 +268,7 @@ export const buildFilesystemDownloadUrl = (
   paths: readonly string[],
   version?: string,
 ): string => {
-  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
@@ -297,7 +297,7 @@ export const buildFilesystemPreviewUrl = (
   format: "pdf",
   version?: string,
 ): string => {
-  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
@@ -324,7 +324,7 @@ export const buildFilesystemXlsxUrl = (
   path: string,
   version?: string,
 ): string => {
-  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {

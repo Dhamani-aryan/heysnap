@@ -1,14 +1,22 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, useColorScheme, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useStore } from 'zustand';
+import {
+  useAgentRunMutation,
+  useAgentRuntime,
+  type AgentContent,
+  type AgentUiContext,
+} from '@ank1015-app/ui/agent-hooks';
 import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
 import { FilesToolbar } from '@/components/machine-files/files-toolbar';
 import { createFileStyles, filePalettes } from '@/components/machine-files/file-screen-styles';
 import { validateFilesystemName } from '@/components/machine-files/file-utils';
 import { FilesystemBody } from '@/components/machine-files/filesystem-body';
+import { FilesOrbMicButton } from '@/components/machine-files/files-orb-mic-button';
 import { NameSheet, type NameDialogState } from '@/components/machine-files/name-sheet';
-import { FilePreviewModal } from '@/components/machine-files/file-preview-modal';
+import { FilePreviewPane } from '@/components/machine-files/file-preview-pane';
 import { ThemedView } from '@/components/themed-view';
 import { useMobileMachineWorkspace } from '@/components/mobile-machine-workspace-provider';
 
@@ -27,6 +35,7 @@ export default function MachineScreen() {
   const {
     canGoBack,
     canGoForward,
+    agentBaseUrl,
     currentDirectoryName,
     currentPath,
     error,
@@ -37,20 +46,16 @@ export default function MachineScreen() {
     isLoading,
     listing,
     navigateTo,
+    openFile,
+    openFileEntry,
+    closeOpenFile,
   } = useMobileMachineWorkspace();
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [isNameSubmitting, setIsNameSubmitting] = useState(false);
-  const [previewPath, setPreviewPath] = useState<string | null>(null);
 
   const entries = listing?.entries ?? EMPTY_ENTRIES;
   const isInitialLoading = isLoading && listing === null;
-
-  const previewEntry = useMemo<FilesystemEntry | null>(() => {
-    if (previewPath === null) {
-      return null;
-    }
-    return entries.find((candidate) => candidate.path === previewPath) ?? null;
-  }, [entries, previewPath]);
+  const previewEntry = openFileEntry;
 
   const openCreateFolderDialog = useCallback(() => {
     setNameDialog({ mode: 'create-folder', initialName: DEFAULT_NEW_FOLDER_NAME });
@@ -69,12 +74,12 @@ export default function MachineScreen() {
       navigateTo(entry.path);
       return;
     }
-    setPreviewPath(entry.path);
-  }, [navigateTo]);
+    openFile(entry.path);
+  }, [navigateTo, openFile]);
 
   const closePreview = useCallback(() => {
-    setPreviewPath(null);
-  }, []);
+    closeOpenFile();
+  }, [closeOpenFile]);
 
   const submitNameDialog = useCallback(
     async (rawName: string) => {
@@ -125,31 +130,49 @@ export default function MachineScreen() {
 
   return (
     <ThemedView style={[styles.shell, { backgroundColor: palette.background }]}>
-      <SafeAreaView edges={['top']} style={styles.safeArea}>
-        <FilesToolbar
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          currentPath={currentPath}
-          directoryName={currentDirectoryName}
-          palette={palette}
-          styles={styles}
-          onCreateFolder={openCreateFolderDialog}
-          onGoBack={goBack}
-          onGoForward={goForward}
-        />
-      </SafeAreaView>
+      {previewEntry === null ? (
+        <>
+          <SafeAreaView edges={['top']} style={styles.safeArea}>
+            <FilesToolbar
+              canGoBack={canGoBack}
+              canGoForward={canGoForward}
+              currentPath={currentPath}
+              directoryName={currentDirectoryName}
+              palette={palette}
+              styles={styles}
+              onCreateFolder={openCreateFolderDialog}
+              onGoBack={goBack}
+              onGoForward={goForward}
+            />
+          </SafeAreaView>
 
-      <FilesystemBody
-        columnCount={columnCount}
-        entries={entries}
-        error={error}
-        filesystemClient={filesystemClient}
-        isLoading={isInitialLoading}
-        palette={palette}
-        styles={styles}
-        onOpenEntry={openPreview}
-        onRenameEntry={openRenameDialog}
-      />
+          <FilesystemBody
+            columnCount={columnCount}
+            entries={entries}
+            error={error}
+            filesystemClient={filesystemClient}
+            isLoading={isInitialLoading}
+            palette={palette}
+            styles={styles}
+            onOpenEntry={openPreview}
+            onRenameEntry={openRenameDialog}
+          />
+        </>
+      ) : (
+        <FilePreviewPane
+          key={previewEntry.path}
+          entry={previewEntry}
+          filesystemWebsocketUrl={filesystemWebsocketUrl}
+          palette={palette}
+          onBack={closePreview}
+        />
+      )}
+
+      {agentBaseUrl === null ? (
+        <FilesOrbMicButton palette={palette} />
+      ) : (
+        <FilesAgentVoiceButton palette={palette} />
+      )}
 
       <NameSheet
         dialog={nameDialog}
@@ -160,13 +183,54 @@ export default function MachineScreen() {
         onDismiss={closeNameDialog}
         onSubmit={handleSheetSubmit}
       />
-
-      <FilePreviewModal
-        entry={previewEntry}
-        filesystemWebsocketUrl={filesystemWebsocketUrl}
-        palette={palette}
-        onClose={closePreview}
-      />
     </ThemedView>
+  );
+}
+
+function FilesAgentVoiceButton({
+  palette,
+}: {
+  palette: (typeof filePalettes)['light'] | (typeof filePalettes)['dark'];
+}) {
+  const {
+    currentPath,
+    openFilePath,
+    selectedAgentThreadId,
+    setSelectedAgentThreadId,
+  } = useMobileMachineWorkspace();
+  const runtime = useAgentRuntime();
+  const isRunning = useStore(runtime.chatStore, (state) => state.activeRun !== null);
+
+  const uiContext = useMemo<AgentUiContext>(
+    () => ({
+      openFiles:
+        openFilePath !== null ? [{ path: openFilePath, isFocused: true }] : [],
+    }),
+    [openFilePath],
+  );
+
+  const { submit, steer } = useAgentRunMutation({
+    currentPath,
+    selectedThreadId: selectedAgentThreadId,
+    uiContext,
+    onThreadResolved: (threadId) => {
+      setSelectedAgentThreadId((current) => current ?? threadId);
+    },
+  });
+
+  const sendTranscript = useCallback(
+    (transcript: string) => {
+      const content: AgentContent = [{ type: 'text', content: transcript }];
+      return isRunning ? steer({ content }) : submit({ content });
+    },
+    [isRunning, steer, submit],
+  );
+
+  return (
+    <FilesOrbMicButton
+      isStreaming={isRunning}
+      palette={palette}
+      onSendTranscript={sendTranscript}
+    />
   );
 }

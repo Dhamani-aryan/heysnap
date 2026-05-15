@@ -18,14 +18,22 @@ export {
 } from "./agent-queries";
 
 export { selectHasThreads, selectHasStreamingThreads } from "./agent-thread-list-store";
+export { getAssistantMarkdown, getTextContent } from "./agent-store";
+export { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "./markdown-links";
 export type { AgentChatState, AgentTimelineRow } from "./agent-store";
+export type { MarkdownFileLinkMeta } from "./markdown-links";
 export type { AgentThreadListState } from "./agent-thread-list-store";
 export type {
   AgentContent,
+  AgentMessage,
   AgentRunEvent,
   AgentThread,
   AgentThreadGroup,
   AgentThreadSummary,
   AgentUiContext,
+  AssistantMessage,
+  FileContent,
+  ImageContent,
+  TextContent,
   UserMessage,
 } from "./types";

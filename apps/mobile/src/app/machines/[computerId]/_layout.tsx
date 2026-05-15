@@ -1,9 +1,16 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
+import { Redirect, useLocalSearchParams, withLayoutContext } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
+import { DebugErrorBoundary } from '@/components/debug-error-boundary';
 import { MobileMachineWorkspaceProvider } from '@/components/mobile-machine-workspace-provider';
 import { Colors } from '@/constants/theme';
+
+const { Navigator } = createMaterialTopTabNavigator();
+// Expo Router wrapper so file-based routes (`index.tsx`, `agent.tsx`) become
+// the two pages of a horizontal swipe pager. The tab bar itself is hidden;
+// users navigate by swiping the screen left/right.
+const SwipeTabs = withLayoutContext(Navigator);
 
 export default function MachineLayout() {
   const scheme = useColorScheme();
@@ -17,21 +24,19 @@ export default function MachineLayout() {
   }
 
   return (
-    <MobileMachineWorkspaceProvider computerId={computerId}>
-      <NativeTabs
-        backgroundColor={colors.background}
-        indicatorColor={colors.backgroundElement}
-        labelStyle={{ selected: { color: colors.text } }}>
-        <NativeTabs.Trigger name="index">
-          <NativeTabs.Trigger.Label>Files</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon sf="folder" md="folder" />
-        </NativeTabs.Trigger>
-
-        <NativeTabs.Trigger name="agent">
-          <NativeTabs.Trigger.Label>Agent</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon sf="bubble.left.and.bubble.right" md="chat" />
-        </NativeTabs.Trigger>
-      </NativeTabs>
-    </MobileMachineWorkspaceProvider>
+    <DebugErrorBoundary label="machines/[computerId]">
+      <MobileMachineWorkspaceProvider computerId={computerId}>
+        <SwipeTabs
+          tabBar={() => null}
+          screenOptions={{
+            swipeEnabled: true,
+            lazy: false,
+            sceneStyle: { backgroundColor: colors.background },
+          }}>
+          <SwipeTabs.Screen name="index" />
+          <SwipeTabs.Screen name="agent" />
+        </SwipeTabs>
+      </MobileMachineWorkspaceProvider>
+    </DebugErrorBoundary>
   );
 }

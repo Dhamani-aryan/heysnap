@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   StyleSheet,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Cancel01Icon } from '@hugeicons/core-free-icons';
+import { ArrowLeft01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
@@ -16,28 +15,28 @@ import { ThemedText } from '@/components/themed-text';
 import { WEB_PREVIEW_URL } from '@/constants/config';
 import type { FilePalette } from './file-screen-styles';
 
-type FilePreviewModalProps = {
-  entry: FilesystemEntry | null;
+type FilePreviewPaneProps = {
+  entry: FilesystemEntry;
   filesystemWebsocketUrl: string | null;
   palette: FilePalette;
-  onClose: () => void;
+  onBack: () => void;
 };
 
 const versionOf = (entry: FilesystemEntry): string =>
   `${entry.updatedAt}:${String(entry.size ?? '')}`;
 
-export function FilePreviewModal({
+export function FilePreviewPane({
   entry,
   filesystemWebsocketUrl,
   palette,
-  onClose,
-}: FilePreviewModalProps) {
+  onBack,
+}: FilePreviewPaneProps) {
   const webViewRef = useRef<WebView>(null);
   const isReadyRef = useRef(false);
   const pendingUpdateRef = useRef<string | null>(null);
 
   const previewUri = useMemo(() => {
-    if (entry === null || filesystemWebsocketUrl === null) {
+    if (filesystemWebsocketUrl === null) {
       return null;
     }
 
@@ -47,47 +46,38 @@ export function FilePreviewModal({
     url.searchParams.set('name', entry.name);
     url.searchParams.set('v', versionOf(entry));
     return url.toString();
-  }, [entry, filesystemWebsocketUrl]);
+  }, [entry.path, filesystemWebsocketUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const currentVersion = entry === null ? null : versionOf(entry);
-  const initialVersionRef = useRef<string | null>(currentVersion);
+  const currentVersion = versionOf(entry);
   const lastSentVersionRef = useRef<string | null>(currentVersion);
 
-  // Reset the bridge state whenever a new file is opened.
+  // Reset the bridge state whenever a new file path is opened.
   useEffect(() => {
-    if (entry === null) {
-      isReadyRef.current = false;
-      pendingUpdateRef.current = null;
-      initialVersionRef.current = null;
-      lastSentVersionRef.current = null;
-      return;
-    }
-
     isReadyRef.current = false;
     pendingUpdateRef.current = null;
-    initialVersionRef.current = versionOf(entry);
-    lastSentVersionRef.current = versionOf(entry);
-  }, [entry?.path, entry?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+    lastSentVersionRef.current = currentVersion;
+  }, [entry.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push version updates into the WebView when the file changes server-side.
   useEffect(() => {
-    if (entry === null || currentVersion === null) {
-      return;
-    }
-
     if (lastSentVersionRef.current === currentVersion) {
       return;
     }
 
     lastSentVersionRef.current = currentVersion;
-    const payload = JSON.stringify({ type: 'update', version: currentVersion });
+    const payload = JSON.stringify({
+      type: 'update',
+      path: entry.path,
+      name: entry.name,
+      version: currentVersion,
+    });
 
     if (isReadyRef.current) {
       sendToWebView(webViewRef.current, payload);
     } else {
       pendingUpdateRef.current = payload;
     }
-  }, [entry, currentVersion]);
+  }, [currentVersion, entry.name, entry.path]);
 
   const handleMessage = (event: WebViewMessageEvent) => {
     let parsed: unknown;
@@ -112,67 +102,61 @@ export function FilePreviewModal({
     }
   };
 
-  const isVisible = entry !== null && previewUri !== null;
-
   return (
-    <Modal
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-      transparent={false}
-      visible={isVisible}>
-      <SafeAreaView edges={['top']} style={[styles.shell, { backgroundColor: palette.background }]}>
+    <View style={[styles.shell, { backgroundColor: palette.background }]}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: palette.background }}>
         <View style={[styles.header, { borderBottomColor: palette.navOutline }]}>
-          <ThemedText
-            numberOfLines={1}
-            style={[styles.title, { color: palette.directoryText }]}>
-            {entry?.name ?? ''}
-          </ThemedText>
           <Pressable
-            accessibilityLabel="Close preview"
+            accessibilityLabel="Back to files"
             accessibilityRole="button"
             hitSlop={12}
-            onPress={onClose}
-            style={({ pressed }) => [styles.closeButton, pressed && { opacity: 0.6 }]}>
+            onPress={onBack}
+            style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.6 }]}>
             <HugeiconsIcon
-              icon={Cancel01Icon}
+              icon={ArrowLeft01Icon}
               size={22}
               color={palette.navIcon}
               strokeWidth={2.4}
             />
           </Pressable>
-        </View>
-
-        <View style={[styles.body, { backgroundColor: palette.background }]}>
-          {previewUri === null ? (
-            <View style={styles.center}>
-              <ThemedText style={{ color: palette.stateText }}>
-                Preview unavailable.
-              </ThemedText>
-            </View>
-          ) : (
-            <WebView
-              ref={webViewRef}
-              source={{ uri: previewUri }}
-              originWhitelist={['*']}
-              javaScriptEnabled
-              domStorageEnabled
-              allowsInlineMediaPlayback
-              mediaPlaybackRequiresUserAction={false}
-              setSupportMultipleWindows={false}
-              onMessage={handleMessage}
-              startInLoadingState
-              renderLoading={() => (
-                <View style={[styles.center, { backgroundColor: palette.background }]}>
-                  <ActivityIndicator color={palette.navIcon} />
-                </View>
-              )}
-              style={[styles.webview, { backgroundColor: palette.background }]}
-            />
-          )}
+          <ThemedText
+            numberOfLines={1}
+            style={[styles.title, { color: palette.directoryText }]}>
+            {entry.name}
+          </ThemedText>
+          <View style={styles.headerSpacer} />
         </View>
       </SafeAreaView>
-    </Modal>
+
+      <View style={[styles.body, { backgroundColor: palette.background }]}>
+        {previewUri === null ? (
+          <View style={styles.center}>
+            <ThemedText style={{ color: palette.stateText }}>
+              Preview unavailable.
+            </ThemedText>
+          </View>
+        ) : (
+          <WebView
+            ref={webViewRef}
+            source={{ uri: previewUri }}
+            originWhitelist={['*']}
+            javaScriptEnabled
+            domStorageEnabled
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+            setSupportMultipleWindows={false}
+            onMessage={handleMessage}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={[styles.center, { backgroundColor: palette.background }]}>
+                <ActivityIndicator color={palette.navIcon} />
+              </View>
+            )}
+            style={[styles.webview, { backgroundColor: palette.background }]}
+          />
+        )}
+      </View>
+    </View>
   );
 }
 
@@ -192,21 +176,26 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
+    gap: 8,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerSpacer: {
+    width: 40,
+    height: 40,
   },
   title: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    textAlign: 'center',
   },
   body: {
     flex: 1,

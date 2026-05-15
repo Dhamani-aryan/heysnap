@@ -10,15 +10,21 @@
     "ios": {
       "icon": {
         "light": "./assets/icons/ios/ios-light.png",
-        "dark": "./assets/icons/ios/ios-dark.png",
+        "dark": "./assets/icons/ios/ios-tinted.png",
         "tinted": "./assets/icons/ios/ios-tinted.png"
       },
       "bundleIdentifier": "com.heysnap.app",
       "supportsTablet": true,
-      "appleTeamId": "P4T94TYPCJ"
+      "appleTeamId": "P4T94TYPCJ",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "HeySnap uses the microphone while you hold the voice button."
+      }
     },
     "android": {
       "package": "com.heysnap.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0f0f11",
         "foregroundImage": "./assets/icons/android/adaptive-icon.png"
