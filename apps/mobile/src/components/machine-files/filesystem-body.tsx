@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo } from 'react';
 import { Button, ContextMenu, Divider, Host, RNHostView } from '@expo/ui/swift-ui';
 import { disabled as swiftDisabled } from '@expo/ui/swift-ui/modifiers';
 import { Image as ExpoImage } from 'expo-image';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
 import type { FilesystemClient } from '@ank1015-app/ui/filesystem-client';
 import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
@@ -131,13 +131,17 @@ function FinderState({
 }) {
   return (
     <View style={styles.state}>
-      <ThemedText
-        style={[
-          styles.stateText,
-          { color: variant === 'error' ? palette.errorText : palette.stateText },
-        ]}>
-        {message}
-      </ThemedText>
+      {variant === 'info' ? (
+        <ActivityIndicator color={palette.navIcon} size="small" />
+      ) : (
+        <ThemedText
+          style={[
+            styles.stateText,
+            { color: palette.errorText },
+          ]}>
+          {message}
+        </ThemedText>
+      )}
     </View>
   );
 }

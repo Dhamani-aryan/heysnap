@@ -106,6 +106,7 @@ export function MobileAgentComposer({
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
   const inputRef = useRef<TextInput>(null);
 
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
@@ -197,6 +198,7 @@ export function MobileAgentComposer({
 
       setDraft('');
       setAttachments([]);
+      setResetKey((current) => current + 1);
     } finally {
       setIsSubmitting(false);
     }
@@ -233,6 +235,7 @@ export function MobileAgentComposer({
 
       <Pressable onPress={() => inputRef.current?.focus()} style={styles.inputArea}>
         <TextInput
+          key={resetKey}
           ref={inputRef}
           editable={!isSubmitting}
           multiline
@@ -262,7 +265,7 @@ export function MobileAgentComposer({
           />
           {activeFolderName === undefined ? null : (
             <View style={styles.folderChip}>
-              <HugeiconsIcon icon={Folder01Icon} size={14} color="#8AA7D6" strokeWidth={2} />
+              <HugeiconsIcon icon={Folder01Icon} size={16} color="#8AA7D6" strokeWidth={2.1} />
               <ThemedText numberOfLines={1} style={styles.folderText}>
                 {activeFolderName}
               </ThemedText>
@@ -388,6 +391,9 @@ function AttachmentChip({
   );
 }
 
+const INPUT_MIN_HEIGHT = 32;
+const INPUT_MAX_HEIGHT = 122;
+
 const formatBytes = (bytes: number): string => {
   if (bytes <= 0) {
     return 'File';
@@ -411,16 +417,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   inputArea: {
-    minHeight: 56,
-    maxHeight: 180,
+    width: '100%',
+    paddingBottom: 6,
   },
   input: {
     fontSize: 16,
     lineHeight: 22,
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 0,
-    minHeight: 56,
-    maxHeight: 180,
+    minHeight: INPUT_MIN_HEIGHT,
+    maxHeight: INPUT_MAX_HEIGHT,
     textAlignVertical: 'top',
   },
   actionsRow: {
@@ -446,13 +452,14 @@ const styles = StyleSheet.create({
   folderChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 4,
-    maxWidth: 180,
+    gap: 7,
+    paddingHorizontal: 5,
+    maxWidth: 196,
   },
   folderText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
+    lineHeight: 18,
     color: '#8AA7D6',
   },
   sendButton: {

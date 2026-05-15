@@ -7,13 +7,12 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
   Folder01Icon,
-  PlusSignIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import {
@@ -65,7 +64,6 @@ type MobileAgentThreadDrawerProps = {
   scheme: 'light' | 'dark';
   onClose: () => void;
   onSelectThread: (thread: AgentThreadSummary) => void;
-  onNewThread: () => void;
 };
 
 export function MobileAgentThreadDrawer({
@@ -74,7 +72,6 @@ export function MobileAgentThreadDrawer({
   scheme,
   onClose,
   onSelectThread,
-  onNewThread,
 }: MobileAgentThreadDrawerProps) {
   const palette = scheme === 'dark' ? darkPalette : lightPalette;
 
@@ -115,85 +112,56 @@ export function MobileAgentThreadDrawer({
     [onClose, onSelectThread],
   );
 
-  const handleNew = useCallback(() => {
-    onNewThread();
-    onClose();
-  }, [onClose, onNewThread]);
-
   return (
     <Modal
+      allowSwipeDismissal
       animationType="slide"
       onRequestClose={onClose}
-      statusBarTranslucent
-      transparent={false}
+      presentationStyle="pageSheet"
       visible={isOpen}>
-      <SafeAreaProvider style={{ backgroundColor: palette.background }}>
-        <SafeAreaView edges={['top']} style={[styles.shell, { backgroundColor: palette.background }]}>
-          <View style={styles.header}>
-            <Pressable
-              accessibilityLabel="Close history"
-              accessibilityRole="button"
-              hitSlop={12}
-              onPress={onClose}
-              style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.5 }]}>
-              <HugeiconsIcon icon={Cancel01Icon} size={24} color={palette.textSecondary} strokeWidth={2.2} />
-            </Pressable>
-            <ThemedText style={[styles.title, { color: palette.textPrimary }]}>History</ThemedText>
-            <View style={styles.headerButton} />
-          </View>
+      <SafeAreaView edges={['top']} style={[styles.shell, { backgroundColor: palette.background }]}>
+        <View style={styles.header}>
+          <Pressable
+            accessibilityLabel="Close history"
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={onClose}
+            style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.5 }]}>
+            <HugeiconsIcon icon={Cancel01Icon} size={24} color={palette.textSecondary} strokeWidth={2.2} />
+          </Pressable>
+          <ThemedText style={[styles.title, { color: palette.textPrimary }]}>History</ThemedText>
+          <View style={styles.headerButton} />
+        </View>
 
-          <ScrollView
-            style={{ flex: 1, backgroundColor: palette.background }}
-            contentContainerStyle={styles.scrollContent}>
-            <Pressable
-              accessibilityLabel="Start a new chat"
-              accessibilityRole="button"
-              onPress={handleNew}
-              style={({ pressed }) => [
-                styles.row,
-                styles.topRow,
-                pressed && { backgroundColor: palette.pressed },
-              ]}>
-              <HugeiconsIcon
-                icon={PlusSignIcon}
-                size={20}
-                color={palette.textPrimary}
-                strokeWidth={1.8}
-              />
-              <ThemedText style={[styles.rowText, { color: palette.textPrimary }]}>
-                New Chat
-              </ThemedText>
-            </Pressable>
-
-            {error !== null ? (
-              <DrawerState text={error} variant="error" palette={palette} />
-            ) : isLoading && !hasThreads ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator color={palette.textSecondary} />
-              </View>
-            ) : !hasThreads ? (
-              <DrawerState text="No previous chats." palette={palette} />
-            ) : (
-              <View style={styles.chatsSection}>
-                <ThemedText style={[styles.sectionLabel, { color: palette.textMuted }]}>
-                  Chats
-                </ThemedText>
-                {nonEmptyGroups.map((group) => (
-                  <ThreadGroupSection
-                    key={group.path}
-                    group={group}
-                    palette={palette}
-                    isExpanded={expandedGroups[group.path] ?? false}
-                    selectedThreadId={selectedThreadId}
-                    onToggle={toggleGroup}
-                    onSelectThread={handleSelect}
-                  />
-                ))}
-              </View>
-            )}
-          </ScrollView>
-        </SafeAreaView>
-      </SafeAreaProvider>
+        <ScrollView
+          keyboardShouldPersistTaps="always"
+          style={{ flex: 1, backgroundColor: palette.background }}
+          contentContainerStyle={styles.scrollContent}>
+          {error !== null ? (
+            <DrawerState text={error} variant="error" palette={palette} />
+          ) : isLoading && !hasThreads ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color={palette.textSecondary} />
+            </View>
+          ) : !hasThreads ? (
+            <DrawerState text="No previous chats." palette={palette} />
+          ) : (
+            <View style={styles.chatsSection}>
+              {nonEmptyGroups.map((group) => (
+                <ThreadGroupSection
+                  key={group.path}
+                  group={group}
+                  palette={palette}
+                  isExpanded={expandedGroups[group.path] ?? false}
+                  selectedThreadId={selectedThreadId}
+                  onToggle={toggleGroup}
+                  onSelectThread={handleSelect}
+                />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   );
 }
@@ -214,6 +182,14 @@ const ThreadGroupSection = memo(function ThreadGroupSection({
   onSelectThread: (thread: AgentThreadSummary) => void;
 }) {
   const groupLabel = group.path.trim().length === 0 ? 'workspace' : group.path.split('/').pop() ?? group.path;
+  const [isShowingAllThreads, setIsShowingAllThreads] = useState(false);
+  const canToggleThreadCount = group.threads.length > COLLAPSED_THREAD_COUNT;
+  const visibleThreads = isShowingAllThreads
+    ? group.threads
+    : group.threads.slice(0, COLLAPSED_THREAD_COUNT);
+  const toggleThreadCount = useCallback(() => {
+    setIsShowingAllThreads((current) => !current);
+  }, []);
 
   return (
     <View style={styles.groupSection}>
@@ -227,23 +203,24 @@ const ThreadGroupSection = memo(function ThreadGroupSection({
         ]}>
         <HugeiconsIcon
           icon={Folder01Icon}
-          size={20}
+          size={24}
           color={palette.textSecondary}
-          strokeWidth={1.8}
+          strokeWidth={1.9}
         />
         <ThemedText numberOfLines={1} style={[styles.rowText, { color: palette.textPrimary }]}>
           {groupLabel}
         </ThemedText>
         <HugeiconsIcon
           icon={isExpanded ? ArrowDown01Icon : ArrowRight01Icon}
-          size={18}
+          size={21}
           color={palette.textMuted}
           strokeWidth={2}
         />
       </Pressable>
 
-      {isExpanded
-        ? group.threads.map((thread) => (
+      {isExpanded ? (
+        <>
+          {visibleThreads.map((thread) => (
             <ThreadRow
               key={thread.id}
               thread={thread}
@@ -251,8 +228,23 @@ const ThreadGroupSection = memo(function ThreadGroupSection({
               isSelected={thread.id === selectedThreadId}
               onSelectThread={onSelectThread}
             />
-          ))
-        : null}
+          ))}
+          {canToggleThreadCount ? (
+            <Pressable
+              accessibilityLabel={isShowingAllThreads ? 'Show fewer chats' : 'Show more chats'}
+              accessibilityRole="button"
+              onPress={toggleThreadCount}
+              style={({ pressed }) => [
+                styles.showMoreRow,
+                pressed && { backgroundColor: palette.pressed },
+              ]}>
+              <ThemedText style={[styles.showMoreText, { color: palette.textMuted }]}>
+                {isShowingAllThreads ? 'Show less' : 'Show more'}
+              </ThemedText>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
     </View>
   );
 });
@@ -317,6 +309,7 @@ const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
+const COLLAPSED_THREAD_COUNT = 3;
 
 const formatRelative = (timestamp: number): string => {
   if (!Number.isFinite(timestamp)) {
@@ -339,9 +332,9 @@ const formatRelative = (timestamp: number): string => {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-const ROW_PADDING_HORIZONTAL = 10;
-const ICON_SIZE = 20;
-const ICON_GAP = 14;
+const ROW_PADDING_HORIZONTAL = 12;
+const ICON_SIZE = 24;
+const ICON_GAP = 16;
 
 const styles = StyleSheet.create({
   shell: {
@@ -367,7 +360,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   scrollContent: {
-    paddingTop: 20,
+    paddingTop: 12,
     paddingBottom: 32,
     paddingHorizontal: 12,
   },
@@ -376,28 +369,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: ICON_GAP,
     paddingHorizontal: ROW_PADDING_HORIZONTAL,
-    paddingVertical: 11,
+    paddingVertical: 13,
     borderRadius: 8,
-  },
-  topRow: {
-    marginBottom: 2,
   },
   rowText: {
     flex: 1,
     minWidth: 0,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '400',
-    lineHeight: 22,
+    lineHeight: 24,
   },
   chatsSection: {
-    marginTop: 20,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '400',
-    lineHeight: 18,
-    paddingHorizontal: ROW_PADDING_HORIZONTAL,
-    paddingBottom: 8,
+    marginTop: 4,
   },
   groupSection: {
     marginBottom: 2,
@@ -406,7 +389,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 9,
+    paddingVertical: 11,
     paddingRight: ROW_PADDING_HORIZONTAL,
     paddingLeft: ROW_PADDING_HORIZONTAL + ICON_SIZE + ICON_GAP,
     borderRadius: 8,
@@ -414,14 +397,27 @@ const styles = StyleSheet.create({
   threadTitle: {
     flex: 1,
     minWidth: 0,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '400',
-    lineHeight: 20,
+    lineHeight: 22,
   },
   threadTime: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '400',
-    lineHeight: 18,
+    lineHeight: 19,
+  },
+  showMoreRow: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingRight: ROW_PADDING_HORIZONTAL,
+    paddingLeft: ROW_PADDING_HORIZONTAL + ICON_SIZE + ICON_GAP,
+    borderRadius: 8,
+  },
+  showMoreText: {
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 17,
+    textAlign: 'left',
   },
   streamingDot: {
     width: 6,
