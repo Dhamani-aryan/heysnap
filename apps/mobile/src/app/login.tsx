@@ -21,7 +21,7 @@ export default function LoginScreen() {
   }
 
   if (authStatus === 'authenticated' && user !== null) {
-    return <Redirect href="/" />;
+    return <Redirect href="/machines" />;
   }
 
   return (
@@ -30,7 +30,7 @@ export default function LoginScreen() {
       isSubmitting={loginMutation.isPending}
       onSuccessComplete={() => {
         authStore.getState().completeLogin();
-        router.replace('/');
+        router.replace('/machines');
       }}
       onSubmit={async (input) => {
         try {

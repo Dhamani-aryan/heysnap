@@ -2,6 +2,7 @@ import { createMaterialTopTabNavigator } from '@react-navigation/material-top-ta
 import { Redirect, useLocalSearchParams, withLayoutContext } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
+import { DebugErrorBoundary } from '@/components/debug-error-boundary';
 import { MobileMachineWorkspaceProvider } from '@/components/mobile-machine-workspace-provider';
 import { Colors } from '@/constants/theme';
 
@@ -23,17 +24,19 @@ export default function MachineLayout() {
   }
 
   return (
-    <MobileMachineWorkspaceProvider computerId={computerId}>
-      <SwipeTabs
-        tabBar={() => null}
-        screenOptions={{
-          swipeEnabled: true,
-          lazy: false,
-          sceneStyle: { backgroundColor: colors.background },
-        }}>
-        <SwipeTabs.Screen name="index" />
-        <SwipeTabs.Screen name="agent" />
-      </SwipeTabs>
-    </MobileMachineWorkspaceProvider>
+    <DebugErrorBoundary label="machines/[computerId]">
+      <MobileMachineWorkspaceProvider computerId={computerId}>
+        <SwipeTabs
+          tabBar={() => null}
+          screenOptions={{
+            swipeEnabled: true,
+            lazy: false,
+            sceneStyle: { backgroundColor: colors.background },
+          }}>
+          <SwipeTabs.Screen name="index" />
+          <SwipeTabs.Screen name="agent" />
+        </SwipeTabs>
+      </MobileMachineWorkspaceProvider>
+    </DebugErrorBoundary>
   );
 }
