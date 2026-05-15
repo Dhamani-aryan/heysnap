@@ -46,7 +46,7 @@ export function FilePreviewPane({
     url.searchParams.set('name', entry.name);
     url.searchParams.set('v', versionOf(entry));
     return url.toString();
-  }, [entry.path, entry.name, entry.updatedAt, entry.size, filesystemWebsocketUrl]);
+  }, [entry.path, filesystemWebsocketUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentVersion = versionOf(entry);
   const lastSentVersionRef = useRef<string | null>(currentVersion);
@@ -65,14 +65,19 @@ export function FilePreviewPane({
     }
 
     lastSentVersionRef.current = currentVersion;
-    const payload = JSON.stringify({ type: 'update', version: currentVersion });
+    const payload = JSON.stringify({
+      type: 'update',
+      path: entry.path,
+      name: entry.name,
+      version: currentVersion,
+    });
 
     if (isReadyRef.current) {
       sendToWebView(webViewRef.current, payload);
     } else {
       pendingUpdateRef.current = payload;
     }
-  }, [currentVersion]);
+  }, [currentVersion, entry.name, entry.path]);
 
   const handleMessage = (event: WebViewMessageEvent) => {
     let parsed: unknown;

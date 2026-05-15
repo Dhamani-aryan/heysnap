@@ -268,7 +268,7 @@ export const buildFilesystemDownloadUrl = (
   paths: readonly string[],
   version?: string,
 ): string => {
-  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
@@ -297,7 +297,7 @@ export const buildFilesystemPreviewUrl = (
   format: "pdf",
   version?: string,
 ): string => {
-  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
@@ -324,7 +324,7 @@ export const buildFilesystemXlsxUrl = (
   path: string,
   version?: string,
 ): string => {
-  const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {

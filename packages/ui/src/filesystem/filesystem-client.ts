@@ -320,7 +320,10 @@ export class FilesystemClient {
       return this.url;
     }
 
-    const baseUrl = typeof window === "undefined" ? "http://localhost" : window.location.href;
+    const baseUrl =
+      typeof window !== "undefined" && typeof window.location?.href === "string"
+        ? window.location.href
+        : "http://localhost";
     const socketUrl = new URL(this.url, baseUrl);
 
     if (socketUrl.protocol === "http:") {
