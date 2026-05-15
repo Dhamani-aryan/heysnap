@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Keyboard, Pressable, StyleSheet, View, useColorScheme } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
@@ -17,7 +18,6 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { MobileAgentRuntime } from '@/components/machine-agent/mobile-agent-runtime';
 import { MobileAgentThreadDrawer } from '@/components/machine-agent/mobile-agent-thread-drawer';
 import { MobileAgentComposer } from '@/components/machine-agent/mobile-agent-composer';
 import { MobileAgentTimeline } from '@/components/machine-agent/mobile-agent-timeline';
@@ -42,11 +42,7 @@ export default function MachineAgentScreen() {
     );
   }
 
-  return (
-    <MobileAgentRuntime agentBaseUrl={agentBaseUrl}>
-      <AgentScreenContent scheme={scheme} palette={palette} />
-    </MobileAgentRuntime>
-  );
+  return <AgentScreenContent scheme={scheme} palette={palette} />;
 }
 
 function AgentScreenContent({
@@ -56,9 +52,17 @@ function AgentScreenContent({
   scheme: 'light' | 'dark';
   palette: Palette;
 }) {
-  const { currentPath, currentDirectoryName, openFilePath } = useMobileMachineWorkspace();
+  const router = useRouter();
+  const {
+    computer,
+    currentPath,
+    currentDirectoryName,
+    openFile,
+    openFilePath,
+    selectedAgentThreadId,
+    setSelectedAgentThreadId,
+  } = useMobileMachineWorkspace();
   const insets = useSafeAreaInsets();
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   const dismissKeyboard = useCallback(() => {
@@ -66,9 +70,9 @@ function AgentScreenContent({
   }, []);
 
   useCloseAgentRuntimeRunOnUnmount();
-  useAgentThreadQuery(selectedThreadId, {
+  useAgentThreadQuery(selectedAgentThreadId, {
     onThreadResolved: (threadId) => {
-      setSelectedThreadId((current) => current ?? threadId);
+      setSelectedAgentThreadId((current) => current ?? threadId);
     },
   });
 
@@ -89,10 +93,10 @@ function AgentScreenContent({
 
   const { cancel, submit, steer } = useAgentRunMutation({
     currentPath,
-    selectedThreadId,
+    selectedThreadId: selectedAgentThreadId,
     uiContext,
     onThreadResolved: (threadId) => {
-      setSelectedThreadId((current) => current ?? threadId);
+      setSelectedAgentThreadId((current) => current ?? threadId);
     },
   });
 
@@ -100,19 +104,30 @@ function AgentScreenContent({
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), []);
 
   const handleSelectThread = useCallback((thread: AgentThreadSummary) => {
-    setSelectedThreadId(thread.id);
-  }, []);
+    setSelectedAgentThreadId(thread.id);
+  }, [setSelectedAgentThreadId]);
 
   const handleNewThread = useCallback(() => {
-    setSelectedThreadId(null);
-  }, []);
+    setSelectedAgentThreadId(null);
+  }, [setSelectedAgentThreadId]);
+
+  const handleOpenFilePath = useCallback((path: string) => {
+    openFile(path);
+
+    if (computer !== null) {
+      router.navigate({
+        pathname: '/machines/[computerId]',
+        params: { computerId: computer.id },
+      });
+    }
+  }, [computer, openFile, router]);
 
   const composerSubmit = useCallback(
     (input: Parameters<typeof submit>[0]) => (isRunning ? steer(input) : submit(input)),
     [isRunning, steer, submit],
   );
 
-  const showEmpty = !hasMessages && !isRunning && selectedThreadId === null && runError === null;
+  const showEmpty = !hasMessages && !isRunning && selectedAgentThreadId === null && runError === null;
 
   const composer = useMemo(
     () => (
@@ -186,7 +201,11 @@ function AgentScreenContent({
             </ThemedText>
           </Pressable>
         ) : (
-          <MobileAgentTimeline palette={palette} />
+          <MobileAgentTimeline
+            currentPath={currentPath}
+            palette={palette}
+            onOpenFilePath={handleOpenFilePath}
+          />
         )}
 
         {runError === null ? null : (
@@ -203,10 +222,9 @@ function AgentScreenContent({
       <MobileAgentThreadDrawer
         isOpen={isDrawerOpen}
         scheme={scheme}
-        selectedThreadId={selectedThreadId}
+        selectedThreadId={selectedAgentThreadId}
         onClose={closeDrawer}
         onSelectThread={handleSelectThread}
-        onNewThread={handleNewThread}
       />
     </ThemedView>
   );

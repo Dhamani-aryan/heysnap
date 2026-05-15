@@ -19,7 +19,9 @@ export {
 
 export { selectHasThreads, selectHasStreamingThreads } from "./agent-thread-list-store";
 export { getAssistantMarkdown, getTextContent } from "./agent-store";
+export { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "./markdown-links";
 export type { AgentChatState, AgentTimelineRow } from "./agent-store";
+export type { MarkdownFileLinkMeta } from "./markdown-links";
 export type { AgentThreadListState } from "./agent-thread-list-store";
 export type {
   AgentContent,

@@ -16,6 +16,7 @@ import { useStore } from 'zustand';
 import {
   getAssistantMarkdown,
   getTextContent,
+  resolveMarkdownFileLinkMeta,
   useAgentRuntime,
   type AgentTimelineRow,
   type FileContent,
@@ -37,10 +38,16 @@ type Palette = {
 };
 
 type MobileAgentTimelineProps = {
+  currentPath: string;
+  onOpenFilePath?: (path: string) => void;
   palette: Palette;
 };
 
-export function MobileAgentTimeline({ palette }: MobileAgentTimelineProps) {
+export function MobileAgentTimeline({
+  currentPath,
+  onOpenFilePath,
+  palette,
+}: MobileAgentTimelineProps) {
   const runtime = useAgentRuntime();
   const rows = useStore(runtime.chatStore, (state) => state.timelineRows);
   const listRef = useRef<FlatList<AgentTimelineRow>>(null);
@@ -85,7 +92,12 @@ export function MobileAgentTimeline({ palette }: MobileAgentTimelineProps) {
   }, []);
 
   const renderItem = (info: ListRenderItemInfo<AgentTimelineRow>) => (
-    <TimelineRow row={info.item} palette={palette} />
+    <TimelineRow
+      currentPath={currentPath}
+      row={info.item}
+      palette={palette}
+      onOpenFilePath={onOpenFilePath}
+    />
   );
 
   return (
@@ -107,9 +119,13 @@ export function MobileAgentTimeline({ palette }: MobileAgentTimelineProps) {
 const keyExtractor = (row: AgentTimelineRow): string => row.id;
 
 const TimelineRow = memo(function TimelineRow({
+  currentPath,
+  onOpenFilePath,
   row,
   palette,
 }: {
+  currentPath: string;
+  onOpenFilePath?: (path: string) => void;
   row: AgentTimelineRow;
   palette: Palette;
 }) {
@@ -121,7 +137,14 @@ const TimelineRow = memo(function TimelineRow({
     return <UserBubble messageId={row.messageId} palette={palette} />;
   }
 
-  return <AssistantBlock messageId={row.messageId} palette={palette} />;
+  return (
+    <AssistantBlock
+      currentPath={currentPath}
+      messageId={row.messageId}
+      palette={palette}
+      onOpenFilePath={onOpenFilePath}
+    />
+  );
 });
 
 const StatusRow = memo(function StatusRow({
@@ -226,10 +249,14 @@ function UserAttachmentChip({
 }
 
 const AssistantBlock = memo(function AssistantBlock({
+  currentPath,
   messageId,
+  onOpenFilePath,
   palette,
 }: {
+  currentPath: string;
   messageId: string;
+  onOpenFilePath?: (path: string) => void;
   palette: Palette;
 }) {
   const runtime = useAgentRuntime();
@@ -242,6 +269,16 @@ const AssistantBlock = memo(function AssistantBlock({
   );
 
   const markdownStyles = useMemo(() => buildMarkdownStyles(palette), [palette]);
+  const handleLinkPress = useCallback((href: string): boolean => {
+    const meta = resolveMarkdownFileLinkMeta(href, currentPath, undefined);
+
+    if (meta === null) {
+      return true;
+    }
+
+    onOpenFilePath?.(meta.targetPath);
+    return false;
+  }, [currentPath, onOpenFilePath]);
 
   if (markdown.length === 0) {
     return null;
@@ -249,7 +286,7 @@ const AssistantBlock = memo(function AssistantBlock({
 
   return (
     <View style={styles.assistantRow}>
-      <Markdown style={markdownStyles}>{markdown}</Markdown>
+      <Markdown onLinkPress={handleLinkPress} style={markdownStyles}>{markdown}</Markdown>
       {!isStreaming ? <CopyMessageButton text={markdown} palette={palette} /> : null}
     </View>
   );
