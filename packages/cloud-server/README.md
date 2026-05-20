@@ -50,6 +50,7 @@ For the full local Docker machine workflow, use the root commands documented in
 - `POST /machines/heartbeat`
 - `WS /machines/tunnel`
 - `WS /gateway/computers/:computerId/filesystem`
+- `WS /gateway/computers/:computerId/browser-control`
 - `HTTP /gateway/computers/:computerId/agent/*`
 - `POST /llm/openai/v1/responses`
 - `POST /llm/openai/v1/images/generations`

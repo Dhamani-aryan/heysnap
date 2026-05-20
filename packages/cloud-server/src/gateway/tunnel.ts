@@ -7,10 +7,16 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
-import type { CloudStore, MachineIdentityRecord } from "../db/types.js";
+import type { CloudStore, ComputerAccessSessionRecord, MachineIdentityRecord } from "../db/types.js";
 import type { GatewayAccessService } from "./access-sessions.js";
 
-export type GatewayRoute = "filesystem";
+export type GatewayRoute = "filesystem" | "browser-control";
+
+export interface GatewayRouteMetadata {
+  readonly userId: string;
+  readonly accessSessionId: string;
+  readonly computerId: string;
+}
 
 export interface TunnelStatusRegistry {
   isConnected(computerId: string): boolean;
@@ -141,8 +147,8 @@ export const attachGatewayTunnelServer = (
     }
 
     void authenticateGatewayRoute(options, requestUrl, request.headers.authorization, routeMatch.computerId)
-      .then((ok) => {
-        if (!ok) {
+      .then((accessSession) => {
+        if (accessSession === null) {
           rejectUpgrade(socket, 401, "Invalid gateway access token");
           return;
         }
@@ -158,6 +164,11 @@ export const attachGatewayTunnelServer = (
           tunnel.openGatewayConnection(webSocket, {
             route: routeMatch.route,
             targetPath: buildMachineTargetPath(routeMatch.route, requestUrl),
+            metadata: {
+              userId: accessSession.userId,
+              accessSessionId: accessSession.id,
+              computerId: routeMatch.computerId,
+            },
           });
         });
       })
@@ -203,6 +214,7 @@ export class MachineTunnel {
     input: {
       readonly route: GatewayRoute;
       readonly targetPath: string;
+      readonly metadata?: GatewayRouteMetadata;
     },
   ): void {
     const connectionId = randomUUID();
@@ -239,6 +251,7 @@ export class MachineTunnel {
       connectionId,
       route: input.route,
       path: input.targetPath,
+      metadata: input.metadata,
     });
   }
 
@@ -481,7 +494,13 @@ interface ActiveHttpStream {
 }
 
 type CloudTunnelMessage =
-  | { readonly type: "open"; readonly connectionId: string; readonly route: GatewayRoute; readonly path: string }
+  | {
+      readonly type: "open";
+      readonly connectionId: string;
+      readonly route: GatewayRoute;
+      readonly path: string;
+      readonly metadata?: GatewayRouteMetadata;
+    }
   | {
       readonly type: "httpRequest";
       readonly connectionId: string;
@@ -553,18 +572,17 @@ const authenticateGatewayRoute = async (
   requestUrl: URL,
   authorization: string | undefined,
   computerId: string,
-): Promise<boolean> => {
+): Promise<ComputerAccessSessionRecord | null> => {
   const token = readBearerToken(authorization)
     ?? requestUrl.searchParams.get("accessToken")
     ?? requestUrl.searchParams.get("token")
     ?? undefined;
 
   if (token === undefined || token.length === 0) {
-    return false;
+    return null;
   }
 
-  const accessSession = await options.gatewayAccessService.authenticateAccessToken({ token, computerId });
-  return accessSession !== null;
+  return await options.gatewayAccessService.authenticateAccessToken({ token, computerId });
 };
 
 const matchGatewayRoute = (pathname: string): { readonly computerId: string; readonly route: GatewayRoute } | null => {
@@ -576,7 +594,7 @@ const matchGatewayRoute = (pathname: string): { readonly computerId: string; rea
 
   const route = match[2];
 
-  if (route !== "filesystem") {
+  if (route !== "filesystem" && route !== "browser-control") {
     return null;
   }
 
