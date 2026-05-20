@@ -5,17 +5,23 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowLeft02Icon,
+  ArrowRight02Icon,
+  Cancel01Icon,
   Download05Icon,
   File02Icon,
   FileUploadIcon,
   FolderAddIcon,
   Folder01Icon,
   FolderUploadIcon,
+  InternetIcon,
   Moon02Icon,
   PlugSocketIcon,
   PowerIcon,
+  Refresh01Icon,
   Search01Icon,
   SidebarRightIcon,
+  SquareArrowExpand01Icon,
+  SquareArrowShrink02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,6 +36,7 @@ import {
 } from "../agent/agent-runtime";
 import { selectHasThreads } from "../agent/agent-thread-list-store";
 import type { AgentThreadGroup, AgentThreadSummary, AgentUiContext } from "../agent/types";
+import type { BrowserControlStatus } from "../cloud/browser-control-bridge";
 import { CapabilitiesPanel } from "../cloud/capabilities-panel";
 import docxFileIconSrc from "../../../../apps/assets/files/docx_file_icon.png";
 import pdfFileIconSrc from "../../../../apps/assets/files/pdf_file_icon.png";
@@ -74,6 +81,12 @@ const HISTORY_LIMIT = 64;
 const DEFAULT_LEFT_PANE_RATIO = 0.5;
 const MIN_PANE_RATIO = 0.25;
 const MAX_PANE_RATIO = 0.75;
+const BROWSER_TOP_PADDING = 8;
+const BROWSER_TAB_BAR_HEIGHT = 36;
+const BROWSER_TOOL_BAR_HEIGHT = 40;
+const BROWSER_BOTTOM_PADDING = 8;
+const DEFAULT_BROWSER_STREAM_ASPECT_RATIO = 16 / 10;
+const DEFAULT_BROWSER_WINDOW_URL = "chrome://newtab";
 const LEFT_PANE_RATIO_STORAGE_KEY = "filesystem-explorer:left-pane-ratio";
 const RIGHT_SIDEBAR_OPEN_STORAGE_KEY = "filesystem-explorer:right-sidebar-open";
 const PPT_VIEWER_SERVER_URL = "http://13.126.207.124/Kd5QihM3zhwV2WztLXAnBc6n07Goa6O3mByrs-rqWjU/ppt";
@@ -129,6 +142,54 @@ type OpenFileTab = {
   readonly size: number | null;
   readonly updatedAt: string;
 };
+
+type ActiveLeftPaneSurface = "directory" | "browser" | "file";
+
+export type BrowserWindowTab = {
+  readonly id: number;
+  readonly index: number;
+  readonly active?: boolean;
+  readonly favIconUrl?: string;
+  readonly status?: string;
+  readonly title?: string;
+  readonly url?: string;
+};
+
+export type BrowserViewportInputPoint = {
+  readonly x: number;
+  readonly y: number;
+};
+
+export type BrowserViewportClickInput = {
+  readonly fallbackPoint: BrowserViewportInputPoint;
+  readonly ratio: BrowserViewportInputPoint;
+  readonly tabId: number;
+};
+
+export type BrowserViewportKeyboardInput = {
+  readonly altKey: boolean;
+  readonly code: string;
+  readonly ctrlKey: boolean;
+  readonly key: string;
+  readonly keyCode: number;
+  readonly location: number;
+  readonly metaKey: boolean;
+  readonly repeat: boolean;
+  readonly shiftKey: boolean;
+  readonly tabId: number;
+  readonly text?: string;
+  readonly type: "keyDown" | "keyUp";
+};
+
+export type BrowserViewportWheelInput = {
+  readonly deltaX: number;
+  readonly deltaY: number;
+  readonly fallbackPoint: BrowserViewportInputPoint;
+  readonly ratio: BrowserViewportInputPoint;
+  readonly tabId: number;
+};
+
+type BrowserScreencastState = "idle" | "connecting" | "streaming" | "new_tab" | "stopped" | "error";
 
 export type WorkspacePanel = "chat" | "connectors";
 
@@ -231,6 +292,17 @@ const toListingErrorMessage = (message: string | null): string | null => {
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentBaseUrl?: string;
+  readonly browserControlStatus?: BrowserControlStatus;
+  readonly browserWindowError?: string | null;
+  readonly browserWindowId?: number | null;
+  readonly browserWindowTabs?: BrowserWindowTab[];
+  readonly browserCanGoBack?: boolean;
+  readonly browserCanGoForward?: boolean;
+  readonly browserScreencastAspectRatio?: number | null;
+  readonly browserScreencastFrameUrl?: string | null;
+  readonly browserScreencastState?: BrowserScreencastState;
+  readonly browserScreencastTabId?: number | null;
+  readonly isBrowserWindowOpening?: boolean;
   readonly capabilitiesBaseUrl?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: WorkspacePanel;
@@ -238,6 +310,18 @@ export interface FilesystemExplorerProps {
   readonly machineName?: string;
   readonly canSleepMachine?: boolean;
   readonly onFilesystemOpen?: () => void;
+  readonly onOpenBrowser?: () => Promise<number | null> | number | null;
+  readonly onCloseBrowser?: () => Promise<void> | void;
+  readonly onSelectBrowserTab?: (tabId: number) => Promise<void> | void;
+  readonly onCloseBrowserTab?: (tabId: number) => Promise<void> | void;
+  readonly onNewBrowserTab?: () => Promise<void> | void;
+  readonly onBrowserBack?: () => Promise<void> | void;
+  readonly onBrowserForward?: () => Promise<void> | void;
+  readonly onBrowserGoTo?: (url: string) => Promise<void> | void;
+  readonly onBrowserRefresh?: () => Promise<void> | void;
+  readonly onBrowserViewportClick?: (input: BrowserViewportClickInput) => Promise<void> | void;
+  readonly onBrowserViewportKey?: (input: BrowserViewportKeyboardInput) => Promise<void> | void;
+  readonly onBrowserViewportWheel?: (input: BrowserViewportWheelInput) => Promise<void> | void;
   readonly onPathChange?: (path: string) => void;
   readonly onInitialPathInvalid?: (path: string) => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
@@ -252,6 +336,17 @@ export interface FilesystemExplorerProps {
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentBaseUrl = "http://localhost:4000/agent",
+  browserControlStatus,
+  browserWindowError = null,
+  browserWindowId = null,
+  browserWindowTabs = [],
+  browserCanGoBack = false,
+  browserCanGoForward = false,
+  browserScreencastAspectRatio = null,
+  browserScreencastFrameUrl = null,
+  browserScreencastState = "idle",
+  browserScreencastTabId = null,
+  isBrowserWindowOpening = false,
   capabilitiesBaseUrl,
   selectedThreadId = null,
   workspacePanel,
@@ -259,6 +354,18 @@ export function FilesystemExplorer({
   machineName = "Machine",
   canSleepMachine = true,
   onFilesystemOpen,
+  onOpenBrowser,
+  onCloseBrowser,
+  onSelectBrowserTab,
+  onCloseBrowserTab,
+  onNewBrowserTab,
+  onBrowserBack,
+  onBrowserForward,
+  onBrowserGoTo,
+  onBrowserRefresh,
+  onBrowserViewportClick,
+  onBrowserViewportKey,
+  onBrowserViewportWheel,
   onPathChange,
   onInitialPathInvalid,
   onSelectThread,
@@ -282,15 +389,17 @@ export function FilesystemExplorer({
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(getInitialRightSidebarOpen);
+  const [isRightWorkAreaOpen, setIsRightWorkAreaOpen] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [activeLeftPaneSurface, setActiveLeftPaneSurface] = useState<ActiveLeftPaneSurface>("directory");
   const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>("connecting");
   const [internalWorkspacePanel, setInternalWorkspacePanel] = useState<WorkspacePanel>("chat");
   const activeWorkspacePanel = workspacePanel ?? internalWorkspacePanel;
   const currentPath = listing?.path ?? "";
   const currentDirectoryName = listing?.name ?? "workspace";
-  const activeFileTab = activeFilePath === null
+  const activeFileTab = activeLeftPaneSurface !== "file" || activeFilePath === null
     ? null
     : openFileTabs.find((tab) => tab.path === activeFilePath) ?? null;
   const openFileWatchKey = useMemo(
@@ -298,11 +407,19 @@ export function FilesystemExplorer({
     [openFileTabs],
   );
   const agentUiContext = useMemo<AgentUiContext>(() => ({
-    openFiles: openFileTabs.map((tab) => ({
-      path: tab.path,
-      isFocused: tab.path === activeFilePath,
-    })),
-  }), [activeFilePath, openFileTabs]);
+    openFiles: [
+      ...openFileTabs.map((tab) => ({
+        path: tab.path,
+        isFocused: activeLeftPaneSurface === "file" && tab.path === activeFilePath,
+      })),
+      ...(browserWindowId === null
+        ? []
+        : [{
+            path: "chrome",
+            isFocused: activeLeftPaneSurface === "browser",
+          }]),
+    ],
+  }), [activeFilePath, activeLeftPaneSurface, browserWindowId, openFileTabs]);
   const onFilesystemOpenRef = useRef(onFilesystemOpen);
   const onPathChangeRef = useRef(onPathChange);
   const onInitialPathInvalidRef = useRef(onInitialPathInvalid);
@@ -318,7 +435,13 @@ export function FilesystemExplorer({
   }, [isRightSidebarOpen]);
 
   useEffect(() => {
-    if (activeFilePath === null || openFileTabs.length < 2) {
+    if (browserWindowId === null) {
+      setActiveLeftPaneSurface((currentSurface) => currentSurface === "browser" ? "directory" : currentSurface);
+    }
+  }, [browserWindowId]);
+
+  useEffect(() => {
+    if (activeLeftPaneSurface !== "file" || activeFilePath === null || openFileTabs.length < 2) {
       return;
     }
 
@@ -344,6 +467,7 @@ export function FilesystemExplorer({
       const direction = event.key === "ArrowRight" ? 1 : -1;
       const nextIndex = (activeIndex + direction + openFileTabs.length) % openFileTabs.length;
       setActiveFilePath(openFileTabs[nextIndex]?.path ?? activeFilePath);
+      setActiveLeftPaneSurface("file");
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -351,7 +475,7 @@ export function FilesystemExplorer({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeFilePath, openFileTabs]);
+  }, [activeFilePath, activeLeftPaneSurface, openFileTabs]);
 
   useEffect(() => {
     const initialPathForConnection = normalizeInitialFilesystemPath(initialPath);
@@ -376,6 +500,7 @@ export function FilesystemExplorer({
       onViewState: (viewState) => {
         setOpenFileTabs(viewState.openFiles.map(toOpenFileTab));
         setActiveFilePath(null);
+        setActiveLeftPaneSurface("directory");
       },
       onLoading: setIsFetching,
       onError: (message) => {
@@ -416,6 +541,7 @@ export function FilesystemExplorer({
     setSelectionAnchorPath(null);
     setOpenFileTabs([]);
     setActiveFilePath(null);
+    setActiveLeftPaneSurface("directory");
     setConnectionStatus("connecting");
     clientRef.current = client;
     client.connect();
@@ -465,6 +591,28 @@ export function FilesystemExplorer({
     onSelectThread?.(thread);
   }, [onSelectThread, showChatPanel]);
 
+  const handleShowBrowser = useCallback((): void => {
+    if (browserWindowId !== null) {
+      setActiveLeftPaneSurface("browser");
+      return;
+    }
+
+    void Promise.resolve(onOpenBrowser?.() ?? null).then((openedWindowId) => {
+      if (openedWindowId !== null) {
+        setActiveLeftPaneSurface("browser");
+      }
+    }).catch(() => {
+      // The workspace-level browser opener owns the user-visible error state.
+    });
+  }, [browserWindowId, onOpenBrowser]);
+
+  const handleCloseBrowser = useCallback((): void => {
+    void Promise.resolve(onCloseBrowser?.()).catch(() => {
+      // The workspace-level browser closer owns the user-visible error state.
+    });
+    setActiveLeftPaneSurface((currentSurface) => currentSurface === "browser" ? "directory" : currentSurface);
+  }, [onCloseBrowser]);
+
   const subscribeTo = useCallback(async (
     nextPath: string,
     shouldPushHistory: boolean,
@@ -472,6 +620,7 @@ export function FilesystemExplorer({
     setIsFetching(true);
     setListingError(null);
     setActiveFilePath(null);
+    setActiveLeftPaneSurface("directory");
     const nextListing = await clientRef.current?.subscribe(nextPath);
     setSelectedPaths([]);
     setSelectionAnchorPath(null);
@@ -529,6 +678,7 @@ export function FilesystemExplorer({
       return [...currentTabs, toOpenFileTab(entry)];
     });
     setActiveFilePath(entry.path);
+    setActiveLeftPaneSurface("file");
   }, []);
 
   const openFilePath = useCallback((path: string): void => {
@@ -554,6 +704,7 @@ export function FilesystemExplorer({
         return [...currentTabs, tab];
       });
       setActiveFilePath(tab.path);
+      setActiveLeftPaneSurface("file");
     };
 
     const openResolvedEntry = (entry: FilesystemEntry): void => {
@@ -610,7 +761,11 @@ export function FilesystemExplorer({
           return currentActivePath;
         }
 
-        return nextTabs[closedIndex]?.path ?? nextTabs[closedIndex - 1]?.path ?? null;
+        const nextActivePath = nextTabs[closedIndex]?.path ?? nextTabs[closedIndex - 1]?.path ?? null;
+        setActiveLeftPaneSurface((currentSurface) => (
+          currentSurface === "file" ? (nextActivePath === null ? "directory" : "file") : currentSurface
+        ));
+        return nextActivePath;
       });
 
       return nextTabs;
@@ -728,7 +883,16 @@ export function FilesystemExplorer({
       );
       setOpenFileTabs((currentTabs) => currentTabs.filter((tab) => !pathsToTrash.includes(tab.path)));
       setActiveFilePath((currentActivePath) =>
-        currentActivePath !== null && pathsToTrash.includes(currentActivePath) ? null : currentActivePath,
+        {
+          if (currentActivePath === null || !pathsToTrash.includes(currentActivePath)) {
+            return currentActivePath;
+          }
+
+          setActiveLeftPaneSurface((currentSurface) => (
+            currentSurface === "file" ? "directory" : currentSurface
+          ));
+          return null;
+        },
       );
     } catch (error) {
       setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to move items to Trash."));
@@ -984,18 +1148,33 @@ export function FilesystemExplorer({
         onForward={onForward}
         title={currentDirectoryName}
         isFetching={isFetching}
+        browserControlStatus={browserControlStatus}
         onNewThread={handleNewThread}
         isRightSidebarOpen={isRightSidebarOpen}
+        isRightWorkAreaOpen={isRightWorkAreaOpen}
+        onToggleRightWorkArea={() => setIsRightWorkAreaOpen((current) => !current)}
         onToggleRightSidebar={() => setIsRightSidebarOpen((current) => !current)}
+        activeLeftPaneSurface={activeLeftPaneSurface}
+        isBrowserTabCollapsed={browserWindowId === null}
+        isBrowserWindowOpening={isBrowserWindowOpening}
+        onShowBrowser={handleShowBrowser}
+        onCollapseBrowser={handleCloseBrowser}
         openFileTabs={openFileTabs}
         activeFilePath={activeFileTab?.path ?? null}
-        onShowDirectory={() => setActiveFilePath(null)}
-        onSelectFileTab={setActiveFilePath}
+        onShowDirectory={() => {
+          setActiveFilePath(null);
+          setActiveLeftPaneSurface("directory");
+        }}
+        onSelectFileTab={(path) => {
+          setActiveFilePath(path);
+          setActiveLeftPaneSurface("file");
+        }}
         onCloseFileTab={closeFileTab}
       />
 
       <DesktopSplitPane
         leftPaneRatio={leftPaneRatio}
+        isRightWorkAreaOpen={isRightWorkAreaOpen}
         onLeftPaneRatioChange={handleLeftPaneRatioChange}
         agentBaseUrl={agentBaseUrl}
         selectedThreadId={selectedThreadId}
@@ -1010,8 +1189,8 @@ export function FilesystemExplorer({
       >
         <div className="left-pane-surface-stack">
           <div
-            className={activeFileTab === null ? "left-pane-surface active" : "left-pane-surface inactive"}
-            aria-hidden={activeFileTab !== null}
+            className={activeLeftPaneSurface === "directory" ? "left-pane-surface active" : "left-pane-surface inactive"}
+            aria-hidden={activeLeftPaneSurface !== "directory"}
           >
             <FinderBody
               error={listingError}
@@ -1045,20 +1224,50 @@ export function FilesystemExplorer({
               onDownloadEntries={downloadEntries}
             />
           </div>
+          <div
+            className={activeLeftPaneSurface === "browser" ? "left-pane-surface active" : "left-pane-surface inactive"}
+            aria-hidden={activeLeftPaneSurface !== "browser"}
+          >
+            <BrowserControlPanel
+              error={browserWindowError}
+              isOpening={isBrowserWindowOpening}
+              status={browserControlStatus}
+              tabs={browserWindowTabs}
+              windowId={browserWindowId}
+              canGoBack={browserCanGoBack}
+              canGoForward={browserCanGoForward}
+              screencastAspectRatio={browserScreencastAspectRatio}
+              screencastFrameUrl={browserScreencastFrameUrl}
+              screencastState={browserScreencastState}
+              screencastTabId={browserScreencastTabId}
+              onBack={onBrowserBack}
+              onForward={onBrowserForward}
+              onGoTo={onBrowserGoTo}
+              onRefresh={onBrowserRefresh}
+              onSelectTab={onSelectBrowserTab}
+              onCloseTab={onCloseBrowserTab}
+              onNewTab={onNewBrowserTab}
+              onViewportClick={onBrowserViewportClick}
+              onViewportKey={onBrowserViewportKey}
+              onViewportWheel={onBrowserViewportWheel}
+            />
+          </div>
           <FileViewerStack
             openFileTabs={openFileTabs}
             activeFilePath={activeFileTab?.path ?? null}
             websocketUrl={websocketUrl}
           />
         </div>
-        <MachineStatusControl
-          canSleepMachine={canSleepMachine}
-          compact={activeFileTab !== null}
-          machineName={machineName}
-          status={connectionStatus}
-          onBack={onBackToMachines}
-          onSleep={onSleepMachine}
-        />
+        {activeLeftPaneSurface === "directory" ? (
+          <MachineStatusControl
+            canSleepMachine={canSleepMachine}
+            compact={false}
+            machineName={machineName}
+            status={connectionStatus}
+            onBack={onBackToMachines}
+            onSleep={onSleepMachine}
+          />
+        ) : null}
       </DesktopSplitPane>
       {rightSidebar}
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
@@ -1541,6 +1750,47 @@ const ConnectorsWorkspaceToolbar = ({
   </div>
 );
 
+const formatBrowserControlTitle = (status: BrowserControlStatus | undefined): string => {
+  if (status === undefined) {
+    return "Browser control unavailable";
+  }
+
+  return status.detail === undefined
+    ? `Browser control: ${status.label}`
+    : `Browser control: ${status.label} - ${status.detail}`;
+};
+
+const getBrowserControlStatusText = (status: BrowserControlStatus | undefined): string =>
+  status === undefined ? "Unavailable" : status.label;
+
+const getBrowserControlDetailText = (status: BrowserControlStatus | undefined): string => {
+  if (status === undefined) {
+    return "Browser control is not configured for this workspace.";
+  }
+
+  return status.detail ?? "Ready to report browser-control activity.";
+};
+
+const getBrowserWindowStatusText = (input: {
+  readonly error: string | null;
+  readonly isOpening: boolean;
+  readonly windowId: number | null;
+}): string => {
+  if (input.error !== null) {
+    return input.error;
+  }
+
+  if (input.isOpening) {
+    return "Creating Chrome window.";
+  }
+
+  if (input.windowId !== null) {
+    return `Chrome window ${input.windowId}`;
+  }
+
+  return "No Chrome window is attached.";
+};
+
 const FinderToolbar = ({
   canGoBack,
   canGoForward,
@@ -1548,9 +1798,17 @@ const FinderToolbar = ({
   onForward,
   title,
   isFetching,
+  browserControlStatus,
   onNewThread,
   isRightSidebarOpen,
+  isRightWorkAreaOpen,
+  onToggleRightWorkArea,
   onToggleRightSidebar,
+  activeLeftPaneSurface,
+  isBrowserTabCollapsed,
+  isBrowserWindowOpening,
+  onShowBrowser,
+  onCollapseBrowser,
   openFileTabs,
   activeFilePath,
   onShowDirectory,
@@ -1563,9 +1821,17 @@ const FinderToolbar = ({
   readonly onForward: () => void;
   readonly title: string;
   readonly isFetching: boolean;
+  readonly browserControlStatus?: BrowserControlStatus;
   readonly onNewThread?: () => void;
   readonly isRightSidebarOpen: boolean;
+  readonly isRightWorkAreaOpen: boolean;
+  readonly onToggleRightWorkArea: () => void;
   readonly onToggleRightSidebar: () => void;
+  readonly activeLeftPaneSurface: ActiveLeftPaneSurface;
+  readonly isBrowserTabCollapsed: boolean;
+  readonly isBrowserWindowOpening: boolean;
+  readonly onShowBrowser: () => void;
+  readonly onCollapseBrowser: () => void;
   readonly openFileTabs: OpenFileTab[];
   readonly activeFilePath: string | null;
   readonly onShowDirectory: () => void;
@@ -1587,13 +1853,21 @@ const FinderToolbar = ({
         <button
           type="button"
           title={title}
-          className={activeFilePath === null ? "directory-tab active" : "directory-tab"}
+          className={activeLeftPaneSurface === "directory" ? "directory-tab active" : "directory-tab"}
           onClick={onShowDirectory}
         >
           <span className="directory-tab-title">{title}</span>
         </button>
 
         <div className="tab-strip" role="tablist" aria-label="Open files">
+          <BrowserTab
+            isActive={activeLeftPaneSurface === "browser"}
+            isCollapsed={isBrowserTabCollapsed}
+            isOpening={isBrowserWindowOpening}
+            title={formatBrowserControlTitle(browserControlStatus)}
+            onSelect={onShowBrowser}
+            onClose={onCollapseBrowser}
+          />
           {openFileTabs.map((tab) => (
             <FileTab
               key={tab.path}
@@ -1607,6 +1881,19 @@ const FinderToolbar = ({
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
+      <ToolbarButton
+        onClick={onToggleRightWorkArea}
+        ariaLabel={isRightWorkAreaOpen ? "Hide right work area" : "Show right work area"}
+        title={isRightWorkAreaOpen ? "Hide right work area" : "Show right work area"}
+        pressed={!isRightWorkAreaOpen}
+      >
+        <HugeiconsIcon
+          icon={isRightWorkAreaOpen ? SquareArrowExpand01Icon : SquareArrowShrink02Icon}
+          size={18}
+          color="currentColor"
+          strokeWidth={1.8}
+        />
+      </ToolbarButton>
       {!isRightSidebarOpen ? (
         <button
           type="button"
@@ -1629,6 +1916,68 @@ const FinderToolbar = ({
     </div>
   </div>
 );
+
+const BrowserTab = ({
+  isActive,
+  isCollapsed,
+  isOpening,
+  title,
+  onSelect,
+  onClose,
+}: {
+  readonly isActive: boolean;
+  readonly isCollapsed: boolean;
+  readonly isOpening: boolean;
+  readonly title: string;
+  readonly onSelect: () => void;
+  readonly onClose: () => void;
+}): React.ReactElement => {
+  if (isCollapsed) {
+    return (
+      <button
+        type="button"
+        className="browser-collapsed-tab"
+        title={title}
+        aria-label={isOpening ? "Opening browser" : "Open browser"}
+        disabled={isOpening}
+        onClick={onSelect}
+      >
+        <HugeiconsIcon icon={InternetIcon} size={14} color="currentColor" strokeWidth={1.8} />
+      </button>
+    );
+  }
+
+  return (
+    <div className={isActive ? "file-tab browser-file-tab active" : "file-tab browser-file-tab"} role="tab" aria-selected={isActive}>
+      <span className="file-tab-leading">
+        <span className="file-tab-file-icon" aria-hidden="true">
+          <HugeiconsIcon icon={InternetIcon} size={14} color="currentColor" strokeWidth={1.8} />
+        </span>
+        <button
+          type="button"
+          className="file-tab-close"
+          aria-label="Collapse browser tab"
+          title="Close tab"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={12} color="currentColor" strokeWidth={2} />
+        </button>
+      </span>
+      <button
+        type="button"
+        className="file-tab-activate"
+        title={title}
+        onClick={onSelect}
+        tabIndex={isActive ? 0 : -1}
+      >
+        <span className="file-tab-title">Browser</span>
+      </button>
+    </div>
+  );
+};
 
 const FileTab = ({
   tab,
@@ -1845,6 +2194,463 @@ const FileViewer = ({
 };
 
 const MemoizedFileViewer = memo(FileViewer);
+
+const BrowserControlPanel = ({
+  canGoBack,
+  canGoForward,
+  error,
+  isOpening,
+  onBack,
+  onCloseTab,
+  onForward,
+  onGoTo,
+  onNewTab,
+  onRefresh,
+  onSelectTab,
+  onViewportClick,
+  onViewportKey,
+  onViewportWheel,
+  screencastAspectRatio,
+  screencastFrameUrl,
+  screencastState,
+  screencastTabId,
+  status,
+  tabs,
+  windowId,
+}: {
+  readonly canGoBack: boolean;
+  readonly canGoForward: boolean;
+  readonly error: string | null;
+  readonly isOpening: boolean;
+  readonly onBack?: () => Promise<void> | void;
+  readonly onCloseTab?: (tabId: number) => Promise<void> | void;
+  readonly onForward?: () => Promise<void> | void;
+  readonly onGoTo?: (url: string) => Promise<void> | void;
+  readonly onNewTab?: () => Promise<void> | void;
+  readonly onRefresh?: () => Promise<void> | void;
+  readonly onSelectTab?: (tabId: number) => Promise<void> | void;
+  readonly onViewportClick?: (input: BrowserViewportClickInput) => Promise<void> | void;
+  readonly onViewportKey?: (input: BrowserViewportKeyboardInput) => Promise<void> | void;
+  readonly onViewportWheel?: (input: BrowserViewportWheelInput) => Promise<void> | void;
+  readonly screencastAspectRatio: number | null;
+  readonly screencastFrameUrl: string | null;
+  readonly screencastState: BrowserScreencastState;
+  readonly screencastTabId: number | null;
+  readonly status?: BrowserControlStatus;
+  readonly tabs: BrowserWindowTab[];
+  readonly windowId: number | null;
+}): React.ReactElement => {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const screenRef = useRef<HTMLDivElement | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const pendingScrollRef = useRef<BrowserViewportWheelInput | null>(null);
+  const [addressValue, setAddressValue] = useState("");
+  const [isAddressFocused, setIsAddressFocused] = useState(false);
+  const [isViewportKeyboardActive, setIsViewportKeyboardActive] = useState(false);
+  const [panelSize, setPanelSize] = useState({ width: 0, height: 0 });
+  const [frameAspectRatio, setFrameAspectRatio] = useState(DEFAULT_BROWSER_STREAM_ASPECT_RATIO);
+  const screenAspectRatio = readBrowserFrameAspectRatio(screencastAspectRatio) ?? frameAspectRatio;
+  const availableScreenHeight = Math.max(
+    0,
+    panelSize.height - BROWSER_TOP_PADDING - BROWSER_TAB_BAR_HEIGHT - BROWSER_TOOL_BAR_HEIGHT - BROWSER_BOTTOM_PADDING,
+  );
+  const screenWidthFromHeight = availableScreenHeight * screenAspectRatio;
+  const screenWidth = Math.max(0, Math.min(panelSize.width, screenWidthFromHeight));
+  const screenHeight = screenWidth > 0 ? screenWidth / screenAspectRatio : 0;
+  const windowHeight = BROWSER_TOP_PADDING + BROWSER_TAB_BAR_HEIGHT + BROWSER_TOOL_BAR_HEIGHT + screenHeight
+    + BROWSER_BOTTOM_PADDING;
+  const statusText = [
+    getBrowserWindowStatusText({ error, isOpening, windowId }),
+    getBrowserControlStatusText(status),
+    getBrowserControlDetailText(status),
+  ].join(" ");
+  const activeTab = tabs.find((tab) => tab.active) ?? tabs[0] ?? null;
+  const activeTabIsNewTab = activeTab !== null && isBrowserNewTabUrl(activeTab.url);
+  const activeFrameUrl = activeTab !== null && activeTab.id === screencastTabId ? screencastFrameUrl : null;
+  const canSendViewportInput = activeTab !== null
+    && activeFrameUrl !== null
+    && !activeTabIsNewTab
+    && screencastState === "streaming";
+  const visibleTabs = tabs.length > 0
+    ? tabs
+    : windowId === null
+      ? []
+      : [{
+          id: windowId,
+          index: 0,
+          active: true,
+          title: `Window ${windowId}`,
+          url: DEFAULT_BROWSER_WINDOW_URL,
+        }];
+
+  useEffect(() => {
+    const panel = panelRef.current;
+
+    if (panel === null) {
+      return;
+    }
+
+    const updateSize = (): void => {
+      const rect = panel.getBoundingClientRect();
+      setPanelSize({
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+    const observer = new ResizeObserver(updateSize);
+
+    updateSize();
+    observer.observe(panel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTabIsNewTab) {
+      setAddressValue("");
+      return;
+    }
+
+    if (!isAddressFocused) {
+      setAddressValue(activeTab?.url ?? "");
+    }
+  }, [activeTab?.url, activeTabIsNewTab, isAddressFocused]);
+
+  useEffect(() => {
+    if (!activeTabIsNewTab || activeTab === null) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      addressInputRef.current?.focus();
+      addressInputRef.current?.select();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [activeTab?.id, activeTabIsNewTab]);
+
+  const flushPendingScroll = useCallback((): void => {
+    scrollFrameRef.current = null;
+
+    const scroll = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+
+    if (scroll === null || onViewportWheel === undefined) {
+      return;
+    }
+
+    void Promise.resolve(onViewportWheel(scroll)).catch(() => undefined);
+  }, [onViewportWheel]);
+
+  const handleScreenWheel = useCallback((event: globalThis.WheelEvent): void => {
+    const screen = screenRef.current;
+
+    if (!canSendViewportInput || screen === null || activeTab === null || onViewportWheel === undefined) {
+      return;
+    }
+
+    const ratio = getBrowserViewportInputRatio(screen, event.clientX, event.clientY);
+    const fallbackPoint = getBrowserViewportInputPoint(screen, event.clientX, event.clientY);
+
+    if (ratio === null || fallbackPoint === null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const pending = pendingScrollRef.current;
+
+    pendingScrollRef.current = {
+      tabId: activeTab.id,
+      fallbackPoint,
+      ratio,
+      deltaX: (pending?.deltaX ?? 0) + event.deltaX,
+      deltaY: (pending?.deltaY ?? 0) + event.deltaY,
+    };
+
+    if (scrollFrameRef.current === null) {
+      scrollFrameRef.current = window.requestAnimationFrame(flushPendingScroll);
+    }
+  }, [activeTab, canSendViewportInput, flushPendingScroll, onViewportWheel]);
+
+  const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>): void => {
+    const screen = screenRef.current;
+
+    if (!canSendViewportInput || screen === null || activeTab === null || onViewportClick === undefined) {
+      return;
+    }
+
+    const ratio = getBrowserViewportInputRatio(screen, event.clientX, event.clientY);
+    const fallbackPoint = getBrowserViewportInputPoint(screen, event.clientX, event.clientY);
+
+    if (ratio === null || fallbackPoint === null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    void Promise.resolve(onViewportClick({
+      fallbackPoint,
+      ratio,
+      tabId: activeTab.id,
+    })).catch(() => undefined);
+  }, [activeTab, canSendViewportInput, onViewportClick]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent): void => {
+      const screen = screenRef.current;
+
+      setIsViewportKeyboardActive(
+        screen !== null && event.target instanceof Node && screen.contains(event.target) && canSendViewportInput,
+      );
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [canSendViewportInput]);
+
+  useEffect(() => {
+    if (!isViewportKeyboardActive || !canSendViewportInput || activeTab === null || onViewportKey === undefined) {
+      return;
+    }
+
+    const handleKeyEvent = (event: KeyboardEvent): void => {
+      if (isEditableKeyboardTarget(event.target) || event.isComposing) {
+        return;
+      }
+
+      const input = toBrowserViewportKeyboardInput(activeTab.id, event);
+
+      if (input === null) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      void Promise.resolve(onViewportKey(input)).catch(() => undefined);
+    };
+
+    window.addEventListener("keydown", handleKeyEvent, true);
+    window.addEventListener("keyup", handleKeyEvent, true);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyEvent, true);
+      window.removeEventListener("keyup", handleKeyEvent, true);
+    };
+  }, [activeTab, canSendViewportInput, isViewportKeyboardActive, onViewportKey]);
+
+  useEffect(() => {
+    const screen = screenRef.current;
+
+    if (screen === null) {
+      return;
+    }
+
+    screen.addEventListener("wheel", handleScreenWheel, { passive: false });
+
+    return () => {
+      screen.removeEventListener("wheel", handleScreenWheel);
+    };
+  }, [handleScreenWheel]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+  }, []);
+
+  return (
+    <section
+      ref={panelRef}
+      className="browser-control-panel"
+      aria-label={`Browser. ${statusText}`}
+      style={{
+        "--browser-tab-bar-height": `${BROWSER_TAB_BAR_HEIGHT}px`,
+        "--browser-tool-bar-height": `${BROWSER_TOOL_BAR_HEIGHT}px`,
+        "--browser-top-padding": `${BROWSER_TOP_PADDING}px`,
+        "--browser-bottom-padding": `${BROWSER_BOTTOM_PADDING}px`,
+        "--browser-screen-width": `${screenWidth}px`,
+        "--browser-screen-height": `${screenHeight}px`,
+        "--browser-window-height": `${windowHeight}px`,
+      } as React.CSSProperties}
+    >
+      <div className="browser-window-layout">
+        <div className="browser-window-tabbar" role="tablist" aria-label="Browser tabs">
+          {visibleTabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={activeTab?.id === tab.id ? "browser-window-tab active" : "browser-window-tab"}
+              role="tab"
+              aria-selected={activeTab?.id === tab.id}
+              tabIndex={activeTab?.id === tab.id ? 0 : -1}
+              title={tab.title ?? tab.url ?? `Tab ${tab.id}`}
+              onClick={() => {
+                void Promise.resolve(onSelectTab?.(tab.id)).catch(() => undefined);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                  return;
+                }
+
+                event.preventDefault();
+                void Promise.resolve(onSelectTab?.(tab.id)).catch(() => undefined);
+              }}
+            >
+              <span className="browser-window-tab-favicon" aria-hidden="true">
+                {tab.favIconUrl === undefined || tab.favIconUrl.length === 0 ? (
+                  <HugeiconsIcon icon={InternetIcon} size={13} color="currentColor" strokeWidth={1.8} />
+                ) : (
+                  <img src={tab.favIconUrl} alt="" />
+                )}
+              </span>
+              <span className="browser-window-tab-title">{tab.title ?? tab.url ?? "New tab"}</span>
+              <button
+                className="browser-window-tab-close"
+                type="button"
+                aria-label={`Close ${tab.title ?? tab.url ?? "tab"}`}
+                title="Close tab"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void Promise.resolve(onCloseTab?.(tab.id)).catch(() => undefined);
+                }}
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={13} color="currentColor" strokeWidth={2} />
+              </button>
+            </div>
+          ))}
+          <button
+            className="browser-window-new-tab"
+            type="button"
+            aria-label="New tab"
+            title="New tab"
+            onClick={() => {
+              void Promise.resolve(onNewTab?.()).catch(() => undefined);
+            }}
+          >
+            <HugeiconsIcon icon={Add01Icon} size={14} color="currentColor" strokeWidth={1.9} />
+          </button>
+        </div>
+        <div className="browser-window-toolbar" aria-label="Browser toolbar">
+          <div className="browser-window-toolbar-nav" aria-label="Browser navigation">
+            <button
+              className="browser-window-toolbar-button"
+              type="button"
+              aria-label="Back"
+              title="Back"
+              disabled={!canGoBack}
+              onClick={() => {
+                void Promise.resolve(onBack?.()).catch(() => undefined);
+              }}
+            >
+              <HugeiconsIcon icon={ArrowLeft02Icon} size={16} color="currentColor" strokeWidth={2} />
+            </button>
+            <button
+              className="browser-window-toolbar-button"
+              type="button"
+              aria-label="Forward"
+              title="Forward"
+              disabled={!canGoForward}
+              onClick={() => {
+                void Promise.resolve(onForward?.()).catch(() => undefined);
+              }}
+            >
+              <HugeiconsIcon icon={ArrowRight02Icon} size={16} color="currentColor" strokeWidth={2} />
+            </button>
+            <button
+              className="browser-window-toolbar-button"
+              type="button"
+              aria-label="Refresh"
+              title="Refresh"
+              disabled={activeTab === null}
+              onClick={() => {
+                void Promise.resolve(onRefresh?.()).catch(() => undefined);
+              }}
+            >
+              <HugeiconsIcon icon={Refresh01Icon} size={15} color="currentColor" strokeWidth={2} />
+            </button>
+          </div>
+          <form
+            className="browser-window-address-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const nextUrl = addressValue.trim();
+
+              if (nextUrl.length === 0 || activeTab === null) {
+                return;
+              }
+
+              void Promise.resolve(onGoTo?.(nextUrl)).catch(() => undefined);
+            }}
+          >
+            <input
+              ref={addressInputRef}
+              className="browser-window-address"
+              type="text"
+              value={addressValue}
+              aria-label="Address"
+              title={activeTab?.url ?? ""}
+              disabled={activeTab === null}
+              spellCheck={false}
+              onBlur={() => {
+                setIsAddressFocused(false);
+              }}
+              onChange={(event) => {
+                setAddressValue(event.currentTarget.value);
+              }}
+              onFocus={(event) => {
+                setIsAddressFocused(true);
+                event.currentTarget.select();
+              }}
+            />
+          </form>
+        </div>
+        <div className="browser-window-stage">
+          <div
+            ref={screenRef}
+            className={activeFrameUrl !== null ? "browser-window-screen has-frame" : "browser-window-screen"}
+            data-stream-state={screencastState}
+            aria-label="Browser screen"
+            onClick={handleScreenClick}
+          >
+            {activeFrameUrl !== null && !activeTabIsNewTab ? (
+              <img
+                src={activeFrameUrl}
+                alt=""
+                onLoad={(event) => {
+                  const aspectRatio = readBrowserFrameAspectRatio(
+                    event.currentTarget.naturalWidth / event.currentTarget.naturalHeight,
+                  );
+
+                  if (aspectRatio !== null) {
+                    setFrameAspectRatio(aspectRatio);
+                  }
+                }}
+              />
+            ) : null}
+            {activeTabIsNewTab ? (
+              <div className="browser-window-new-tab-placeholder">
+                <span className="browser-window-new-tab-title">New tab</span>
+                <span className="browser-window-new-tab-subtitle">enter url to continue</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const FileViewerStack = ({
   openFileTabs,
@@ -2601,6 +3407,7 @@ const VideoViewer = ({
 const DesktopSplitPane = ({
   children,
   leftPaneRatio,
+  isRightWorkAreaOpen,
   onLeftPaneRatioChange,
   agentBaseUrl,
   selectedThreadId,
@@ -2615,6 +3422,7 @@ const DesktopSplitPane = ({
 }: {
   readonly children: React.ReactNode;
   readonly leftPaneRatio: number;
+  readonly isRightWorkAreaOpen: boolean;
   readonly onLeftPaneRatioChange: (ratio: number) => void;
   readonly agentBaseUrl: string;
   readonly selectedThreadId: string | null;
@@ -2673,6 +3481,7 @@ const DesktopSplitPane = ({
         ref={containerRef}
         className="split-main"
         data-resizing={isResizing ? "true" : undefined}
+        data-right-work-area-open={isRightWorkAreaOpen ? "true" : "false"}
       >
         <section className="split-left" style={{ flexBasis: `${leftPaneRatio * 100}%` }}>
           {children}
@@ -2687,6 +3496,9 @@ const DesktopSplitPane = ({
           aria-valuenow={Math.round(leftPaneRatio * 100)}
           onMouseDown={(event) => {
             event.preventDefault();
+            if (!isRightWorkAreaOpen) {
+              return;
+            }
             setIsResizing(true);
           }}
           className="split-resizer"
@@ -2697,6 +3509,7 @@ const DesktopSplitPane = ({
 
         <aside
           className="split-preview"
+          aria-hidden={!isRightWorkAreaOpen}
           aria-label={workspacePanel === "connectors" ? "Connectors panel" : "Preview panel"}
         >
           {workspacePanel === "connectors" ? (
@@ -4147,6 +4960,124 @@ const buildFilesystemXlsxAssetUrl = (
 
   return url.toString();
 };
+
+const isBrowserNewTabUrl = (url: string | undefined): boolean => {
+  if (url === undefined || url.length === 0) {
+    return true;
+  }
+
+  return url === "about:blank" || url === "chrome://newtab" || url === "chrome://newtab/";
+};
+
+const toBrowserViewportKeyboardInput = (
+  tabId: number,
+  event: KeyboardEvent,
+): BrowserViewportKeyboardInput | null => {
+  if (event.type !== "keydown" && event.type !== "keyup") {
+    return null;
+  }
+
+  return {
+    altKey: event.altKey,
+    code: event.code,
+    ctrlKey: event.ctrlKey,
+    key: event.key,
+    keyCode: event.keyCode,
+    location: event.location,
+    metaKey: event.metaKey,
+    repeat: event.repeat,
+    shiftKey: event.shiftKey,
+    tabId,
+    text: getBrowserKeyboardText(event),
+    type: event.type === "keydown" ? "keyDown" : "keyUp",
+  };
+};
+
+const getBrowserKeyboardText = (event: KeyboardEvent): string | undefined => {
+  if (event.type !== "keydown" || event.ctrlKey || event.metaKey || event.altKey) {
+    return undefined;
+  }
+
+  if (event.key.length === 1) {
+    return event.key;
+  }
+
+  return event.key === "Enter" ? "\r" : undefined;
+};
+
+const getBrowserViewportInputPoint = (
+  viewport: HTMLDivElement,
+  clientX: number,
+  clientY: number,
+): BrowserViewportInputPoint | null => {
+  const image = viewport.querySelector("img");
+  const rect = getBrowserViewportInputRect(viewport);
+
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+
+  const naturalWidth = image?.naturalWidth || rect.width;
+  const naturalHeight = image?.naturalHeight || rect.height;
+
+  return {
+    x: clampNumber(((clientX - rect.left) / rect.width) * naturalWidth, 0, naturalWidth),
+    y: clampNumber(((clientY - rect.top) / rect.height) * naturalHeight, 0, naturalHeight),
+  };
+};
+
+const getBrowserViewportInputRatio = (
+  viewport: HTMLDivElement,
+  clientX: number,
+  clientY: number,
+): BrowserViewportInputPoint | null => {
+  const rect = getBrowserViewportInputRect(viewport);
+
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+
+  return {
+    x: clampNumber((clientX - rect.left) / rect.width, 0, 1),
+    y: clampNumber((clientY - rect.top) / rect.height, 0, 1),
+  };
+};
+
+const getBrowserViewportInputRect = (viewport: HTMLDivElement): DOMRectReadOnly => {
+  const image = viewport.querySelector("img");
+
+  if (image === null || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return viewport.getBoundingClientRect();
+  }
+
+  const rect = image.getBoundingClientRect();
+  const objectFit = window.getComputedStyle(image).objectFit;
+
+  if (objectFit !== "contain" && objectFit !== "cover" && objectFit !== "scale-down") {
+    return rect;
+  }
+
+  const naturalAspectRatio = image.naturalWidth / image.naturalHeight;
+  const renderedAspectRatio = rect.width / rect.height;
+  const shouldFitWidth = objectFit === "cover"
+    ? renderedAspectRatio > naturalAspectRatio
+    : renderedAspectRatio < naturalAspectRatio;
+  const width = shouldFitWidth ? rect.width : rect.height * naturalAspectRatio;
+  const height = shouldFitWidth ? rect.width / naturalAspectRatio : rect.height;
+
+  return new DOMRectReadOnly(
+    rect.left + ((rect.width - width) / 2),
+    rect.top + ((rect.height - height) / 2),
+    width,
+    height,
+  );
+};
+
+const readBrowserFrameAspectRatio = (value: number | null | undefined): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value > 0.1 && value < 10 ? value : null;
+
+const clampNumber = (value: number, min: number, max: number): number =>
+  Math.min(Math.max(value, min), max);
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer);
