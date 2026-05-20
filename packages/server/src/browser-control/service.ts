@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
+import { open, realpath, stat } from "node:fs/promises";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { basename } from "node:path";
 
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
+import { ensureWithinRoot, resolveClientPath } from "../filesystem/paths.js";
 import { attachWebSocketUpgradeRoute } from "../websocket/upgrade-router.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_TIMEOUT_MS = 5 * 60_000;
+const MAX_ATTACHMENT_COUNT = 10;
+const MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_ATTACHMENT_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_ATTACHMENT_CHUNK_BYTES = 512 * 1024;
+const DEFAULT_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 
 const jsonHeaders = {
   "access-control-allow-origin": "*",
@@ -21,6 +29,10 @@ export interface BrowserControlService {
   readonly handleRequest: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>;
 }
 
+export interface BrowserControlServiceOptions {
+  readonly filesystemRootPath?: string;
+}
+
 export interface BrowserControlStatus {
   readonly connected: boolean;
   readonly clientId: string | null;
@@ -32,6 +44,14 @@ export type BrowserControlCliInput = BrowserControlRequest & {
   readonly targetUserId?: string;
   readonly timeoutMs?: number;
   readonly clientRequestId?: string;
+  readonly attachments?: readonly BrowserControlAttachmentInput[];
+};
+
+export type BrowserControlBrokerInput = BrowserControlRequest & {
+  readonly targetUserId?: string;
+  readonly timeoutMs?: number;
+  readonly clientRequestId?: string;
+  readonly attachments?: readonly BrowserControlResolvedAttachment[];
 };
 
 export type BrowserControlRequest =
@@ -106,6 +126,25 @@ export interface BrowserControlTabCdpParams extends BrowserControlTabTargetParam
   readonly params?: Record<string, unknown>;
 }
 
+export interface BrowserControlAttachmentInput {
+  readonly id: string;
+  readonly path: string;
+  readonly name?: string;
+  readonly mimeType?: string;
+}
+
+export interface BrowserControlAttachmentMetadata {
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size: number;
+}
+
+export interface BrowserControlResolvedAttachment extends BrowserControlAttachmentMetadata {
+  readonly absolutePath: string;
+  readonly mtimeMs: number;
+}
+
 type BrowserControlCliResult =
   | { readonly ok: true; readonly result: unknown }
   | { readonly ok: false; readonly error: BrowserControlErrorPayload };
@@ -131,6 +170,7 @@ interface BrowserControlClient {
 interface PendingBrowserControlRequest {
   readonly requestId: string;
   readonly client: BrowserControlClient;
+  readonly attachmentsById: Map<string, BrowserControlResolvedAttachment>;
   readonly timeout: ReturnType<typeof setTimeout>;
   readonly resolve: (result: BrowserControlCliResult) => void;
   completed: boolean;
@@ -154,9 +194,19 @@ type BrowserControlClientMessage =
       readonly requestId: string;
       readonly ok: false;
       readonly error: BrowserControlErrorPayload;
+    }
+  | {
+      readonly type: "attachment.read";
+      readonly requestId: string;
+      readonly chunkRequestId: string;
+      readonly attachmentId: string;
+      readonly offset: number;
+      readonly length: number;
     };
 
-export const createBrowserControlService = (): BrowserControlService => {
+export const createBrowserControlService = (
+  options: BrowserControlServiceOptions = {},
+): BrowserControlService => {
   const broker = new BrowserControlBroker();
   const socketServer = new WebSocketServer({ noServer: true });
 
@@ -176,7 +226,7 @@ export const createBrowserControlService = (): BrowserControlService => {
     broker,
     socketServer,
     handleRequest: async (request, response) =>
-      handleBrowserControlHttpRequest(request, response, broker),
+      handleBrowserControlHttpRequest(request, response, broker, options),
   };
 };
 
@@ -238,7 +288,7 @@ export class BrowserControlBroker {
   }
 
   async execute(
-    input: BrowserControlCliInput,
+    input: BrowserControlBrokerInput,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<BrowserControlCliResult> {
     const client = input.targetUserId === undefined
@@ -292,6 +342,7 @@ export class BrowserControlBroker {
       this.pendingRequests.set(requestId, {
         requestId,
         client,
+        attachmentsById: new Map((input.attachments ?? []).map((attachment) => [attachment.id, attachment])),
         timeout,
         resolve: complete,
         completed: false,
@@ -312,6 +363,7 @@ export class BrowserControlBroker {
         params: input.params,
         timeoutMs,
         clientRequestId: input.clientRequestId,
+        attachments: input.attachments?.map(attachmentToMetadata),
       }));
     });
   }
@@ -334,6 +386,11 @@ export class BrowserControlBroker {
       return;
     }
 
+    if (message.type === "attachment.read") {
+      void this.handleAttachmentRead(client, message);
+      return;
+    }
+
     const pending = this.pendingRequests.get(message.requestId);
 
     if (pending === undefined || pending.client !== client) {
@@ -346,6 +403,75 @@ export class BrowserControlBroker {
     }
 
     pending.resolve({ ok: false, error: normalizeClientError(message.error) });
+  }
+
+  private async handleAttachmentRead(
+    client: BrowserControlClient,
+    message: Extract<BrowserControlClientMessage, { readonly type: "attachment.read" }>,
+  ): Promise<void> {
+    const pending = this.pendingRequests.get(message.requestId);
+
+    if (pending === undefined || pending.client !== client || pending.completed) {
+      this.sendAttachmentError(client, message, "BROWSER_ATTACHMENT_REQUEST_NOT_FOUND", "Browser-control request is no longer pending.");
+      return;
+    }
+
+    if (message.length <= 0 || message.length > MAX_ATTACHMENT_CHUNK_BYTES) {
+      this.sendAttachmentError(client, message, "BROWSER_ATTACHMENT_RANGE_INVALID", `Attachment chunks must be between 1 and ${String(MAX_ATTACHMENT_CHUNK_BYTES)} bytes.`);
+      return;
+    }
+
+    const attachment = pending.attachmentsById.get(message.attachmentId);
+
+    if (attachment === undefined) {
+      this.sendAttachmentError(client, message, "BROWSER_ATTACHMENT_NOT_FOUND", "Browser-control attachment was not found on this request.");
+      return;
+    }
+
+    if (message.offset < 0 || message.offset > attachment.size) {
+      this.sendAttachmentError(client, message, "BROWSER_ATTACHMENT_RANGE_INVALID", "Attachment read offset is outside the file.");
+      return;
+    }
+
+    try {
+      const chunk = await readAttachmentChunk(attachment, message.offset, message.length);
+      const currentPending = this.pendingRequests.get(message.requestId);
+
+      if (currentPending === undefined || currentPending.client !== client || currentPending.completed) {
+        return;
+      }
+
+      sendWebSocketJson(client.webSocket, {
+        type: "attachment.chunk",
+        requestId: message.requestId,
+        chunkRequestId: message.chunkRequestId,
+        attachmentId: message.attachmentId,
+        offset: message.offset,
+        dataBase64: chunk.data.toString("base64"),
+        done: chunk.done,
+      });
+    } catch (error) {
+      const attachmentError = toAttachmentReadError(error);
+      this.sendAttachmentError(client, message, attachmentError.code, attachmentError.message);
+    }
+  }
+
+  private sendAttachmentError(
+    client: BrowserControlClient,
+    message: Extract<BrowserControlClientMessage, { readonly type: "attachment.read" }>,
+    code: string,
+    errorMessage: string,
+  ): void {
+    sendWebSocketJson(client.webSocket, {
+      type: "attachment.error",
+      requestId: message.requestId,
+      chunkRequestId: message.chunkRequestId,
+      attachmentId: message.attachmentId,
+      error: {
+        code,
+        message: errorMessage,
+      },
+    });
   }
 
   private detachClient(client: BrowserControlClient, code: string, message: string): void {
@@ -404,6 +530,7 @@ const handleBrowserControlHttpRequest = async (
   request: IncomingMessage,
   response: ServerResponse,
   broker: BrowserControlBroker,
+  options: BrowserControlServiceOptions,
 ): Promise<boolean> => {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
 
@@ -438,7 +565,11 @@ const handleBrowserControlHttpRequest = async (
 
     try {
       const input = parseCliInput(await readJsonBody(request));
-      const result = await broker.execute(input, { signal: abortController.signal });
+      const attachments = await resolveBrowserControlAttachments(input.attachments, options.filesystemRootPath);
+      const result = await broker.execute({
+        ...input,
+        attachments,
+      }, { signal: abortController.signal });
       sendJson(response, 200, result);
     } catch (error) {
       sendJson(response, 400, browserControlError(
@@ -480,6 +611,7 @@ const parseCliInput = (body: unknown): BrowserControlCliInput => {
   const targetUserId = readNonEmptyString(input["targetUserId"]);
   const timeoutMs = input["timeoutMs"];
   const clientRequestId = input["clientRequestId"];
+  const attachments = parseBrowserControlAttachmentInputs(input["attachments"]);
   const request = parseBrowserControlRequest(input);
 
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || typeof timeoutMs !== "number" || timeoutMs <= 0)) {
@@ -495,8 +627,107 @@ const parseCliInput = (body: unknown): BrowserControlCliInput => {
     ...request,
     timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
     clientRequestId: typeof clientRequestId === "string" ? clientRequestId : undefined,
+    attachments,
   };
 };
+
+const parseBrowserControlAttachmentInputs = (value: unknown): readonly BrowserControlAttachmentInput[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("attachments must be an array.");
+  }
+
+  if (value.length > MAX_ATTACHMENT_COUNT) {
+    throw new Error(`attachments cannot include more than ${String(MAX_ATTACHMENT_COUNT)} files.`);
+  }
+
+  const seenIds = new Set<string>();
+  return value.map((entry, index) => {
+    const label = `attachments[${String(index)}]`;
+    const attachment = readRequiredObject(entry, label);
+    assertAllowedKeys(attachment, label, ["id", "path", "name", "mimeType"]);
+    const id = readRequiredNonEmptyString(attachment["id"], `${label}.id`);
+
+    if (seenIds.has(id)) {
+      throw new Error(`attachments includes duplicate id "${id}".`);
+    }
+    seenIds.add(id);
+
+    return stripUndefined({
+      id,
+      path: readRequiredNonEmptyString(attachment["path"], `${label}.path`),
+      name: readOptionalNonEmptyString(attachment["name"], `${label}.name`),
+      mimeType: readOptionalNonEmptyString(attachment["mimeType"], `${label}.mimeType`),
+    });
+  });
+};
+
+const resolveBrowserControlAttachments = async (
+  attachments: readonly BrowserControlAttachmentInput[] | undefined,
+  filesystemRootPath: string | undefined,
+): Promise<readonly BrowserControlResolvedAttachment[] | undefined> => {
+  if (attachments === undefined || attachments.length === 0) {
+    return undefined;
+  }
+
+  if (filesystemRootPath === undefined) {
+    throw new Error("Browser-control attachments are unavailable because the filesystem root is not configured.");
+  }
+
+  const realRootPath = await realpath(filesystemRootPath);
+  const resolvedAttachments: BrowserControlResolvedAttachment[] = [];
+  let totalSize = 0;
+
+  for (const attachment of attachments) {
+    const targetPath = resolveClientPath(filesystemRootPath, attachment.path);
+    let realTargetPath: string;
+
+    try {
+      realTargetPath = await realpath(targetPath);
+    } catch {
+      throw new Error(`attachments.${attachment.id}.path was not found.`);
+    }
+
+    ensureWithinRoot(realRootPath, realTargetPath);
+    const targetStats = await stat(realTargetPath);
+
+    if (!targetStats.isFile()) {
+      throw new Error(`attachments.${attachment.id}.path must point to a file.`);
+    }
+
+    if (targetStats.size > MAX_ATTACHMENT_FILE_BYTES) {
+      throw new Error(`attachments.${attachment.id}.path exceeds the ${String(MAX_ATTACHMENT_FILE_BYTES)} byte per-file limit.`);
+    }
+
+    totalSize += targetStats.size;
+    if (totalSize > MAX_ATTACHMENT_TOTAL_BYTES) {
+      throw new Error(`attachments exceed the ${String(MAX_ATTACHMENT_TOTAL_BYTES)} byte total limit.`);
+    }
+
+    resolvedAttachments.push({
+      id: attachment.id,
+      absolutePath: realTargetPath,
+      name: attachment.name ?? basename(realTargetPath),
+      mimeType: attachment.mimeType ?? DEFAULT_ATTACHMENT_MIME_TYPE,
+      size: targetStats.size,
+      mtimeMs: targetStats.mtimeMs,
+    });
+  }
+
+  return resolvedAttachments;
+};
+
+const attachmentToMetadata = (
+  attachment: BrowserControlResolvedAttachment,
+): BrowserControlAttachmentMetadata => ({
+  id: attachment.id,
+  name: attachment.name,
+  mimeType: attachment.mimeType,
+  size: attachment.size,
+});
 
 const supportedBrowserControlCommands = [
   "getTabs",
@@ -773,7 +1004,93 @@ const parseClientMessage = (data: RawData): BrowserControlClientMessage | null =
     }
   }
 
+  if (message["type"] === "attachment.read") {
+    const requestId = readNonEmptyString(message["requestId"]);
+    const chunkRequestId = readNonEmptyString(message["chunkRequestId"]);
+    const attachmentId = readNonEmptyString(message["attachmentId"]);
+    const offset = message["offset"];
+    const length = message["length"];
+
+    if (
+      requestId === undefined ||
+      chunkRequestId === undefined ||
+      attachmentId === undefined ||
+      !isNonNegativeInteger(offset) ||
+      !isPositiveInteger(length)
+    ) {
+      return null;
+    }
+
+    return {
+      type: "attachment.read",
+      requestId,
+      chunkRequestId,
+      attachmentId,
+      offset,
+      length,
+    };
+  }
+
   return null;
+};
+
+const readAttachmentChunk = async (
+  attachment: BrowserControlResolvedAttachment,
+  offset: number,
+  length: number,
+): Promise<{ readonly data: Buffer; readonly done: boolean }> => {
+  const file = await open(attachment.absolutePath, "r");
+
+  try {
+    const currentStats = await file.stat();
+
+    if (currentStats.size !== attachment.size || currentStats.mtimeMs !== attachment.mtimeMs) {
+      throw new AttachmentReadError("BROWSER_ATTACHMENT_CHANGED", "Browser-control attachment changed after request validation.");
+    }
+
+    const remaining = Math.max(attachment.size - offset, 0);
+    const readLength = Math.min(length, remaining);
+    const buffer = Buffer.alloc(readLength);
+
+    if (readLength === 0) {
+      return {
+        data: buffer,
+        done: true,
+      };
+    }
+
+    const result = await file.read(buffer, 0, readLength, offset);
+    return {
+      data: result.bytesRead === buffer.byteLength ? buffer : buffer.subarray(0, result.bytesRead),
+      done: offset + result.bytesRead >= attachment.size,
+    };
+  } finally {
+    await file.close();
+  }
+};
+
+class AttachmentReadError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AttachmentReadError";
+  }
+}
+
+const toAttachmentReadError = (error: unknown): BrowserControlErrorPayload => {
+  if (error instanceof AttachmentReadError) {
+    return {
+      code: error.code,
+      message: error.message,
+    };
+  }
+
+  return {
+    code: "BROWSER_ATTACHMENT_READ_FAILED",
+    message: error instanceof Error ? error.message : "Failed to read browser-control attachment.",
+  };
 };
 
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
@@ -883,6 +1200,12 @@ const readOptionalPositiveInteger = (value: unknown, label: string): number | un
   return value;
 };
 
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0;
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
+
 const readOptionalBoolean = (value: unknown, label: string): boolean | undefined => {
   if (value === undefined) {
     return undefined;
@@ -947,4 +1270,10 @@ const rawDataToText = (data: RawData): string => {
   }
 
   return Buffer.concat(data).toString("utf8");
+};
+
+const sendWebSocketJson = (webSocket: WebSocket, message: unknown): void => {
+  if (webSocket.readyState === WebSocket.OPEN) {
+    webSocket.send(JSON.stringify(message));
+  }
 };

@@ -1,4 +1,7 @@
+import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,9 +12,11 @@ import {
 } from "../src/browser-control/service.js";
 
 const servers: Server[] = [];
+const tempDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => closeServer(server)));
+  await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })));
 });
 
 describe("browser-control service", () => {
@@ -267,6 +272,159 @@ describe("browser-control service", () => {
     second.close();
   });
 
+  it("forwards browser-control attachment metadata and serves request-scoped chunks", async () => {
+    const root = await createTempRoot();
+    await writeFile(join(root, "avatar.png"), Buffer.from("hello-browser-file", "utf8"));
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+    client.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+
+    const responsePromise = fetch(`${baseUrl}/browser-control/requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "user-1",
+        command: "tab.evaluate",
+        params: { tabId: 123, expression: "location.href" },
+        attachments: [{
+          id: "avatar",
+          path: "avatar.png",
+          mimeType: "image/png",
+        }],
+      }),
+    });
+    const request = await waitForJsonMessage<BrowserControlRequestMessage>(client);
+
+    expect(request).toMatchObject({
+      type: "request",
+      command: "tab.evaluate",
+      attachments: [{
+        id: "avatar",
+        name: "avatar.png",
+        mimeType: "image/png",
+        size: Buffer.byteLength("hello-browser-file"),
+      }],
+    });
+
+    client.send(JSON.stringify({
+      type: "attachment.read",
+      requestId: request.requestId,
+      chunkRequestId: "chunk-1",
+      attachmentId: "avatar",
+      offset: 0,
+      length: 5,
+    }));
+    const chunk = await waitForJsonMessage<BrowserControlAttachmentChunkMessage>(client);
+
+    expect(chunk).toEqual({
+      type: "attachment.chunk",
+      requestId: request.requestId,
+      chunkRequestId: "chunk-1",
+      attachmentId: "avatar",
+      offset: 0,
+      dataBase64: Buffer.from("hello", "utf8").toString("base64"),
+      done: false,
+    });
+
+    client.send(JSON.stringify({
+      type: "response",
+      requestId: request.requestId,
+      ok: true,
+      result: { hydrated: true },
+    }));
+
+    expect(await (await responsePromise).json()).toEqual({
+      ok: true,
+      result: { hydrated: true },
+    });
+
+    client.close();
+  });
+
+  it("rejects invalid browser-control attachment requests", async () => {
+    const root = await createTempRoot();
+    await mkdir(join(root, "folder"));
+    await writeFile(join(root, "file.txt"), "hello");
+    await writeFile(join(root, "large.bin"), "");
+    await truncate(join(root, "large.bin"), (50 * 1024 * 1024) + 1);
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+
+    await expectInvalidAttachmentRequest(baseUrl, [{
+      id: "outside",
+      path: "../outside.txt",
+    }], "Path cannot contain parent directory segments");
+
+    await expectInvalidAttachmentRequest(baseUrl, [{
+      id: "missing",
+      path: "missing.txt",
+    }], "was not found");
+
+    await expectInvalidAttachmentRequest(baseUrl, [{
+      id: "directory",
+      path: "folder",
+    }], "must point to a file");
+
+    await expectInvalidAttachmentRequest(baseUrl, [
+      { id: "same", path: "file.txt" },
+      { id: "same", path: "file.txt" },
+    ], "duplicate id");
+
+    await expectInvalidAttachmentRequest(baseUrl, [{
+      id: "large",
+      path: "large.bin",
+    }], "per-file limit");
+  });
+
+  it("rejects attachment chunks after the browser-control request completes", async () => {
+    const root = await createTempRoot();
+    await writeFile(join(root, "file.txt"), "hello");
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+    client.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+
+    const responsePromise = fetch(`${baseUrl}/browser-control/requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "user-1",
+        command: "tab.evaluate",
+        params: { tabId: 123, expression: "location.href" },
+        attachments: [{ id: "file", path: "file.txt" }],
+      }),
+    });
+    const request = await waitForJsonMessage<BrowserControlRequestMessage>(client);
+
+    client.send(JSON.stringify({
+      type: "response",
+      requestId: request.requestId,
+      ok: true,
+      result: { ok: true },
+    }));
+    expect(await (await responsePromise).json()).toEqual({
+      ok: true,
+      result: { ok: true },
+    });
+
+    client.send(JSON.stringify({
+      type: "attachment.read",
+      requestId: request.requestId,
+      chunkRequestId: "late-chunk",
+      attachmentId: "file",
+      offset: 0,
+      length: 5,
+    }));
+
+    expect(await waitForJsonMessage<BrowserControlAttachmentErrorMessage>(client)).toMatchObject({
+      type: "attachment.error",
+      requestId: request.requestId,
+      chunkRequestId: "late-chunk",
+      attachmentId: "file",
+      error: { code: "BROWSER_ATTACHMENT_REQUEST_NOT_FOUND" },
+    });
+
+    client.close();
+  });
+
   it("returns stable errors when no client is connected or a client times out", async () => {
     const { baseUrl } = await startBrowserControlServer();
 
@@ -381,13 +539,37 @@ interface BrowserControlRequestMessage {
   readonly requestId: string;
   readonly command: string;
   readonly params?: unknown;
+  readonly attachments?: unknown;
 }
 
-const startBrowserControlServer = async (): Promise<{
+interface BrowserControlAttachmentChunkMessage {
+  readonly type: "attachment.chunk";
+  readonly requestId: string;
+  readonly chunkRequestId: string;
+  readonly attachmentId: string;
+  readonly offset: number;
+  readonly dataBase64: string;
+  readonly done: boolean;
+}
+
+interface BrowserControlAttachmentErrorMessage {
+  readonly type: "attachment.error";
+  readonly requestId: string;
+  readonly chunkRequestId: string;
+  readonly attachmentId: string;
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
+const startBrowserControlServer = async (options: {
+  readonly filesystemRootPath?: string;
+} = {}): Promise<{
   readonly server: Server;
   readonly baseUrl: string;
 }> => {
-  const service = createBrowserControlService();
+  const service = createBrowserControlService(options);
   const server = createServer((request, response) => {
     void service.handleRequest(request, response).then((handled) => {
       if (!handled) {
@@ -409,6 +591,37 @@ const startBrowserControlServer = async (): Promise<{
   }
 
   return { server, baseUrl: `http://127.0.0.1:${String(address.port)}` };
+};
+
+const createTempRoot = async (): Promise<string> => {
+  const root = await mkdtemp(join(tmpdir(), "ank1015-browser-control-"));
+  tempDirectories.push(root);
+  return root;
+};
+
+const expectInvalidAttachmentRequest = async (
+  baseUrl: string,
+  attachments: unknown,
+  expectedMessage: string,
+): Promise<void> => {
+  const response = await fetch(`${baseUrl}/browser-control/requests`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      command: "tab.evaluate",
+      params: { tabId: 123, expression: "location.href" },
+      attachments,
+    }),
+  });
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({
+    ok: false,
+    error: {
+      code: "INVALID_REQUEST",
+      message: expect.stringContaining(expectedMessage),
+    },
+  });
 };
 
 const openBrowserControlClient = (baseUrl: string, userId: string): Promise<WebSocket> =>

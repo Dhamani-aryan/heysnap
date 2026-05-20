@@ -83,7 +83,9 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   });
   const agentHttpService = createAgentHttpService({ harness: agentHarness });
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
-  const browserControlService = createBrowserControlService();
+  const browserControlService = createBrowserControlService({
+    filesystemRootPath: filesystemRoot.absolutePath,
+  });
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
 
