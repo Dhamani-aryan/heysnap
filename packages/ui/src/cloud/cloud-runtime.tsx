@@ -7,6 +7,11 @@ import { useStore } from "zustand";
 import { CloudClient } from "./cloud-client";
 import { createCloudAuthStore, type CloudAuthState, type CloudAuthStore } from "./state/auth-store";
 import {
+  createBrowserWindowStore,
+  type BrowserWindowState,
+  type BrowserWindowStore,
+} from "./state/browser-window-store";
+import {
   createCloudMachinesStore,
   type CloudMachinesState,
   type CloudMachinesStore,
@@ -30,6 +35,7 @@ export interface CloudRuntime {
   readonly cloudServerUrl: string;
   readonly storageKey: string;
   readonly authStore: CloudAuthStore;
+  readonly browserWindowStore: BrowserWindowStore;
   readonly machinesStore: CloudMachinesStore;
   readonly accessStore: MachineAccessStore;
   readonly storage: CloudSessionStorage;
@@ -57,6 +63,7 @@ export function CloudRuntimeProvider({
     })
   );
   const [authStore] = useState(() => createCloudAuthStore());
+  const [browserWindowStore] = useState(() => createBrowserWindowStore());
   const [machinesStore] = useState(() => createCloudMachinesStore());
   const [accessStore] = useState(() => createMachineAccessStore());
   const client = useMemo(() => new CloudClient(cloudServerUrl), [cloudServerUrl]);
@@ -66,9 +73,10 @@ export function CloudRuntimeProvider({
     storageKey,
     storage,
     authStore,
+    browserWindowStore,
     machinesStore,
     accessStore,
-  }), [accessStore, authStore, client, cloudServerUrl, machinesStore, storage, storageKey]);
+  }), [accessStore, authStore, browserWindowStore, client, cloudServerUrl, machinesStore, storage, storageKey]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -95,6 +103,11 @@ export const useCloudRuntime = (): CloudRuntime => {
 export const useCloudAuthStore = <T,>(selector: (state: CloudAuthState) => T): T => {
   const { authStore } = useCloudRuntime();
   return useStore(authStore, selector);
+};
+
+export const useBrowserWindowStore = <T,>(selector: (state: BrowserWindowState) => T): T => {
+  const { browserWindowStore } = useCloudRuntime();
+  return useStore(browserWindowStore, selector);
 };
 
 export const useCloudMachinesStore = <T,>(selector: (state: CloudMachinesState) => T): T => {
