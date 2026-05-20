@@ -73,6 +73,53 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   return btoa(binary);
 };
 
+const getClipboardFileName = (file: File, index: number): string => {
+  const trimmedName = file.name.trim();
+
+  if (trimmedName.length > 0) {
+    return trimmedName;
+  }
+
+  const extension = getMimeTypeExtension(file.type);
+  return `clipboard-image-${Date.now()}-${index + 1}.${extension}`;
+};
+
+const getMimeTypeExtension = (mimeType: string): string => {
+  const subtype = mimeType.split("/")[1]?.split(";")[0]?.trim().toLowerCase();
+
+  if (subtype === "jpeg") {
+    return "jpg";
+  }
+
+  return subtype !== undefined && subtype.length > 0 ? subtype : "png";
+};
+
+export const getClipboardAttachmentFiles = (clipboardData: DataTransfer | null): File[] => {
+  if (clipboardData === null) {
+    return [];
+  }
+
+  const files = Array.from(clipboardData.files);
+
+  if (files.length > 0) {
+    return files.map((file, index) => (
+      file.name.trim().length > 0
+        ? file
+        : new File([file], getClipboardFileName(file, index), { type: file.type, lastModified: file.lastModified })
+    ));
+  }
+
+  return Array.from(clipboardData.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null)
+    .map((file, index) => (
+      file.name.trim().length > 0
+        ? file
+        : new File([file], getClipboardFileName(file, index), { type: file.type, lastModified: file.lastModified })
+    ));
+};
+
 const toPromptAttachment = async (file: File): Promise<PromptAttachment> => {
   const content = arrayBufferToBase64(await file.arrayBuffer());
 
@@ -255,6 +302,17 @@ export const RightPromptComposer = ({
     }
   };
 
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = getClipboardAttachmentFiles(event.clipboardData);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    void handleAttachmentFiles(files);
+  };
+
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit || isSubmitting) {
       return;
@@ -381,6 +439,7 @@ export const RightPromptComposer = ({
         rows={1}
         className="prompt-textarea"
         onChange={(event) => setDraftValue(event.target.value)}
+        onPaste={handlePaste}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
