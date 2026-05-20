@@ -135,6 +135,9 @@ Common errors:
 | `BROWSER_EXECUTOR_ERROR` | The web client or extension command failed. |
 | `BROWSER_ATTACHMENTS_UNSUPPORTED` | Attachments were used with a command other than `tab.evaluate`, or without the workspace browser executor. |
 | `BROWSER_ATTACHMENT_CHANGED` | An attachment changed after request validation and before chunk streaming completed. |
+| `BROWSER_OUTPUTS_UNSUPPORTED` | Output streaming was used without the workspace browser executor. |
+| `BROWSER_OUTPUT_TOO_LARGE` | A screenshot output exceeded the configured file-size limit. |
+| `BROWSER_OUTPUT_INCOMPLETE` | The browser client responded before finishing the screenshot output stream. |
 | `INVALID_REQUEST` | Request JSON or params failed server validation. |
 
 ## Shared Result Types
@@ -593,6 +596,96 @@ Example response:
 }
 ```
 
+### `tab.screenshot`
+
+Captures a screenshot from a tab through CDP and saves it inside the machine
+filesystem root. Screenshot bytes are streamed back to the machine server over
+the browser-control websocket and are not returned in the HTTP response.
+
+```ts
+type TabScreenshotRequest = {
+  command: "tab.screenshot";
+  params: {
+    tabId: number;
+    path: string;
+    captureMode?: "viewport" | "fullPage" | "clip";
+    clip?: { x: number; y: number; width: number; height: number; scale?: number };
+    format?: "png" | "jpeg" | "webp";
+    quality?: number;
+    overwrite?: boolean;
+    waitForLoad?: WaitForLoad;
+    fromSurface?: boolean;
+    captureBeyondViewport?: boolean;
+    optimizeForSpeed?: boolean;
+  };
+};
+
+type TabScreenshotResponse = BrowserControlSuccess<{
+  tabId: number | null;
+  path: string;
+  format: "png" | "jpeg" | "webp";
+  mimeType: string;
+  size: number;
+  overwritten: boolean;
+}>;
+```
+
+Notes:
+
+- `path` is filesystem-root-relative. Parent folders are created automatically.
+- Existing files fail unless `overwrite` is `true`.
+- `format` is inferred from `.png`, `.jpg`, `.jpeg`, or `.webp`; otherwise it
+  defaults to `png`. If provided, it must match the extension.
+- `captureMode` defaults to `viewport`. `fullPage` uses CDP layout metrics and
+  `captureBeyondViewport`. `clip` requires `clip`.
+- `quality` is valid only for `jpeg` and `webp`.
+
+Example: capture the visible viewport.
+
+```json
+{
+  "command": "tab.screenshot",
+  "params": {
+    "tabId": 123,
+    "path": "screenshots/example.png"
+  },
+  "timeoutMs": 30000
+}
+```
+
+Example: capture a full-page JPEG and replace any previous file.
+
+```json
+{
+  "command": "tab.screenshot",
+  "params": {
+    "tabId": 123,
+    "path": "screenshots/example-full.jpeg",
+    "captureMode": "fullPage",
+    "quality": 85,
+    "overwrite": true,
+    "waitForLoad": true
+  },
+  "timeoutMs": 60000
+}
+```
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "tabId": 123,
+    "path": "screenshots/example.png",
+    "format": "png",
+    "mimeType": "image/png",
+    "size": 42891,
+    "overwritten": false
+  }
+}
+```
+
 ### `tab.cdp`
 
 Sends a Chrome DevTools Protocol command to a tab. The extension auto-attaches
@@ -696,6 +789,7 @@ type BrowserControlCommand =
   | TabGoToRequest
   | TabRefreshRequest
   | TabEvaluateRequest
+  | TabScreenshotRequest
   | TabCdpRequest;
 ```
 
