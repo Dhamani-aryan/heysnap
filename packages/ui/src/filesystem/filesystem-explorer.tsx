@@ -27,7 +27,8 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
-import { useAgentThreadGroupsQuery } from "../agent/agent-queries";
+import { useAgentRunMutation, useAgentThreadGroupsQuery } from "../agent/agent-queries";
+import { RightPromptComposer } from "../agent/prompt-composer";
 import {
   AgentRuntimeProvider,
   useAgentChatStore,
@@ -3490,6 +3491,14 @@ const DesktopSplitPane = ({
       >
         <section className="split-left" style={{ flexBasis: `${leftPaneRatio * 100}%` }}>
           {children}
+          <FilesystemHoverGrip
+            sarvamApiKey={sarvamApiKey}
+            currentPath={currentPath}
+            selectedThreadId={selectedThreadId}
+            uiContext={uiContext}
+            onSelectThread={onSelectThread}
+            onThreadResolved={onThreadResolved}
+          />
         </section>
 
         <div
@@ -3536,6 +3545,690 @@ const DesktopSplitPane = ({
     </div>
   );
 };
+
+const FilesystemHoverGrip = ({
+  sarvamApiKey,
+  currentPath,
+  selectedThreadId,
+  uiContext,
+  onSelectThread,
+  onThreadResolved,
+}: {
+  readonly sarvamApiKey?: string;
+  readonly currentPath: string;
+  readonly selectedThreadId: string | null;
+  readonly uiContext: AgentUiContext;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+  readonly onThreadResolved?: (threadId: string) => void;
+}): React.ReactElement => {
+  const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
+  const [transcriptDraft, setTranscriptDraft] = useState<{ readonly id: number; readonly text: string } | null>(null);
+  const activeRun = useAgentChatStore((state) => state.activeRun);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingSessionRef = useRef(0);
+  const recordingStartedAtRef = useRef(0);
+  const shouldTranscribeOnStopRef = useRef(false);
+  const hotkeyRecordingRef = useRef(false);
+  const transcriptDraftIdRef = useRef(0);
+  const isAgentRunning = activeRun !== null;
+  const { cancel, steer, submit } = useAgentRunMutation({
+    currentPath,
+    uiContext,
+    selectedThreadId,
+    onSelectThread,
+    onThreadResolved,
+  });
+  const isRecording = recordingState === "recording";
+  const isTranscribing = recordingState === "transcribing";
+  const isExpanded = recordingState !== "idle";
+
+  const discardRecording = useCallback(() => {
+    audioChunksRef.current = [];
+
+    const stream = mediaStreamRef.current;
+    mediaStreamRef.current = null;
+    stream?.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    hotkeyRecordingRef.current = false;
+    recordingSessionRef.current += 1;
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+
+    if (recorder !== null && recorder.state !== "inactive") {
+      shouldTranscribeOnStopRef.current = true;
+      setRecordingState("transcribing");
+      recorder.stop();
+    } else {
+      discardRecording();
+      setRecordingState("idle");
+    }
+  }, [discardRecording]);
+
+  const handleRecordingStopped = useCallback(async (durationSeconds: number): Promise<void> => {
+    const recorder = mediaRecorderRef.current;
+    const audioType = normalizeSarvamAudioMimeType(recorder?.mimeType || audioChunksRef.current[0]?.type || "audio/webm");
+    const audioBlob = new Blob(audioChunksRef.current, { type: audioType });
+
+    try {
+      const result = await transcribeSarvamRecording({
+        apiKey: sarvamApiKey,
+        audioBlob,
+        durationSeconds,
+      });
+      const transcript = extractSarvamTranscript(result);
+
+      if (transcript !== null) {
+        transcriptDraftIdRef.current += 1;
+        setTranscriptDraft({ id: transcriptDraftIdRef.current, text: transcript });
+      }
+    } catch (error) {
+      console.error("Sarvam STT failed.", error);
+    } finally {
+      discardRecording();
+      setRecordingState("idle");
+    }
+  }, [discardRecording, sarvamApiKey]);
+
+	  const startRecording = useCallback(async () => {
+    if (
+      typeof window === "undefined" ||
+      typeof MediaRecorder === "undefined" ||
+      navigator.mediaDevices?.getUserMedia === undefined
+    ) {
+      return;
+    }
+
+    setRecordingState("starting");
+    setTranscriptDraft(null);
+    const recordingSession = recordingSessionRef.current + 1;
+    recordingSessionRef.current = recordingSession;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      if (recordingSessionRef.current !== recordingSession) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      const recordingMimeType = getPreferredRecordingMimeType();
+      const recorder = new MediaRecorder(
+        stream,
+        recordingMimeType === undefined ? undefined : { mimeType: recordingMimeType },
+      );
+
+      shouldTranscribeOnStopRef.current = false;
+      audioChunksRef.current = [];
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordingStartedAtRef.current = performance.now();
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      });
+      recorder.addEventListener("stop", () => {
+        if (shouldTranscribeOnStopRef.current) {
+          shouldTranscribeOnStopRef.current = false;
+          void handleRecordingStopped((performance.now() - recordingStartedAtRef.current) / 1000);
+          return;
+        }
+
+        discardRecording();
+      }, { once: true });
+      recorder.start();
+      setRecordingState("recording");
+    } catch (error) {
+      discardRecording();
+      setRecordingState("idle");
+      console.warn("Microphone recording failed.", error);
+    }
+  }, [discardRecording, handleRecordingStopped]);
+
+  useEffect(() => {
+    const isRecordingHotkey = (event: KeyboardEvent): boolean =>
+      event.altKey && (event.code === "KeyM" || event.key.toLowerCase() === "m");
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.repeat || !isRecordingHotkey(event) || isEditableKeyboardTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (recordingState !== "idle") {
+        return;
+      }
+
+      hotkeyRecordingRef.current = true;
+      void startRecording();
+    };
+
+    const handleKeyUp = (event: KeyboardEvent): void => {
+      if (
+        !hotkeyRecordingRef.current ||
+        (event.code !== "KeyM" && event.key.toLowerCase() !== "m" && event.key !== "Alt")
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      hotkeyRecordingRef.current = false;
+      stopRecording();
+    };
+
+    const handleWindowBlur = (): void => {
+      if (!hotkeyRecordingRef.current) {
+        return;
+      }
+
+      hotkeyRecordingRef.current = false;
+      stopRecording();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [recordingState, startRecording, stopRecording]);
+
+  useEffect(() => () => {
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    shouldTranscribeOnStopRef.current = false;
+
+    if (recorder !== null && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+
+    discardRecording();
+  }, [discardRecording]);
+
+  if (transcriptDraft !== null) {
+    return (
+      <div className="filesystem-voice-prompt-shell">
+        <RightPromptComposer
+          draftSeed={transcriptDraft}
+          isRunning={isAgentRunning}
+          onCancel={cancel}
+          onSubmit={async (input) => {
+            const didSubmit = isAgentRunning ? await steer(input) : submit(input);
+
+            if (didSubmit === false) {
+              return false;
+            }
+
+            setTranscriptDraft(null);
+            return didSubmit;
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      className="filesystem-hover-grip"
+      type="button"
+      aria-label={isRecording ? "Stop recording" : "Start recording"}
+      aria-pressed={isRecording}
+      data-expanded={isExpanded ? "true" : "false"}
+      data-recording={isRecording ? "true" : "false"}
+      data-loading={isTranscribing ? "true" : "false"}
+      onClick={() => {
+        if (isTranscribing) {
+          return;
+        }
+
+        if (recordingState === "idle") {
+          void startRecording();
+          return;
+        }
+
+        stopRecording();
+      }}
+    >
+      {isTranscribing ? (
+        <span className="filesystem-hover-grip-loading" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      ) : (
+        <span className="filesystem-hover-grip-dots" aria-hidden="true">
+          {Array.from({ length: 8 }, (_, index) => (
+            <span key={index} />
+          ))}
+        </span>
+      )}
+    </button>
+  );
+};
+
+const SARVAM_API_BASE_URL = "https://api.sarvam.ai";
+const SARVAM_SHORT_AUDIO_MAX_SECONDS = 30;
+const SARVAM_STT_MODEL = "saaras:v3";
+const SARVAM_STT_MODE = "translit";
+const SARVAM_BATCH_POLL_INTERVAL_MS = 2_000;
+const SARVAM_BATCH_TIMEOUT_MS = 20 * 60 * 1_000;
+
+type SarvamJobState = "Accepted" | "Pending" | "Running" | "Completed" | "Failed";
+
+type SarvamSignedUrlDetails = {
+  readonly file_url: string;
+  readonly file_metadata?: Record<string, unknown> | null;
+};
+
+type SarvamTaskFileDetails = {
+  readonly file_name: string;
+  readonly file_id: string;
+};
+
+type SarvamTaskDetail = {
+  readonly outputs?: SarvamTaskFileDetails[];
+  readonly state?: string;
+  readonly error_message?: string | null;
+};
+
+type SarvamBatchStatusResponse = {
+  readonly job_state: SarvamJobState;
+  readonly job_id: string;
+  readonly job_details?: SarvamTaskDetail[];
+  readonly error_message?: string;
+};
+
+type SarvamBatchInitResponse = {
+  readonly job_id: string;
+};
+
+type SarvamUploadLinksResponse = {
+  readonly upload_urls: Record<string, SarvamSignedUrlDetails>;
+  readonly storage_container_type?: string;
+};
+
+type SarvamDownloadLinksResponse = {
+  readonly download_urls: Record<string, SarvamSignedUrlDetails>;
+};
+
+const getPreferredRecordingMimeType = (): string | undefined => {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return undefined;
+  }
+
+  return [
+    "audio/ogg;codecs=opus",
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+  ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+};
+
+const normalizeSarvamAudioMimeType = (mimeType: string): string => {
+  const normalizedMimeType = mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
+
+  if (normalizedMimeType === "audio/webm" || normalizedMimeType === "video/webm") {
+    return "audio/webm";
+  }
+
+  if (normalizedMimeType === "audio/ogg" || normalizedMimeType === "audio/opus") {
+    return normalizedMimeType;
+  }
+
+  if (normalizedMimeType === "audio/mp4" || normalizedMimeType === "audio/x-m4a") {
+    return normalizedMimeType;
+  }
+
+  if (normalizedMimeType === "audio/wav" || normalizedMimeType === "audio/x-wav" || normalizedMimeType === "audio/wave") {
+    return normalizedMimeType;
+  }
+
+  if (normalizedMimeType === "audio/mpeg" || normalizedMimeType === "audio/mp3") {
+    return normalizedMimeType;
+  }
+
+  return "audio/webm";
+};
+
+const transcribeSarvamRecording = async ({
+  apiKey,
+  audioBlob,
+  durationSeconds,
+}: {
+  readonly apiKey?: string;
+  readonly audioBlob: Blob;
+  readonly durationSeconds: number;
+}): Promise<unknown> => {
+  if (audioBlob.size === 0) {
+    console.warn("Sarvam STT skipped because the recording was empty.");
+    return null;
+  }
+
+  if (apiKey === undefined || apiKey.length === 0) {
+    console.warn("Sarvam STT skipped because NEXT_PUBLIC_SARVAM_API_KEY is not set.");
+    return null;
+  }
+
+  const fileName = createSarvamAudioFileName(audioBlob.type);
+  const result = durationSeconds < SARVAM_SHORT_AUDIO_MAX_SECONDS
+    ? await transcribeShortSarvamAudio({ apiKey, audioBlob, fileName })
+    : await transcribeBatchSarvamAudio({ apiKey, audioBlob, fileName });
+
+  return result;
+};
+
+const extractSarvamTranscript = (result: unknown): string | null => {
+  if (typeof result === "string") {
+    const trimmed = result.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+
+  if (Array.isArray(result)) {
+    const joined = result
+      .map((item) => extractSarvamTranscript(item))
+      .filter((transcript): transcript is string => transcript !== null)
+      .join("\n")
+      .trim();
+
+    return joined.length === 0 ? null : joined;
+  }
+
+  if (typeof result !== "object" || result === null) {
+    return null;
+  }
+
+  const record = result as Record<string, unknown>;
+
+  if (typeof record["transcript"] === "string") {
+    const transcript = record["transcript"].trim();
+    return transcript.length === 0 ? null : transcript;
+  }
+
+  if ("output" in record) {
+    return extractSarvamTranscript(record["output"]);
+  }
+
+  if (Array.isArray(record["transcripts"])) {
+    return extractSarvamTranscript(record["transcripts"]);
+  }
+
+  return null;
+};
+
+const transcribeShortSarvamAudio = async ({
+  apiKey,
+  audioBlob,
+  fileName,
+}: {
+  readonly apiKey: string;
+  readonly audioBlob: Blob;
+  readonly fileName: string;
+}): Promise<unknown> => {
+  const formData = new FormData();
+  formData.set("model", SARVAM_STT_MODEL);
+  formData.set("mode", SARVAM_STT_MODE);
+  formData.set("file", audioBlob, fileName);
+
+  const response = await fetch(`${SARVAM_API_BASE_URL}/speech-to-text`, {
+    method: "POST",
+    headers: {
+      "api-subscription-key": apiKey,
+    },
+    body: formData,
+  });
+
+  return readSarvamJsonResponse(response);
+};
+
+const transcribeBatchSarvamAudio = async ({
+  apiKey,
+  audioBlob,
+  fileName,
+}: {
+  readonly apiKey: string;
+  readonly audioBlob: Blob;
+  readonly fileName: string;
+}): Promise<unknown> => {
+  const initResponse = await sarvamJsonFetch<SarvamBatchInitResponse>("/speech-to-text/job/v1", apiKey, {
+    method: "POST",
+    body: JSON.stringify({
+      job_parameters: {
+        model: SARVAM_STT_MODEL,
+        mode: SARVAM_STT_MODE,
+      },
+    }),
+  });
+  const jobId = initResponse.job_id;
+  const uploadLinksResponse = await sarvamJsonFetch<SarvamUploadLinksResponse>(
+    "/speech-to-text/job/v1/upload-files",
+    apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        job_id: jobId,
+        files: [fileName],
+      }),
+    },
+  );
+  const uploadUrl = getSarvamSignedUrl(uploadLinksResponse.upload_urls, fileName);
+  const uploadHeaders = createSarvamUploadHeaders(
+    uploadUrl.file_metadata,
+    audioBlob.type,
+    uploadLinksResponse.storage_container_type,
+  );
+  const uploadResponse = await fetch(uploadUrl.file_url, {
+    method: "PUT",
+    headers: uploadHeaders,
+    body: audioBlob,
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Sarvam batch upload failed with ${uploadResponse.status}: ${await uploadResponse.text()}`);
+  }
+
+  await sarvamJsonFetch(`/speech-to-text/job/v1/${encodeURIComponent(jobId)}/start`, apiKey, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+
+  const status = await waitForSarvamBatchJob(apiKey, jobId);
+  const outputFileNames = getSarvamOutputFileNames(status);
+  const downloadLinksResponse = await sarvamJsonFetch<SarvamDownloadLinksResponse>(
+    "/speech-to-text/job/v1/download-files",
+    apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        job_id: jobId,
+        files: outputFileNames,
+      }),
+    },
+  );
+
+  return Promise.all(outputFileNames.map(async (outputFileName) => {
+    const downloadUrl = getSarvamSignedUrl(downloadLinksResponse.download_urls, outputFileName);
+    const response = await fetch(downloadUrl.file_url);
+
+    if (!response.ok) {
+      throw new Error(`Sarvam batch download failed with ${response.status}: ${await response.text()}`);
+    }
+
+    return {
+      fileName: outputFileName,
+      output: await readPossiblyJsonResponse(response),
+    };
+  }));
+};
+
+const waitForSarvamBatchJob = async (
+  apiKey: string,
+  jobId: string,
+): Promise<SarvamBatchStatusResponse> => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < SARVAM_BATCH_TIMEOUT_MS) {
+    const status = await sarvamJsonFetch<SarvamBatchStatusResponse>(
+      `/speech-to-text/job/v1/${encodeURIComponent(jobId)}/status`,
+      apiKey,
+      { method: "GET" },
+    );
+
+    if (status.job_state === "Completed") {
+      return status;
+    }
+
+    if (status.job_state === "Failed") {
+      throw new Error(status.error_message || "Sarvam batch speech-to-text job failed.");
+    }
+
+    await wait(SARVAM_BATCH_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Timed out waiting for Sarvam batch speech-to-text job.");
+};
+
+const sarvamJsonFetch = async <ResponseBody,>(
+  path: string,
+  apiKey: string,
+  init: RequestInit,
+): Promise<ResponseBody> => {
+  const response = await fetch(`${SARVAM_API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "api-subscription-key": apiKey,
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
+  });
+
+  return readSarvamJsonResponse(response) as Promise<ResponseBody>;
+};
+
+const readSarvamJsonResponse = async (response: Response): Promise<unknown> => {
+  const body = await readPossiblyJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(`Sarvam API failed with ${response.status}: ${formatSarvamResponseBody(body)}`);
+  }
+
+  return body;
+};
+
+const readPossiblyJsonResponse = async (response: Response): Promise<unknown> => {
+  const text = await response.text();
+
+  if (text.length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+};
+
+const formatSarvamResponseBody = (body: unknown): string => {
+  if (typeof body === "string") {
+    return body;
+  }
+
+  return JSON.stringify(body);
+};
+
+const getSarvamSignedUrl = (
+  urls: Record<string, SarvamSignedUrlDetails>,
+  fileName: string,
+): SarvamSignedUrlDetails => {
+  const url = urls[fileName] ?? Object.values(urls)[0];
+
+  if (url === undefined) {
+    throw new Error(`Sarvam did not return a signed URL for ${fileName}.`);
+  }
+
+  return url;
+};
+
+const createSarvamUploadHeaders = (
+  metadata: Record<string, unknown> | null | undefined,
+  contentType: string,
+  storageContainerType: string | undefined,
+): Headers => {
+  const headers = new Headers();
+
+  if (metadata !== null && metadata !== undefined) {
+    for (const [key, value] of Object.entries(metadata)) {
+      if (value !== null && value !== undefined) {
+        headers.set(key, String(value));
+      }
+    }
+  }
+
+  if (!headers.has("Content-Type") && contentType.length > 0) {
+    headers.set("Content-Type", contentType);
+  }
+
+  if (storageContainerType?.toLowerCase().startsWith("azure") === true && !headers.has("x-ms-blob-type")) {
+    headers.set("x-ms-blob-type", "BlockBlob");
+  }
+
+  return headers;
+};
+
+const getSarvamOutputFileNames = (status: SarvamBatchStatusResponse): string[] => {
+  const outputFileNames = status.job_details
+    ?.filter((detail) => detail.state === undefined || detail.state === "Success")
+    .flatMap((detail) => detail.outputs ?? [])
+    .map((output) => output.file_name)
+    .filter((fileName) => fileName.length > 0) ?? [];
+
+  if (outputFileNames.length === 0) {
+    const failedDetail = status.job_details?.find((detail) => detail.error_message !== null && detail.error_message !== undefined);
+    throw new Error(failedDetail?.error_message ?? "Sarvam batch job completed without an output file.");
+  }
+
+  return outputFileNames;
+};
+
+const createSarvamAudioFileName = (mimeType: string): string => {
+  const extension = getAudioFileExtension(mimeType);
+  return `heysnap-recording-${Date.now()}.${extension}`;
+};
+
+const getAudioFileExtension = (mimeType: string): string => {
+  const normalizedMimeType = mimeType.toLowerCase();
+
+  if (normalizedMimeType.includes("ogg")) {
+    return "ogg";
+  }
+
+  if (normalizedMimeType.includes("mp4")) {
+    return "m4a";
+  }
+
+  if (normalizedMimeType.includes("mpeg") || normalizedMimeType.includes("mp3")) {
+    return "mp3";
+  }
+
+  if (normalizedMimeType.includes("wav")) {
+    return "wav";
+  }
+
+  return "webm";
+};
+
+const wait = (durationMs: number): Promise<void> => new Promise((resolve) => {
+  window.setTimeout(resolve, durationMs);
+});
 
 const FinderBody = ({
   error,
