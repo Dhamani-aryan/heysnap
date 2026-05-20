@@ -621,6 +621,7 @@ describe("cloud server computer access sessions", () => {
     });
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
+      browserControlWebSocketUrl: `/gateway/computers/${computer.id}/browser-control`,
       agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
       capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
     });
@@ -1281,6 +1282,7 @@ interface AccessSessionResponse {
   };
   readonly routes: {
     readonly filesystemWebSocketUrl: string;
+    readonly browserControlWebSocketUrl: string;
     readonly agentBaseUrl: string;
     readonly capabilitiesBaseUrl: string;
   };
