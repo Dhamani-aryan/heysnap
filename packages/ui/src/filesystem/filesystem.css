@@ -1322,6 +1322,88 @@ button:disabled {
   overflow: hidden;
 }
 
+.filesystem-hover-grip {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 9;
+  display: grid;
+  width: 42px;
+  height: 10px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 999px;
+  background: rgba(8, 8, 8, 0.94);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 6px 16px rgba(0, 0, 0, 0.14);
+  transform: translateX(-50%);
+  transform-origin: center bottom;
+  transition:
+    width 170ms ease,
+    height 170ms ease,
+    border-width 170ms ease,
+    border-color 170ms ease,
+    background-color 170ms ease,
+    box-shadow 170ms ease;
+}
+
+.filesystem-hover-grip:hover,
+.filesystem-hover-grip[data-expanded="true"] {
+  width: 92px;
+  height: 30px;
+  border-width: 0.5px;
+  border-color: rgba(150, 150, 150, 0.58);
+  background: rgba(6, 6, 6, 0.96);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 8px 20px rgba(0, 0, 0, 0.16);
+}
+
+.filesystem-hover-grip-dots {
+  display: grid;
+  grid-template-columns: repeat(8, 3px);
+  grid-auto-rows: 3px;
+  gap: 0 3px;
+  opacity: 0;
+  transform: scale(0.76);
+  transition:
+    opacity 120ms ease,
+    transform 170ms ease;
+}
+
+.filesystem-hover-grip:hover .filesystem-hover-grip-dots,
+.filesystem-hover-grip[data-expanded="true"] .filesystem-hover-grip-dots {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.filesystem-hover-grip-dots span {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(166, 166, 166, 0.78);
+}
+
+:root:not(.dark) .filesystem-hover-grip {
+  border-color: rgba(255, 255, 255, 0.48);
+  background: rgba(8, 8, 8, 0.94);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 6px 16px rgba(0, 0, 0, 0.14);
+}
+
+:root:not(.dark) .filesystem-hover-grip:hover {
+  border-color: rgba(150, 150, 150, 0.58);
+  background: rgba(6, 6, 6, 0.96);
+}
+
+:root:not(.dark) .filesystem-hover-grip-dots span {
+  background: rgba(166, 166, 166, 0.78);
+}
+
 .split-resizer {
   position: relative;
   display: flex;
