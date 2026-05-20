@@ -292,6 +292,7 @@ const toListingErrorMessage = (message: string | null): string | null => {
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly agentBaseUrl?: string;
+  readonly sarvamApiKey?: string;
   readonly browserControlStatus?: BrowserControlStatus;
   readonly browserWindowError?: string | null;
   readonly browserWindowId?: number | null;
@@ -336,6 +337,7 @@ export interface FilesystemExplorerProps {
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   agentBaseUrl = "http://localhost:4000/agent",
+  sarvamApiKey,
   browserControlStatus,
   browserWindowError = null,
   browserWindowId = null,
@@ -1177,6 +1179,7 @@ export function FilesystemExplorer({
         isRightWorkAreaOpen={isRightWorkAreaOpen}
         onLeftPaneRatioChange={handleLeftPaneRatioChange}
         agentBaseUrl={agentBaseUrl}
+        sarvamApiKey={sarvamApiKey}
         selectedThreadId={selectedThreadId}
         currentPath={currentPath}
         currentDirectoryName={currentDirectoryName}
@@ -3410,6 +3413,7 @@ const DesktopSplitPane = ({
   isRightWorkAreaOpen,
   onLeftPaneRatioChange,
   agentBaseUrl,
+  sarvamApiKey,
   selectedThreadId,
   currentPath,
   currentDirectoryName,
@@ -3425,6 +3429,7 @@ const DesktopSplitPane = ({
   readonly isRightWorkAreaOpen: boolean;
   readonly onLeftPaneRatioChange: (ratio: number) => void;
   readonly agentBaseUrl: string;
+  readonly sarvamApiKey?: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly currentDirectoryName: string;

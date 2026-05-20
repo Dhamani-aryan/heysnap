@@ -38,6 +38,7 @@ export interface CloudAppProps {
   readonly cloudServerUrl?: string;
   readonly browserControlExtensionId?: string;
   readonly route?: CloudAppRoute;
+  readonly sarvamApiKey?: string;
   readonly onRouteChange?: (route: CloudAppRoute, options?: CloudRouteChangeOptions) => void;
   readonly onMachineCreateStarted?: () => void;
   readonly storageKey?: string;
@@ -55,6 +56,7 @@ export interface CloudWorkspaceRendererProps {
   readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
+  readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
@@ -109,6 +111,7 @@ export function CloudAppCore(props: CloudAppCoreProps): React.ReactElement {
 function CloudAppContent({
   browserControlExtensionId,
   route,
+  sarvamApiKey,
   onRouteChange,
   onMachineCreateStarted,
   renderWorkspace,
@@ -476,6 +479,7 @@ function CloudAppContent({
           path: workspaceSession.accessSession.routes.filesystemWebSocketUrl,
           token: workspaceSession.accessSession.accessSession.token,
         }),
+        sarvamApiKey,
         selectedThreadId,
         workspacePanel: selectedWorkspacePanel,
         onSelectThread: selectThread,

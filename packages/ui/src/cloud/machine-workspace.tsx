@@ -39,6 +39,7 @@ export interface MachineWorkspaceProps {
   readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
+  readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
@@ -59,6 +60,7 @@ export function MachineWorkspace({
   capabilitiesBaseUrl,
   computer,
   filesystemWebsocketUrl,
+  sarvamApiKey,
   selectedThreadId = null,
   workspacePanel = "chat",
   onSelectThread,
@@ -1165,6 +1167,7 @@ export function MachineWorkspace({
           <FilesystemExplorer
             websocketUrl={filesystemWebsocketUrl}
             agentBaseUrl={agentBaseUrl}
+            sarvamApiKey={sarvamApiKey}
             browserControlStatus={browserControlStatus}
             browserWindowError={browserWindowError}
             browserWindowId={browserWindowId}
