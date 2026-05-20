@@ -511,6 +511,12 @@ class CodexLiveTurnMapper {
       case "turn/completed":
         return this.handleTurnCompleted(notification.params);
       case "error":
+        if (isRetryingErrorNotification(notification.params)) {
+          return {
+            events: [this.toAgentWarningEvent(notification.params)],
+            done: false,
+          };
+        }
         return {
           events: [this.toAgentErrorEvent(notification.params)],
           done: true,
@@ -904,15 +910,24 @@ class CodexLiveTurnMapper {
     };
   }
 
+  private toAgentWarningEvent(params: unknown): AgentRunEvent {
+    return {
+      ...this.nextBase("runtime.warning"),
+      warning: this.toAgentErrorPayload(params),
+    };
+  }
+
   private toAgentErrorPayload(params: unknown): AgentErrorPayload {
     const payload = asRecord(params);
     const error = asRecord(payload?.["error"]);
     const message = stringField(error, "message") ?? "Codex turn failed";
+    const attempts = retryAttemptsFromMessage(message);
 
     return {
       phase: "server",
       message,
-      canRetry: true,
+      canRetry: booleanField(payload, "willRetry") ?? false,
+      ...(attempts !== undefined ? { attempts } : {}),
     };
   }
 }
@@ -1364,6 +1379,8 @@ const runtimeItemType = (item: CodexThreadItem): AgentRuntimeItem["itemType"] =>
       return "web_search";
     case "imageView":
       return "image_view";
+    case "contextCompaction":
+      return "context_compaction";
     default:
       return "custom";
   }
@@ -1429,6 +1446,19 @@ const threadTimestampMs = (thread: CodexThread): number =>
 
 const turnTimestampMs = (turn: CodexTurn, thread: CodexThread): number =>
   Math.round((turn.startedAt ?? turn.completedAt ?? thread.updatedAt ?? thread.createdAt) * 1000);
+
+const isRetryingErrorNotification = (params: unknown): boolean =>
+  booleanField(asRecord(params), "willRetry") === true;
+
+const retryAttemptsFromMessage = (message: string): number | undefined => {
+  const match = /\b(\d+)\/\d+\b/u.exec(message);
+  if (match?.[1] === undefined) {
+    return undefined;
+  }
+
+  const attempts = Number.parseInt(match[1], 10);
+  return Number.isInteger(attempts) ? attempts : undefined;
+};
 
 const readThreadOriginator = async (path: string | null | undefined): Promise<string | undefined> => {
   if (path === undefined || path === null || path === "") {
@@ -1497,6 +1527,11 @@ const stringField = (record: Record<string, unknown> | undefined, key: string): 
 const numberField = (record: Record<string, unknown> | undefined, key: string): number | undefined => {
   const value = record?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+};
+
+const booleanField = (record: Record<string, unknown> | undefined, key: string): boolean | undefined => {
+  const value = record?.[key];
+  return typeof value === "boolean" ? value : undefined;
 };
 
 const normalizeSetupInput = (input: SetupInput): NormalizedSetupInput => {

@@ -995,6 +995,170 @@ describe("codex agent harness", () => {
     });
   });
 
+  it("keeps retrying Codex stream errors alive as warnings", async () => {
+    let client: FakeCodexClient;
+    client = new FakeCodexClient((method) => {
+      if (method === "thread/resume") {
+        return {
+          thread: createCodexThread({
+            id: "thread-retry",
+            preview: "Retry thread",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 20,
+          }),
+        };
+      }
+
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          client.emit(createNotification("error", {
+            threadId: "thread-retry",
+            turnId: "turn-retry",
+            willRetry: true,
+            error: {
+              message: "Reconnecting... 1/5",
+              codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+            },
+          }));
+          client.emit(createNotification("item/agentMessage/delta", {
+            threadId: "thread-retry",
+            turnId: "turn-retry",
+            itemId: "assistant-retry",
+            delta: "Recovered",
+          }));
+          client.emit(createNotification("turn/completed", {
+            threadId: "thread-retry",
+            turn: { id: "turn-retry", status: "completed" },
+          }));
+        });
+        return { turn: { id: "turn-retry", status: "inProgress", items: [] } };
+      }
+
+      if (method === "thread/read") {
+        return {
+          thread: createCodexThread({
+            id: "thread-retry",
+            preview: "Retry thread",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 30,
+            turns: [createUserTurn("turn-retry")],
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected method ${method}`);
+    });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    const events = await collectAsyncIterable(harness.sendMessage({
+      threadId: "thread-retry",
+      path: "Projects/app",
+      content: [{ type: "text", content: "Continue" }],
+    }));
+
+    expect(events.map((event) => event.type)).toEqual([
+      "turn.started",
+      "runtime.warning",
+      "content.delta",
+      "turn.completed",
+      "thread.updated",
+    ]);
+    expect(events[1]).toMatchObject({
+      type: "runtime.warning",
+      warning: {
+        message: "Reconnecting... 1/5",
+        canRetry: true,
+        attempts: 1,
+      },
+    });
+  });
+
+  it("maps live context compaction items", async () => {
+    let client: FakeCodexClient;
+    client = new FakeCodexClient((method) => {
+      if (method === "thread/resume") {
+        return {
+          thread: createCodexThread({
+            id: "thread-compact",
+            preview: "Compact thread",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 20,
+          }),
+        };
+      }
+
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          client.emit(createNotification("item/started", {
+            threadId: "thread-compact",
+            turnId: "turn-compact",
+            item: { type: "contextCompaction", id: "compact-live" },
+          }));
+          client.emit(createNotification("item/completed", {
+            threadId: "thread-compact",
+            turnId: "turn-compact",
+            item: { type: "contextCompaction", id: "compact-live" },
+          }));
+          client.emit(createNotification("turn/completed", {
+            threadId: "thread-compact",
+            turn: { id: "turn-compact", status: "completed" },
+          }));
+        });
+        return { turn: { id: "turn-compact", status: "inProgress", items: [] } };
+      }
+
+      if (method === "thread/read") {
+        return {
+          thread: createCodexThread({
+            id: "thread-compact",
+            preview: "Compact thread",
+            cwd: "/workspace/Desktop/Projects/app",
+            createdAt: 10,
+            updatedAt: 30,
+            turns: [createUserTurn("turn-compact")],
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected method ${method}`);
+    });
+    const harness = new CodexAgentHarness({
+      filesystemRoot: "/workspace/Desktop",
+      client,
+    });
+
+    const events = await collectAsyncIterable(harness.sendMessage({
+      threadId: "thread-compact",
+      path: "Projects/app",
+      content: [{ type: "text", content: "Continue" }],
+    }));
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "item.started",
+        item: expect.objectContaining({
+          id: "compact-live",
+          itemType: "context_compaction",
+          title: "Context compacted",
+        }),
+      }),
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({
+          id: "compact-live",
+          itemType: "context_compaction",
+          title: "Context compacted",
+        }),
+      }),
+    ]));
+  });
+
   it("resumes an existing Codex thread without overriding cwd", async () => {
     let client: FakeCodexClient;
     client = new FakeCodexClient((method) => {
