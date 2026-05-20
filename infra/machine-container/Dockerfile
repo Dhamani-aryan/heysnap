@@ -30,7 +30,7 @@ RUN apt-get update \
 RUN ln -sf /usr/local/bin/node /usr/bin/node \
   && corepack enable \
   && corepack prepare pnpm@9.15.2 --activate \
-  && npm install -g @openai/codex @heysnap-ai/web vercel@latest heysnap-image-gen@0.1.1 docx pptxgenjs react-icons react react-dom sharp
+  && npm install -g @openai/codex @heysnap-ai/web @heysnap-ai/chrome-controller-cli vercel@latest heysnap-image-gen@0.1.1 docx pptxgenjs react-icons react react-dom sharp
 
 RUN install -d -m 0755 /opt/ank1015/venvs \
   && python -m venv /opt/ank1015/venvs/default \
