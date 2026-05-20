@@ -19,6 +19,8 @@ import {
 } from "./browser-control-extension";
 import {
   BrowserControlBridge,
+  type BrowserControlAttachmentMetadata,
+  type BrowserControlAttachmentReader,
   type BrowserControlExecutor,
   type BrowserControlStatus,
 } from "./browser-control-bridge";
@@ -30,6 +32,7 @@ const DEFAULT_BROWSER_WINDOW_URL = "chrome://newtab";
 const BROWSER_SCREENCAST_PORT_NAME = "heysnap-cdp-screencast";
 const BROWSER_TAB_EVENTS_PORT_NAME = "heysnap-tab-events";
 const CHROME_DEBUGGER_PROTOCOL_VERSION = "1.3";
+const BROWSER_CONTROL_ATTACHMENT_CHUNK_BYTES = 512 * 1024;
 
 export interface MachineWorkspaceProps {
   readonly agentBaseUrl: string;
@@ -772,10 +775,12 @@ export function MachineWorkspace({
     }
 
     const result = await executeBrowserControlExtensionCommand({
+      attachments: input.attachments,
       command: input.command,
       executeDebuggerCommand: executeBrowserDebuggerCommand,
       executeExtensionCommand: executeBrowserExtensionCommand,
       params: input.params,
+      readAttachment: input.readAttachment,
       signal: input.signal,
       timeoutMs: input.timeoutMs,
       windowId,
@@ -1265,6 +1270,7 @@ type BrowserScreencastMessage =
     };
 
 type BrowserControlCommandInput = {
+  readonly attachments?: readonly BrowserControlAttachmentMetadata[];
   readonly command: string;
   readonly executeDebuggerCommand: BrowserDebuggerCommandExecutor;
   readonly executeExtensionCommand: (
@@ -1273,6 +1279,7 @@ type BrowserControlCommandInput = {
     signal: AbortSignal,
   ) => Promise<unknown>;
   readonly params: unknown;
+  readonly readAttachment?: BrowserControlAttachmentReader;
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
   readonly windowId: number;
@@ -1303,19 +1310,37 @@ type BrowserControlTab = {
 type WaitUntilState = "domcontentloaded" | "complete" | "networkIdle";
 
 type WaitForLoadOptions = {
+  readonly expectedUrl?: string;
   readonly timeoutMs: number;
   readonly waitUntil: WaitUntilState;
 };
 
+type BrowserPageLoadState = {
+  readonly href: string;
+  readonly readyState: string;
+  readonly resourceCount: number;
+  readonly title: string;
+};
+
+type BrowserTabLoadState = {
+  readonly pendingUrl?: string;
+};
+
 const executeBrowserControlExtensionCommand = async ({
+  attachments = [],
   command,
   executeDebuggerCommand,
   executeExtensionCommand,
   params,
+  readAttachment,
   signal,
   timeoutMs,
   windowId,
 }: BrowserControlCommandInput): Promise<unknown> => {
+  if (attachments.length > 0 && command !== "tab.evaluate") {
+    throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENTS_UNSUPPORTED", "Browser-control attachments are only supported for tab.evaluate.");
+  }
+
   switch (command) {
     case "getTabs":
       return executeExtensionCommand("tabs.query", {
@@ -1401,6 +1426,16 @@ const executeBrowserControlExtensionCommand = async ({
     }
     case "tab.evaluate": {
       const parsed = readRequiredObject(params, "tab.evaluate.params");
+      if (attachments.length > 0) {
+        await hydrateBrowserControlAttachments({
+          attachments,
+          executeDebuggerCommand,
+          params: parsed,
+          readAttachment,
+          signal,
+        });
+      }
+
       return evaluateInBrowserTab({
         executeDebuggerCommand,
         params: parsed,
@@ -1444,7 +1479,6 @@ const createBrowserTabs = async ({
   }
 
   const createdTabs: unknown[] = [];
-  const waitForLoad = parseWaitForLoadOptions(parsed["waitForLoad"], timeoutMs);
   const loads: unknown[] = [];
   for (const rawTab of rawTabs) {
     const tab = readCreateNewTabTarget(rawTab);
@@ -1457,7 +1491,12 @@ const createBrowserTabs = async ({
     }, signal);
     createdTabs.push(createdTab);
 
-    if (waitForLoad !== null && tab.url !== undefined) {
+    if (tab.url !== undefined) {
+      const waitForLoad = parseWaitForLoadOptions(parsed["waitForLoad"], timeoutMs, tab.url);
+      if (waitForLoad === null) {
+        continue;
+      }
+
       loads.push(await waitForBrowserLoad({
         executeDebuggerCommand,
         executeExtensionCommand,
@@ -1686,7 +1725,7 @@ const withOptionalLoadWait = async ({
   readonly timeoutMs?: number;
   readonly windowId?: number;
 }): Promise<unknown> => {
-  const waitForLoad = parseWaitForLoadOptions(params["waitForLoad"], timeoutMs);
+  const waitForLoad = parseWaitForLoadOptions(params["waitForLoad"], timeoutMs, readWaitForLoadExpectedUrl(params));
 
   if (waitForLoad === null) {
     return result;
@@ -1742,27 +1781,28 @@ const waitForBrowserLoad = async ({
 
   for (;;) {
     throwIfAborted(signal);
-    const state = await getBrowserLoadState({ executeDebuggerCommand, signal, tabId });
+    const state = await getBrowserLoadState({ executeDebuggerCommand, executeExtensionCommand, signal, tabId });
     const elapsedMs = Date.now() - startedAt;
+    const pageState = state.page;
+    const isWaitingForNavigationCommit = shouldWaitForNavigationCommit(pageState.href, options.expectedUrl, state.tab.pendingUrl);
 
-    if (options.waitUntil === "domcontentloaded" && (state.readyState === "interactive" || state.readyState === "complete")) {
-      return { ...state, elapsedMs, tabId, waited: true, waitUntil: options.waitUntil };
-    }
-
-    if (options.waitUntil === "complete" && state.readyState === "complete") {
-      return { ...state, elapsedMs, tabId, waited: true, waitUntil: options.waitUntil };
-    }
-
-    if (options.waitUntil === "networkIdle" && state.readyState === "complete") {
-      if (lastResourceCount === state.resourceCount) {
+    if (isWaitingForNavigationCommit) {
+      lastResourceCount = null;
+      resourceCountStableSince = null;
+    } else if (options.waitUntil === "domcontentloaded" && (pageState.readyState === "interactive" || pageState.readyState === "complete")) {
+      return { ...pageState, elapsedMs, tabId, waited: true, waitUntil: options.waitUntil };
+    } else if (options.waitUntil === "complete" && pageState.readyState === "complete") {
+      return { ...pageState, elapsedMs, tabId, waited: true, waitUntil: options.waitUntil };
+    } else if (options.waitUntil === "networkIdle" && pageState.readyState === "complete") {
+      if (lastResourceCount === pageState.resourceCount) {
         resourceCountStableSince ??= Date.now();
       } else {
-        lastResourceCount = state.resourceCount;
+        lastResourceCount = pageState.resourceCount;
         resourceCountStableSince = Date.now();
       }
 
       if (resourceCountStableSince !== null && Date.now() - resourceCountStableSince >= 750) {
-        return { ...state, elapsedMs, tabId, waited: true, waitUntil: options.waitUntil };
+        return { ...pageState, elapsedMs, tabId, waited: true, waitUntil: options.waitUntil };
       }
     }
 
@@ -1776,18 +1816,24 @@ const waitForBrowserLoad = async ({
 
 const getBrowserLoadState = async ({
   executeDebuggerCommand,
+  executeExtensionCommand,
   signal,
   tabId,
 }: {
   readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly executeExtensionCommand: BrowserControlCommandInput["executeExtensionCommand"];
   readonly signal: AbortSignal;
   readonly tabId: number;
 }): Promise<{
-  readonly href: string;
-  readonly readyState: string;
-  readonly resourceCount: number;
-  readonly title: string;
+  readonly page: BrowserPageLoadState;
+  readonly tab: BrowserTabLoadState;
 }> => {
+  const tab = readBrowserTabLoadState(
+    await executeExtensionCommand("chrome.call", {
+      api: "tabs.get",
+      args: [tabId],
+    }, signal),
+  );
   const result = await executeDebuggerCommand({
     tabId,
     method: "Runtime.evaluate",
@@ -1801,11 +1847,126 @@ const getBrowserLoadState = async ({
   const state = readRequiredObject(value, "loadState");
 
   return {
-    href: readRequiredString(state["href"], "loadState.href"),
-    readyState: readRequiredString(state["readyState"], "loadState.readyState"),
-    resourceCount: readRequiredNumber(state["resourceCount"], "loadState.resourceCount"),
-    title: typeof state["title"] === "string" ? state["title"] : "",
+    page: {
+      href: readRequiredString(state["href"], "loadState.href"),
+      readyState: readRequiredString(state["readyState"], "loadState.readyState"),
+      resourceCount: readRequiredNumber(state["resourceCount"], "loadState.resourceCount"),
+      title: typeof state["title"] === "string" ? state["title"] : "",
+    },
+    tab,
   };
+};
+
+const hydrateBrowserControlAttachments = async ({
+  attachments,
+  executeDebuggerCommand,
+  params,
+  readAttachment,
+  signal,
+}: {
+  readonly attachments: readonly BrowserControlAttachmentMetadata[];
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly params: Record<string, unknown>;
+  readonly readAttachment: BrowserControlAttachmentReader | undefined;
+  readonly signal: AbortSignal;
+}): Promise<void> => {
+  if (readAttachment === undefined) {
+    throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENTS_UNSUPPORTED", "Browser-control attachment reader is unavailable.");
+  }
+
+  const tabId = readRequiredNumber(params["tabId"], "tab.evaluate.params.tabId");
+  await evaluateBrowserControlAttachmentScript({
+    executeDebuggerCommand,
+    expression: browserControlFilesHelperExpression,
+    label: "browserControlFiles.install",
+    signal,
+    tabId,
+  });
+
+  for (const attachment of attachments) {
+    await evaluateBrowserControlAttachmentScript({
+      executeDebuggerCommand,
+      expression: `window.__heysnapFiles.__begin(${JSON.stringify(attachment)})`,
+      label: `browserControlFiles.${attachment.id}.begin`,
+      signal,
+      tabId,
+    });
+
+    let offset = 0;
+    for (;;) {
+      throwIfAborted(signal);
+      const chunk = await readAttachment({
+        attachmentId: attachment.id,
+        length: BROWSER_CONTROL_ATTACHMENT_CHUNK_BYTES,
+        offset,
+        signal,
+      });
+
+      if (chunk.offset !== offset) {
+        throw new Error(`Browser-control attachment ${attachment.id} returned an unexpected chunk offset.`);
+      }
+
+      const byteLength = getBase64ByteLength(chunk.dataBase64);
+      await evaluateBrowserControlAttachmentScript({
+        executeDebuggerCommand,
+        expression: `window.__heysnapFiles.__append(${JSON.stringify(attachment.id)}, ${JSON.stringify(chunk.dataBase64)})`,
+        label: `browserControlFiles.${attachment.id}.append`,
+        signal,
+        tabId,
+      });
+      offset += byteLength;
+
+      if (chunk.done) {
+        break;
+      }
+
+      if (byteLength === 0) {
+        throw new Error(`Browser-control attachment ${attachment.id} returned an empty non-final chunk.`);
+      }
+    }
+
+    if (offset !== attachment.size) {
+      throw new Error(`Browser-control attachment ${attachment.id} size mismatch after streaming.`);
+    }
+
+    await evaluateBrowserControlAttachmentScript({
+      executeDebuggerCommand,
+      expression: `window.__heysnapFiles.__finish(${JSON.stringify(attachment.id)})`,
+      label: `browserControlFiles.${attachment.id}.finish`,
+      signal,
+      tabId,
+    });
+  }
+};
+
+const evaluateBrowserControlAttachmentScript = async ({
+  executeDebuggerCommand,
+  expression,
+  label,
+  signal,
+  tabId,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly expression: string;
+  readonly label: string;
+  readonly signal: AbortSignal;
+  readonly tabId: number;
+}): Promise<void> => {
+  const result = await executeDebuggerCommand({
+    tabId,
+    method: "Runtime.evaluate",
+    params: {
+      awaitPromise: true,
+      expression,
+      returnByValue: true,
+    },
+    signal,
+  });
+  const cdpResult = readRequiredObject(result, `${label}.result`);
+
+  if (cdpResult["exceptionDetails"] !== undefined) {
+    throw new Error(`${label} failed while hydrating browser-control attachments.`);
+  }
 };
 
 const evaluateInBrowserTab = async ({
@@ -1844,16 +2005,17 @@ const evaluateInBrowserTab = async ({
   };
 };
 
-const parseWaitForLoadOptions = (value: unknown, requestTimeoutMs: number | undefined): WaitForLoadOptions | null => {
+const parseWaitForLoadOptions = (
+  value: unknown,
+  requestTimeoutMs: number | undefined,
+  expectedUrl?: string,
+): WaitForLoadOptions | null => {
   if (value === undefined || value === false) {
     return null;
   }
 
   if (value === true) {
-    return {
-      timeoutMs: requestTimeoutMs ?? 30_000,
-      waitUntil: "complete",
-    };
+    return createWaitForLoadOptions(requestTimeoutMs ?? 30_000, "complete", expectedUrl);
   }
 
   const options = readRequiredObject(value, "waitForLoad");
@@ -1861,10 +2023,51 @@ const parseWaitForLoadOptions = (value: unknown, requestTimeoutMs: number | unde
     ? "complete"
     : readWaitUntil(options["waitUntil"], "waitForLoad.waitUntil");
 
-  return {
-    timeoutMs: readOptionalNumber(options["timeoutMs"], "waitForLoad.timeoutMs") ?? requestTimeoutMs ?? 30_000,
+  return createWaitForLoadOptions(
+    readOptionalNumber(options["timeoutMs"], "waitForLoad.timeoutMs") ?? requestTimeoutMs ?? 30_000,
     waitUntil,
-  };
+    expectedUrl,
+  );
+};
+
+const createWaitForLoadOptions = (
+  timeoutMs: number,
+  waitUntil: WaitUntilState,
+  expectedUrl: string | undefined,
+): WaitForLoadOptions => {
+  if (expectedUrl !== undefined) {
+    return { expectedUrl, timeoutMs, waitUntil };
+  }
+
+  return { timeoutMs, waitUntil };
+};
+
+const readWaitForLoadExpectedUrl = (params: Record<string, unknown>): string | undefined => {
+  const url = params["url"];
+
+  return typeof url === "string" && url.trim().length > 0 ? url : undefined;
+};
+
+export const shouldWaitForNavigationCommit = (
+  currentHref: string,
+  expectedUrl: string | undefined,
+  pendingUrl?: string,
+): boolean => {
+  if (pendingUrl !== undefined && pendingUrl.trim().length > 0) {
+    return true;
+  }
+
+  if (expectedUrl === undefined) {
+    return false;
+  }
+
+  const normalizedExpectedUrl = expectedUrl.trim().toLowerCase();
+
+  if (normalizedExpectedUrl.length === 0 || normalizedExpectedUrl === "about:blank") {
+    return false;
+  }
+
+  return currentHref === "" || currentHref === "about:blank";
 };
 
 const readWaitUntil = (value: unknown, label: string): WaitUntilState => {
@@ -1917,6 +2120,145 @@ const throwIfAborted = (signal: AbortSignal): void => {
   }
 };
 
+const browserControlFilesHelperExpression = `(() => {
+  const VERSION = 1;
+  const existing = window.__heysnapFiles;
+  if (existing !== undefined && existing.version === VERSION) {
+    return true;
+  }
+
+  const records = new Map();
+  const requireRecord = (id) => {
+    const record = records.get(id);
+    if (record === undefined) {
+      throw new Error("Browser-control file not found: " + id);
+    }
+    return record;
+  };
+  const decodeBase64 = (dataBase64) => {
+    const binary = atob(dataBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  };
+  const resolveTarget = (selectorOrElement) => {
+    if (typeof selectorOrElement === "string") {
+      const element = document.querySelector(selectorOrElement);
+      if (element === null) {
+        throw new Error("Browser-control file target not found: " + selectorOrElement);
+      }
+      return element;
+    }
+    if (selectorOrElement instanceof Element) {
+      return selectorOrElement;
+    }
+    throw new Error("Browser-control file target must be a selector or Element.");
+  };
+  const getIds = (ids) => {
+    if (ids === undefined) {
+      return Array.from(records.keys());
+    }
+    if (Array.isArray(ids)) {
+      return ids;
+    }
+    return [ids];
+  };
+  const makeFile = (id) => {
+    const record = requireRecord(id);
+    if (record.done !== true) {
+      throw new Error("Browser-control file is not fully loaded: " + id);
+    }
+    return new File(record.parts, record.name, {
+      type: record.mimeType,
+      lastModified: record.lastModified,
+    });
+  };
+  const api = {
+    version: VERSION,
+    __begin(metadata) {
+      records.set(metadata.id, {
+        done: false,
+        lastModified: Date.now(),
+        mimeType: metadata.mimeType || "application/octet-stream",
+        name: metadata.name || metadata.id,
+        parts: [],
+        size: metadata.size,
+      });
+      return true;
+    },
+    __append(id, dataBase64) {
+      const record = requireRecord(id);
+      record.parts.push(decodeBase64(dataBase64));
+      return true;
+    },
+    __finish(id) {
+      const record = requireRecord(id);
+      record.done = true;
+      return true;
+    },
+    async get(id) {
+      return makeFile(id);
+    },
+    async getAll(ids) {
+      return getIds(ids).map((id) => makeFile(id));
+    },
+    async setInputFiles(selectorOrElement, ids) {
+      const target = resolveTarget(selectorOrElement);
+      const files = await api.getAll(ids);
+      const dataTransfer = new DataTransfer();
+      for (const file of files) {
+        dataTransfer.items.add(file);
+      }
+      target.files = dataTransfer.files;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      return { count: files.length };
+    },
+    async dropFiles(selectorOrElement, ids) {
+      const target = resolveTarget(selectorOrElement);
+      const files = await api.getAll(ids);
+      const dataTransfer = new DataTransfer();
+      for (const file of files) {
+        dataTransfer.items.add(file);
+      }
+      const event = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+      });
+      target.dispatchEvent(event);
+      return { count: files.length };
+    },
+    clear(ids) {
+      if (ids === undefined) {
+        records.clear();
+        return true;
+      }
+      for (const id of getIds(ids)) {
+        records.delete(id);
+      }
+      return true;
+    },
+  };
+
+  Object.defineProperty(window, "__heysnapFiles", {
+    configurable: true,
+    value: api,
+  });
+  return true;
+})()`;
+
+const getBase64ByteLength = (value: string): number => {
+  if (value.length === 0) {
+    return 0;
+  }
+
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return Math.floor(value.length * 3 / 4) - padding;
+};
+
 const rememberCurrentActiveTab = async ({
   executeExtensionCommand,
   signal,
@@ -1966,6 +2308,13 @@ const readBrowserControlTabUrl = (value: unknown): string | undefined => {
   }
 
   return readOptionalString((value as Record<string, unknown>)["url"], "tab.url");
+};
+
+const readBrowserTabLoadState = (value: unknown): BrowserTabLoadState => {
+  const parsed = readRequiredObject(value, "tabs.get.result");
+  const pendingUrl = readOptionalString(parsed["pendingUrl"], "tabs.get.result.pendingUrl");
+
+  return pendingUrl === undefined ? {} : { pendingUrl };
 };
 
 const readNavigationHistory = (value: unknown): {

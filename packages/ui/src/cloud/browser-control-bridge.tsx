@@ -12,6 +12,8 @@ export interface BrowserControlExecutorInput {
   readonly params: unknown;
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
+  readonly attachments?: readonly BrowserControlAttachmentMetadata[];
+  readonly readAttachment?: BrowserControlAttachmentReader;
 }
 
 export type BrowserControlExecutor = (
@@ -45,19 +47,67 @@ interface PendingBrowserControlRequest {
   readonly abortController: AbortController;
 }
 
-type BrowserControlServerMessage =
+interface PendingBrowserControlAttachmentRead {
+  readonly reject: (error: Error) => void;
+  readonly resolve: (chunk: BrowserControlAttachmentChunk) => void;
+}
+
+export type BrowserControlServerMessage =
   | {
       readonly type: "request";
       readonly requestId: string;
       readonly command: BrowserControlCommandName;
       readonly params?: unknown;
       readonly timeoutMs?: number;
+      readonly attachments?: readonly BrowserControlAttachmentMetadata[];
     }
   | {
       readonly type: "cancel";
       readonly requestId: string;
       readonly reason?: string;
+    }
+  | {
+      readonly type: "attachment.chunk";
+      readonly requestId: string;
+      readonly chunkRequestId: string;
+      readonly attachmentId: string;
+      readonly offset: number;
+      readonly dataBase64: string;
+      readonly done: boolean;
+    }
+  | {
+      readonly type: "attachment.error";
+      readonly requestId: string;
+      readonly chunkRequestId: string;
+      readonly attachmentId: string;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
     };
+
+export interface BrowserControlAttachmentMetadata {
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size: number;
+}
+
+export interface BrowserControlAttachmentChunk {
+  readonly attachmentId: string;
+  readonly dataBase64: string;
+  readonly done: boolean;
+  readonly offset: number;
+}
+
+export type BrowserControlAttachmentReader = (
+  input: {
+    readonly attachmentId: string;
+    readonly length: number;
+    readonly offset: number;
+    readonly signal: AbortSignal;
+  },
+) => Promise<BrowserControlAttachmentChunk>;
 
 export function BrowserControlBridge({
   websocketUrl,
@@ -92,6 +142,7 @@ export function BrowserControlBridge({
     let webSocket: WebSocket | null = null;
     let isCancelled = false;
     const pendingRequests = new Map<string, PendingBrowserControlRequest>();
+    const pendingAttachmentReads = new Map<string, PendingBrowserControlAttachmentRead>();
     const setStatus = (status: BrowserControlStatus): void => {
       if (!isCancelled) {
         onStatusChange?.(status);
@@ -103,6 +154,12 @@ export function BrowserControlBridge({
         pendingRequest.abortController.abort(reason);
       }
       pendingRequests.clear();
+    };
+    const closePendingAttachmentReads = (reason: string): void => {
+      for (const [chunkRequestId, pendingRead] of pendingAttachmentReads) {
+        pendingAttachmentReads.delete(chunkRequestId);
+        pendingRead.reject(new BrowserControlExtensionCommandError("BROWSER_ATTACHMENT_CANCELLED", reason));
+      }
     };
 
     const connect = async (): Promise<void> => {
@@ -148,10 +205,15 @@ export function BrowserControlBridge({
       });
 
       socket.addEventListener("message", (event) => {
-        const message = parseServerMessage(event.data);
+        const message = parseBrowserControlServerMessage(event.data);
 
         if (message === null) {
           socket.close(1003, "Invalid browser-control message");
+          return;
+        }
+
+        if (message.type === "attachment.chunk" || message.type === "attachment.error") {
+          settleAttachmentRead(pendingAttachmentReads, message);
           return;
         }
 
@@ -176,6 +238,11 @@ export function BrowserControlBridge({
           executor: executorRef.current ?? createExtensionExecutor(extensionIdRef.current),
           ensureBrowserWindow: ensureBrowserWindowRef.current,
           message,
+          readAttachment: createAttachmentReader({
+            pendingAttachmentReads,
+            requestId: message.requestId,
+            webSocket: socket,
+          }),
           webSocket: socket,
         }).finally(() => {
           pendingRequests.delete(message.requestId);
@@ -184,6 +251,7 @@ export function BrowserControlBridge({
 
       socket.addEventListener("close", () => {
         closePendingRequests("Browser-control socket closed");
+        closePendingAttachmentReads("Browser-control socket closed");
         setStatus({ state: "disconnected", label: "Disconnected" });
       });
 
@@ -203,6 +271,7 @@ export function BrowserControlBridge({
     return () => {
       isCancelled = true;
       closePendingRequests("Browser-control bridge unmounted");
+      closePendingAttachmentReads("Browser-control bridge unmounted");
       webSocket?.close(1000, "Browser-control bridge unmounted");
     };
   }, [clientId, extensionId, onStatusChange, websocketUrl]);
@@ -215,6 +284,7 @@ const executeRequest = async (input: {
   readonly ensureBrowserWindow: (() => Promise<number | null> | number | null) | undefined;
   readonly executor: BrowserControlExecutor | undefined;
   readonly message: Extract<BrowserControlServerMessage, { readonly type: "request" }>;
+  readonly readAttachment: BrowserControlAttachmentReader;
   readonly webSocket: WebSocket;
 }): Promise<void> => {
   if (input.executor === undefined) {
@@ -253,6 +323,8 @@ const executeRequest = async (input: {
       params: input.message.params,
       signal: input.abortController.signal,
       timeoutMs: input.message.timeoutMs,
+      attachments: input.message.attachments,
+      readAttachment: input.readAttachment,
     });
 
     sendResponse(input.webSocket, {
@@ -282,7 +354,13 @@ const createExtensionExecutor = (extensionId: string | undefined): BrowserContro
     return undefined;
   }
 
-  return async (input) => sendBrowserControlExtensionCommand(normalizedExtensionId, input.command, input.params, input.signal);
+  return async (input) => {
+    if ((input.attachments?.length ?? 0) > 0) {
+      throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENTS_UNSUPPORTED", "Browser-control attachments require the workspace browser executor.");
+    }
+
+    return sendBrowserControlExtensionCommand(normalizedExtensionId, input.command, input.params, input.signal);
+  };
 };
 
 const sendResponse = (webSocket: WebSocket, response: unknown): void => {
@@ -291,7 +369,7 @@ const sendResponse = (webSocket: WebSocket, response: unknown): void => {
   }
 };
 
-const parseServerMessage = (data: unknown): BrowserControlServerMessage | null => {
+export const parseBrowserControlServerMessage = (data: unknown): BrowserControlServerMessage | null => {
   if (typeof data !== "string") {
     return null;
   }
@@ -311,6 +389,12 @@ const parseServerMessage = (data: unknown): BrowserControlServerMessage | null =
   const message = parsed as Record<string, unknown>;
 
   if (message["type"] === "request") {
+    const attachments = parseAttachmentMetadata(message["attachments"]);
+
+    if (attachments === null) {
+      return null;
+    }
+
     return typeof message["requestId"] === "string" &&
       typeof message["command"] === "string" &&
       browserControlCommandNames.has(message["command"])
@@ -320,6 +404,7 @@ const parseServerMessage = (data: unknown): BrowserControlServerMessage | null =
           command: message["command"] as BrowserControlCommandName,
           params: message["params"],
           timeoutMs: typeof message["timeoutMs"] === "number" ? message["timeoutMs"] : undefined,
+          attachments,
         }
       : null;
   }
@@ -334,7 +419,161 @@ const parseServerMessage = (data: unknown): BrowserControlServerMessage | null =
       : null;
   }
 
+  if (message["type"] === "attachment.chunk") {
+    return typeof message["requestId"] === "string" &&
+      typeof message["chunkRequestId"] === "string" &&
+      typeof message["attachmentId"] === "string" &&
+      typeof message["offset"] === "number" &&
+      typeof message["dataBase64"] === "string" &&
+      typeof message["done"] === "boolean"
+      ? {
+          type: "attachment.chunk",
+          requestId: message["requestId"],
+          chunkRequestId: message["chunkRequestId"],
+          attachmentId: message["attachmentId"],
+          offset: message["offset"],
+          dataBase64: message["dataBase64"],
+          done: message["done"],
+        }
+      : null;
+  }
+
+  if (message["type"] === "attachment.error") {
+    const error = typeof message["error"] === "object" && message["error"] !== null && !Array.isArray(message["error"])
+      ? message["error"] as Record<string, unknown>
+      : null;
+
+    return typeof message["requestId"] === "string" &&
+      typeof message["chunkRequestId"] === "string" &&
+      typeof message["attachmentId"] === "string" &&
+      typeof error?.["code"] === "string" &&
+      typeof error["message"] === "string"
+      ? {
+          type: "attachment.error",
+          requestId: message["requestId"],
+          chunkRequestId: message["chunkRequestId"],
+          attachmentId: message["attachmentId"],
+          error: {
+            code: error["code"],
+            message: error["message"],
+          },
+        }
+      : null;
+  }
+
   return null;
+};
+
+const parseAttachmentMetadata = (value: unknown): readonly BrowserControlAttachmentMetadata[] | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const attachments: BrowserControlAttachmentMetadata[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return null;
+    }
+
+    const attachment = entry as Record<string, unknown>;
+    if (
+      typeof attachment["id"] !== "string" ||
+      typeof attachment["name"] !== "string" ||
+      typeof attachment["mimeType"] !== "string" ||
+      typeof attachment["size"] !== "number"
+    ) {
+      return null;
+    }
+
+    attachments.push({
+      id: attachment["id"],
+      name: attachment["name"],
+      mimeType: attachment["mimeType"],
+      size: attachment["size"],
+    });
+  }
+
+  return attachments;
+};
+
+const createAttachmentReader = ({
+  pendingAttachmentReads,
+  requestId,
+  webSocket,
+}: {
+  readonly pendingAttachmentReads: Map<string, PendingBrowserControlAttachmentRead>;
+  readonly requestId: string;
+  readonly webSocket: WebSocket;
+}): BrowserControlAttachmentReader => async ({
+  attachmentId,
+  length,
+  offset,
+  signal,
+}) => {
+  if (webSocket.readyState !== WebSocket.OPEN) {
+    throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENT_CANCELLED", "Browser-control socket is not open.");
+  }
+
+  const chunkRequestId = createBrowserControlClientId();
+
+  return await new Promise<BrowserControlAttachmentChunk>((resolve, reject) => {
+    const handleAbort = (): void => {
+      pendingAttachmentReads.delete(chunkRequestId);
+      reject(new BrowserControlExtensionCommandError("BROWSER_ATTACHMENT_CANCELLED", "Browser-control attachment read was cancelled."));
+    };
+
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    pendingAttachmentReads.set(chunkRequestId, { resolve, reject });
+    signal.addEventListener("abort", handleAbort, { once: true });
+
+    try {
+      webSocket.send(JSON.stringify({
+        type: "attachment.read",
+        requestId,
+        chunkRequestId,
+        attachmentId,
+        offset,
+        length,
+      }));
+    } catch (error) {
+      signal.removeEventListener("abort", handleAbort);
+      pendingAttachmentReads.delete(chunkRequestId);
+      reject(error instanceof Error ? error : new Error("Failed to request browser-control attachment chunk."));
+    }
+  });
+};
+
+const settleAttachmentRead = (
+  pendingAttachmentReads: Map<string, PendingBrowserControlAttachmentRead>,
+  message: Extract<BrowserControlServerMessage, { readonly type: "attachment.chunk" | "attachment.error" }>,
+): void => {
+  const pendingRead = pendingAttachmentReads.get(message.chunkRequestId);
+
+  if (pendingRead === undefined) {
+    return;
+  }
+
+  pendingAttachmentReads.delete(message.chunkRequestId);
+
+  if (message.type === "attachment.error") {
+    pendingRead.reject(new BrowserControlExtensionCommandError(message.error.code, message.error.message));
+    return;
+  }
+
+  pendingRead.resolve({
+    attachmentId: message.attachmentId,
+    dataBase64: message.dataBase64,
+    done: message.done,
+    offset: message.offset,
+  });
 };
 
 type BrowserControlCommandName =

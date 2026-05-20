@@ -29,6 +29,14 @@ type BrowserControlPostRequest = BrowserControlCommand & {
   targetUserId?: string;
   timeoutMs?: number;
   clientRequestId?: string;
+  attachments?: BrowserControlAttachment[];
+};
+
+type BrowserControlAttachment = {
+  id: string;
+  path: string;
+  name?: string;
+  mimeType?: string;
 };
 ```
 
@@ -41,10 +49,51 @@ Fields:
 | `targetUserId` | string | no | Routes to the latest connected browser client for that user. If omitted, routes to the latest connected browser client. |
 | `timeoutMs` | number | no | Positive number. Defaults to `30000`; max is `300000`. |
 | `clientRequestId` | string | no | Caller-provided trace id. It is forwarded through the websocket frame but is not currently echoed in the HTTP response. |
+| `attachments` | array | no | Request-scoped files from the machine filesystem root. V1 hydrates attachments only for `tab.evaluate`. |
 
 All tab commands are scoped to the managed Chrome window remembered by the web
 client. If no `windowId` exists in the web client's browser-window store, the
 web client opens one before executing the command.
+
+## Request Attachments
+
+Attachments let `tab.evaluate` work with files that exist inside the machine,
+even though Chrome is running on the user's side. Attachment `path` values are
+root-relative filesystem paths, using the same path model as the filesystem UI.
+
+Limits: at most 10 files, at most 50 MiB per file, and at most 100 MiB total.
+The server validates files before forwarding the browser-control request, then
+serves request-scoped chunks over the existing browser-control websocket.
+
+Example:
+
+```json
+{
+  "command": "tab.evaluate",
+  "params": {
+    "tabId": 123,
+    "expression": "await window.__heysnapFiles.setInputFiles('input[type=file]', ['avatar'])"
+  },
+  "attachments": [
+    {
+      "id": "avatar",
+      "path": "assets/avatar.png",
+      "mimeType": "image/png"
+    }
+  ],
+  "timeoutMs": 120000
+}
+```
+
+During `tab.evaluate`, the web client hydrates files into the page and exposes:
+
+```ts
+await window.__heysnapFiles.get(id);
+await window.__heysnapFiles.getAll(ids);
+await window.__heysnapFiles.setInputFiles(selectorOrElement, ids);
+await window.__heysnapFiles.dropFiles(selectorOrElement, ids);
+window.__heysnapFiles.clear(ids);
+```
 
 ## Response Envelope
 
@@ -84,6 +133,8 @@ Common errors:
 | `BROWSER_WINDOW_UNAVAILABLE` | Chrome is connected, but the managed browser window could not be opened. |
 | `BROWSER_EXECUTOR_UNAVAILABLE` | The web workspace has no browser executor available. |
 | `BROWSER_EXECUTOR_ERROR` | The web client or extension command failed. |
+| `BROWSER_ATTACHMENTS_UNSUPPORTED` | Attachments were used with a command other than `tab.evaluate`, or without the workspace browser executor. |
+| `BROWSER_ATTACHMENT_CHANGED` | An attachment changed after request validation and before chunk streaming completed. |
 | `INVALID_REQUEST` | Request JSON or params failed server validation. |
 
 ## Shared Result Types
