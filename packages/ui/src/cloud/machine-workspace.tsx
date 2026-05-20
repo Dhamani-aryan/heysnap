@@ -1350,8 +1350,8 @@ export const executeBrowserControlExtensionCommand = async ({
     throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENTS_UNSUPPORTED", "Browser-control attachments are only supported for tab.evaluate.");
   }
 
-  if (outputs.length > 0 && command !== "tab.screenshot") {
-    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "Browser-control outputs are only supported for tab.screenshot.");
+  if (outputs.length > 0 && command !== "tab.screenshot" && command !== "tab.evaluate") {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "Browser-control outputs are only supported for tab.evaluate and tab.screenshot.");
   }
 
   switch (command) {
@@ -1449,11 +1449,38 @@ export const executeBrowserControlExtensionCommand = async ({
         });
       }
 
-      return evaluateInBrowserTab({
+      if (outputs.length > 0) {
+        await prepareBrowserControlDownloads({
+          executeDebuggerCommand,
+          outputs,
+          params: parsed,
+          signal,
+        });
+      }
+
+      const evaluation = await evaluateInBrowserTab({
         executeDebuggerCommand,
-        params: parsed,
+        params: outputs.length > 0
+          ? { ...parsed, awaitPromise: true }
+          : parsed,
         signal,
       });
+
+      if (outputs.length > 0) {
+        if (isFailedBrowserEvaluation(evaluation)) {
+          throw new BrowserControlExtensionCommandError("BROWSER_EXECUTOR_ERROR", "tab.evaluate failed before browser-control downloads completed.");
+        }
+
+        await drainBrowserControlDownloads({
+          executeDebuggerCommand,
+          outputs,
+          params: parsed,
+          signal,
+          writeOutput,
+        });
+      }
+
+      return evaluation;
     }
     case "tab.screenshot":
       return captureBrowserTabScreenshot({
@@ -2028,6 +2055,171 @@ const evaluateInBrowserTab = async ({
   };
 };
 
+const isFailedBrowserEvaluation = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  (value as Record<string, unknown>)["ok"] === false;
+
+const prepareBrowserControlDownloads = async ({
+  executeDebuggerCommand,
+  outputs,
+  params,
+  signal,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly outputs: readonly BrowserControlOutputMetadata[];
+  readonly params: Record<string, unknown>;
+  readonly signal: AbortSignal;
+}): Promise<void> => {
+  const tabId = readRequiredNumber(params["tabId"], "tab.evaluate.params.tabId");
+  await evaluateBrowserControlDownloadsScript({
+    executeDebuggerCommand,
+    expression: browserControlDownloadsHelperExpression,
+    label: "browserControlDownloads.install",
+    signal,
+    tabId,
+  });
+  await evaluateBrowserControlDownloadsScript({
+    executeDebuggerCommand,
+    expression: `window.__heysnapDownloads.__prepare(${JSON.stringify(outputs)})`,
+    label: "browserControlDownloads.prepare",
+    signal,
+    tabId,
+  });
+};
+
+const drainBrowserControlDownloads = async ({
+  executeDebuggerCommand,
+  outputs,
+  params,
+  signal,
+  writeOutput,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly outputs: readonly BrowserControlOutputMetadata[];
+  readonly params: Record<string, unknown>;
+  readonly signal: AbortSignal;
+  readonly writeOutput: BrowserControlOutputWriter | undefined;
+}): Promise<void> => {
+  if (writeOutput === undefined) {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "Browser-control output writer is unavailable.");
+  }
+
+  const tabId = readRequiredNumber(params["tabId"], "tab.evaluate.params.tabId");
+
+  for (const output of outputs) {
+    const info = readDownloadInfo(await evaluateBrowserControlDownloadsScript({
+      executeDebuggerCommand,
+      expression: `window.__heysnapDownloads.__info(${JSON.stringify(output.id)})`,
+      label: `browserControlDownloads.${output.id}.info`,
+      signal,
+      tabId,
+    }), `browserControlDownloads.${output.id}.info`);
+
+    if (info.size > output.maxBytes) {
+      throw new BrowserControlExtensionCommandError("BROWSER_OUTPUT_TOO_LARGE", `Browser-control download ${output.id} exceeds the ${String(output.maxBytes)} byte limit.`);
+    }
+
+    let offset = 0;
+    for (;;) {
+      throwIfAborted(signal);
+      const chunk = readDownloadChunk(await evaluateBrowserControlDownloadsScript({
+        executeDebuggerCommand,
+        expression: `window.__heysnapDownloads.__read(${JSON.stringify(output.id)}, ${String(offset)}, ${String(BROWSER_CONTROL_OUTPUT_CHUNK_BYTES)})`,
+        label: `browserControlDownloads.${output.id}.read`,
+        signal,
+        tabId,
+      }), `browserControlDownloads.${output.id}.read`);
+
+      if (chunk.offset !== offset) {
+        throw new Error(`Browser-control download ${output.id} returned an unexpected chunk offset.`);
+      }
+
+      const ack = await writeOutput({
+        dataBase64: chunk.dataBase64,
+        done: chunk.done,
+        offset,
+        outputId: output.id,
+        signal,
+      });
+      const byteLength = getBase64ByteLength(chunk.dataBase64);
+
+      if (ack.offset !== offset || ack.bytesWritten !== byteLength) {
+        throw new Error("Browser-control output acknowledged an unexpected write range.");
+      }
+
+      offset += byteLength;
+
+      if (chunk.done) {
+        break;
+      }
+
+      if (byteLength === 0) {
+        throw new Error(`Browser-control download ${output.id} returned an empty non-final chunk.`);
+      }
+    }
+
+    if (offset !== info.size) {
+      throw new Error(`Browser-control download ${output.id} size mismatch after streaming.`);
+    }
+  }
+};
+
+const evaluateBrowserControlDownloadsScript = async ({
+  executeDebuggerCommand,
+  expression,
+  label,
+  signal,
+  tabId,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly expression: string;
+  readonly label: string;
+  readonly signal: AbortSignal;
+  readonly tabId: number;
+}): Promise<unknown> => {
+  const result = await executeDebuggerCommand({
+    tabId,
+    method: "Runtime.evaluate",
+    params: {
+      awaitPromise: true,
+      expression,
+      returnByValue: true,
+    },
+    signal,
+  });
+  const cdpResult = readRequiredObject(result, `${label}.result`);
+
+  if (cdpResult["exceptionDetails"] !== undefined) {
+    throw new Error(`${label} failed while handling browser-control downloads.`);
+  }
+
+  return readCdpEvaluationResult(cdpResult["result"]);
+};
+
+const readDownloadInfo = (
+  value: unknown,
+  label: string,
+): { readonly size: number } => {
+  const info = readRequiredObject(value, label);
+  return {
+    size: readRequiredNumber(info["size"], `${label}.size`),
+  };
+};
+
+const readDownloadChunk = (
+  value: unknown,
+  label: string,
+): { readonly dataBase64: string; readonly done: boolean; readonly offset: number } => {
+  const chunk = readRequiredObject(value, label);
+  return {
+    dataBase64: readRequiredString(chunk["dataBase64"], `${label}.dataBase64`),
+    done: readRequiredBoolean(chunk["done"], `${label}.done`),
+    offset: readRequiredNumber(chunk["offset"], `${label}.offset`),
+  };
+};
+
 const captureBrowserTabScreenshot = async ({
   executeDebuggerCommand,
   executeExtensionCommand,
@@ -2343,6 +2535,129 @@ const throwIfAborted = (signal: AbortSignal): void => {
   }
 };
 
+const browserControlDownloadsHelperExpression = `(() => {
+  const VERSION = 1;
+  const existing = window.__heysnapDownloads;
+  if (existing !== undefined && existing.version === VERSION) {
+    return true;
+  }
+
+  const records = new Map();
+  const encoder = new TextEncoder();
+  const getIds = (ids) => {
+    if (ids === undefined) {
+      return Array.from(records.keys());
+    }
+    if (Array.isArray(ids)) {
+      return ids;
+    }
+    return [ids];
+  };
+  const requireRecord = (id) => {
+    const record = records.get(id);
+    if (record === undefined) {
+      throw new Error("Browser-control download output not found: " + id);
+    }
+    return record;
+  };
+  const requireSavedRecord = (id) => {
+    const record = requireRecord(id);
+    if (record.blob === null) {
+      throw new Error("Browser-control download output was not saved: " + id);
+    }
+    return record;
+  };
+  const toBlob = async (source, mimeType) => {
+    if (source instanceof Response) {
+      return await source.blob();
+    }
+    if (source instanceof Blob) {
+      return source;
+    }
+    if (source instanceof ArrayBuffer) {
+      return new Blob([source], { type: mimeType });
+    }
+    if (ArrayBuffer.isView(source)) {
+      return new Blob([source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength)], { type: mimeType });
+    }
+    if (typeof source === "string") {
+      return new Blob([encoder.encode(source)], { type: mimeType || "text/plain;charset=utf-8" });
+    }
+    throw new Error("Browser-control download source must be a Response, Blob, ArrayBuffer, typed array, DataView, or string.");
+  };
+  const encodeBase64 = (bytes) => {
+    let binary = "";
+    const batchSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += batchSize) {
+      const chunk = bytes.subarray(index, index + batchSize);
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    return btoa(binary);
+  };
+  const api = {
+    version: VERSION,
+    __prepare(outputs) {
+      records.clear();
+      for (const output of outputs) {
+        records.set(output.id, {
+          blob: null,
+          maxBytes: output.maxBytes,
+          mimeType: output.mimeType || "application/octet-stream",
+        });
+      }
+      return true;
+    },
+    __info(id) {
+      const record = requireSavedRecord(id);
+      return {
+        size: record.blob.size,
+      };
+    },
+    async __read(id, offset, length) {
+      const record = requireSavedRecord(id);
+      if (!Number.isFinite(offset) || offset < 0 || offset > record.blob.size) {
+        throw new Error("Browser-control download offset is outside the saved output.");
+      }
+      if (!Number.isFinite(length) || length <= 0) {
+        throw new Error("Browser-control download read length must be positive.");
+      }
+      const end = Math.min(offset + length, record.blob.size);
+      const bytes = new Uint8Array(await record.blob.slice(offset, end).arrayBuffer());
+      return {
+        dataBase64: encodeBase64(bytes),
+        done: end >= record.blob.size,
+        offset,
+      };
+    },
+    async save(id, source, options) {
+      const record = requireRecord(id);
+      const blob = await toBlob(source, options && typeof options.mimeType === "string" ? options.mimeType : record.mimeType);
+      if (blob.size > record.maxBytes) {
+        throw new Error("Browser-control download exceeds the configured byte limit: " + id);
+      }
+      record.blob = blob;
+      return {
+        id,
+        mimeType: blob.type || record.mimeType,
+        size: blob.size,
+      };
+    },
+    clear(ids) {
+      for (const id of getIds(ids)) {
+        const record = requireRecord(id);
+        record.blob = null;
+      }
+      return true;
+    },
+  };
+
+  Object.defineProperty(window, "__heysnapDownloads", {
+    configurable: true,
+    value: api,
+  });
+  return true;
+})()`;
+
 const browserControlFilesHelperExpression = `(() => {
   const VERSION = 1;
   const existing = window.__heysnapFiles;
@@ -2648,6 +2963,14 @@ const readOptionalString = (value: unknown, label: string): string | undefined =
   }
 
   return readRequiredString(value, label);
+};
+
+const readRequiredBoolean = (value: unknown, label: string): boolean => {
+  if (typeof value !== "boolean") {
+    throw new Error(`${label} must be a boolean.`);
+  }
+
+  return value;
 };
 
 const readOptionalBoolean = (value: unknown, label: string): boolean | undefined => {
