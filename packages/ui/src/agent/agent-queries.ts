@@ -113,6 +113,7 @@ export const useAgentThreadQuery = (
         runtime.activeRunHandleRef.current = null;
       },
       onError: (error) => {
+        notifyAgentRunError(error.message);
         const failedThreadId = runtime.chatStore.getState().activeRun?.threadId;
         flushBufferedEvents();
         runtime.chatStore.getState().failRun(error.message);
@@ -263,6 +264,7 @@ export const useAgentRunMutation = ({
           }
         },
         onError: (error) => {
+          notifyAgentRunError(error.message);
           const failedThreadId = runtime.chatStore.getState().activeRun?.threadId;
           flushBufferedEvents();
           runtime.chatStore.getState().failRun(error.message);
@@ -413,6 +415,7 @@ export const useAgentEditUserMessageMutation = ({
           }
         },
         onError: (error) => {
+          notifyAgentRunError(error.message);
           const failedThreadId = runtime.chatStore.getState().activeRun?.threadId;
           flushBufferedEvents();
           runtime.chatStore.getState().failRun(error.message);
@@ -506,7 +509,7 @@ const useRuntimeEventDispatcher = ({
     }
 
     if (event.type === "runtime.error") {
-      runtime.chatStore.getState().setRunError(event.error.message);
+      notifyAgentRunError(event.error.message);
     }
 
     if (event.type === "content.delta") {
@@ -542,3 +545,17 @@ const createOptimisticUserMessage = (
   content,
   path,
 });
+
+const notifyAgentRunError = (message: string): void => {
+  if (
+    typeof window === "undefined" ||
+    typeof window.dispatchEvent !== "function" ||
+    typeof CustomEvent !== "function"
+  ) {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent("heysnap:agent-run-error", {
+    detail: { message },
+  }));
+};

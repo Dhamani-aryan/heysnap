@@ -73,7 +73,6 @@ const AgentPanelContent = ({
   const hasMessages = useAgentChatStore((state) => state.messageOrder.length > 0);
   const loadStatus = useAgentChatStore((state) => state.loadStatus);
   const loadError = useAgentChatStore((state) => state.loadError);
-  const runError = useAgentChatStore((state) => state.runError ?? state.error);
   const isRunning = activeRun !== null;
   const { cancel, steer, submit } = useAgentRunMutation({
     currentPath,
@@ -103,7 +102,7 @@ const AgentPanelContent = ({
     onSubmit: isRunning ? steer : submit,
   };
 
-  if (selectedThreadId === null && !hasMessages && !isRunning && runError === null) {
+  if (selectedThreadId === null && !hasMessages && !isRunning) {
     return <AgentEmptyThread {...composerProps} currentDirectoryName={currentDirectoryName} />;
   }
 
@@ -121,9 +120,6 @@ const AgentPanelContent = ({
         ) : null}
       </div>
       <div className="right-prompt-composer-wrap">
-        {runError === null ? null : (
-          <div className="agent-run-error">{runError}</div>
-        )}
         <RightPromptComposer {...composerProps} />
       </div>
     </div>
