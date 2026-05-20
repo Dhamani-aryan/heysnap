@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowUp02Icon, Folder01Icon, Pdf02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp02Icon, Folder01Icon, Pdf02Icon, PlusSignIcon, VoiceIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AgentContent } from "./types";
 
@@ -20,10 +20,20 @@ export type PromptAttachment = {
   readonly content: string;
 };
 
+export type PromptVoiceState = "idle" | "starting" | "recording" | "transcribing";
+
 export interface RightPromptComposerProps {
   readonly isRunning?: boolean;
   readonly draftSeed?: { readonly id: number; readonly text: string } | null;
+  readonly draft?: string;
+  readonly attachments?: readonly PromptAttachment[];
   readonly activeFolderName?: string;
+  readonly voiceState?: PromptVoiceState;
+  readonly autoFocus?: boolean;
+  readonly autoFocusToken?: number;
+  readonly onDraftChange?: (draft: string) => void;
+  readonly onAttachmentsChange?: (attachments: PromptAttachment[]) => void;
+  readonly onVoiceToggle?: () => void;
   readonly onCancel?: () => void;
   readonly onSubmit?: (input: { readonly content: AgentContent }) => boolean | void | Promise<boolean | void>;
 }
@@ -107,40 +117,122 @@ const toAgentContent = (text: string, attachments: readonly PromptAttachment[]):
 export const RightPromptComposer = ({
   isRunning = false,
   draftSeed = null,
+  draft: controlledDraft,
+  attachments: controlledAttachments,
   activeFolderName,
+  voiceState = "idle",
+  autoFocus = false,
+  autoFocusToken,
+  onDraftChange,
+  onAttachmentsChange,
+  onVoiceToggle,
   onCancel,
   onSubmit,
 }: RightPromptComposerProps): React.ReactElement => {
-  const [draft, setDraft] = useState("");
-  const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
+  const [internalDraft, setInternalDraft] = useState("");
+  const [internalAttachments, setInternalAttachments] = useState<PromptAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const promptInputRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
+  const previousAutoFocusTokenRef = useRef(autoFocusToken);
+  const draft = controlledDraft ?? internalDraft;
+  const attachments = controlledAttachments ?? internalAttachments;
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
+  const isVoiceRecording = voiceState === "recording";
+  const isVoiceLoading = voiceState === "starting" || voiceState === "transcribing";
+  const shouldShowVoiceIndicator = isVoiceRecording || isVoiceLoading;
+  const shouldShowVoiceControl = onVoiceToggle !== undefined;
 
-  useLayoutEffect(() => {
+  const focusTextareaAtEnd = useCallback((): void => {
     const textarea = textareaRef.current;
 
     if (textarea === null) {
       return;
     }
 
+    textarea.focus();
+    const cursorPosition = textarea.value.length;
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  }, []);
+
+  const setDraftValue = useCallback((nextDraft: string): void => {
+    if (controlledDraft === undefined) {
+      setInternalDraft(nextDraft);
+    }
+
+    onDraftChange?.(nextDraft);
+  }, [controlledDraft, onDraftChange]);
+
+  const setAttachmentValues = useCallback((nextAttachments: PromptAttachment[]): void => {
+    if (controlledAttachments === undefined) {
+      setInternalAttachments(nextAttachments);
+    }
+
+    onAttachmentsChange?.(nextAttachments);
+  }, [controlledAttachments, onAttachmentsChange]);
+
+  const resizeTextarea = useCallback((): void => {
+    const textarea = textareaRef.current;
+
+    if (textarea === null || textarea.clientWidth <= 0) {
+      return;
+    }
+
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, PROMPT_MAX_HEIGHT)}px`;
-  }, [draft]);
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeTextarea();
+  }, [draft, resizeTextarea]);
+
+  useEffect(() => {
+    const promptInput = promptInputRef.current;
+
+    if (promptInput === null || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    let animationFrame = 0;
+    const scheduleResize = (): void => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(resizeTextarea);
+    };
+    const observer = new ResizeObserver(scheduleResize);
+
+    observer.observe(promptInput);
+    scheduleResize();
+
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [resizeTextarea]);
+
+  useEffect(() => {
+    const shouldFocusForToken = autoFocusToken !== undefined && previousAutoFocusTokenRef.current !== autoFocusToken;
+    previousAutoFocusTokenRef.current = autoFocusToken;
+
+    if (!autoFocus && !shouldFocusForToken) {
+      return;
+    }
+
+    window.requestAnimationFrame(focusTextareaAtEnd);
+  }, [autoFocus, autoFocusToken, focusTextareaAtEnd]);
 
   useEffect(() => {
     if (draftSeed === null) {
       return;
     }
 
-    setDraft(draftSeed.text);
+    setDraftValue(draftSeed.text);
     setAttachmentError(null);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [draftSeed]);
+    window.requestAnimationFrame(focusTextareaAtEnd);
+  }, [draftSeed, focusTextareaAtEnd, setDraftValue]);
 
   const handleAttachmentFiles = async (files: FileList | File[]): Promise<void> => {
     const nextFiles = Array.from(files);
@@ -153,7 +245,7 @@ export const RightPromptComposer = ({
 
     try {
       const nextAttachments = await Promise.all(nextFiles.map((file) => toPromptAttachment(file)));
-      setAttachments((current) => [...current, ...nextAttachments]);
+      setAttachmentValues([...attachments, ...nextAttachments]);
     } catch (error) {
       setAttachmentError(error instanceof Error ? error.message : "Failed to read attachment.");
     } finally {
@@ -177,8 +269,8 @@ export const RightPromptComposer = ({
         return;
       }
 
-      setDraft("");
-      setAttachments([]);
+      setDraftValue("");
+      setAttachmentValues([]);
       setAttachmentError(null);
 
       if (fileInputRef.current !== null) {
@@ -203,6 +295,7 @@ export const RightPromptComposer = ({
 
   return (
     <div
+      ref={promptInputRef}
       className="prompt-input"
       onClick={() => textareaRef.current?.focus()}
       onDragEnter={(event) => {
@@ -271,9 +364,7 @@ export const RightPromptComposer = ({
               key={attachment.id}
               attachment={attachment}
               onRemove={() => {
-                setAttachments((current) =>
-                  current.filter((candidate) => candidate.id !== attachment.id),
-                );
+                setAttachmentValues(attachments.filter((candidate) => candidate.id !== attachment.id));
               }}
             />
           ))}
@@ -289,7 +380,7 @@ export const RightPromptComposer = ({
         maxLength={200000}
         rows={1}
         className="prompt-textarea"
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => setDraftValue(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
@@ -321,28 +412,67 @@ export const RightPromptComposer = ({
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            handlePrimaryAction();
-          }}
-          disabled={isSubmitting || (!isRunning && !canSubmit)}
-          className={isAbortAction ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
-          aria-label={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
-          title={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
-        >
-          {isSendAction ? (
-            <HugeiconsIcon
-              icon={ArrowUp02Icon}
-              size={16}
-              color="currentColor"
-              strokeWidth={1.9}
-            />
-          ) : (
-            <span className="prompt-stop-square" aria-hidden="true" />
-          )}
-        </button>
+        <div className="prompt-trailing-actions">
+          {shouldShowVoiceControl || shouldShowVoiceIndicator ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+
+                if (isVoiceLoading) {
+                  return;
+                }
+
+                onVoiceToggle?.();
+              }}
+              disabled={isVoiceLoading || onVoiceToggle === undefined}
+              className="prompt-voice-button"
+              data-recording={isVoiceRecording ? "true" : undefined}
+              data-loading={isVoiceLoading ? "true" : undefined}
+              aria-label={isVoiceRecording ? "Stop voice input" : isVoiceLoading ? "Transcribing voice input" : "Start voice input"}
+              title={isVoiceRecording ? "Stop voice input" : isVoiceLoading ? "Transcribing voice input" : "Start voice input"}
+            >
+              {isVoiceLoading ? (
+                <span className="prompt-voice-loading" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              ) : isVoiceRecording ? (
+                <span className="prompt-voice-bars" aria-hidden="true">
+                  {Array.from({ length: 8 }, (_, index) => (
+                    <span key={index} />
+                  ))}
+                </span>
+              ) : (
+                <HugeiconsIcon icon={VoiceIcon} size={16} color="currentColor" strokeWidth={1.9} />
+              )}
+            </button>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              handlePrimaryAction();
+            }}
+            disabled={isSubmitting || (!isRunning && !canSubmit)}
+            className={isAbortAction ? "prompt-send-button active running" : canSubmit ? "prompt-send-button active" : "prompt-send-button"}
+            aria-label={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
+            title={isAbortAction ? "Stop response" : isRunning ? "Send steer" : "Send prompt"}
+          >
+            {isSendAction ? (
+              <HugeiconsIcon
+                icon={ArrowUp02Icon}
+                size={16}
+                color="currentColor"
+                strokeWidth={1.9}
+              />
+            ) : (
+              <span className="prompt-stop-square" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
 
       {isDragActive ? <div className="prompt-drop-overlay">Drop files to attach</div> : null}
