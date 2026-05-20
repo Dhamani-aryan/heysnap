@@ -24,11 +24,12 @@ import {
   SquareArrowShrink02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { AgentPanel } from "../agent/agent-panel";
 import { useAgentRunMutation, useAgentThreadGroupsQuery } from "../agent/agent-queries";
-import { RightPromptComposer } from "../agent/prompt-composer";
+import { getAssistantMarkdown } from "../agent/agent-store";
+import { RightPromptComposer, type PromptAttachment, type PromptVoiceState } from "../agent/prompt-composer";
 import {
   AgentRuntimeProvider,
   useAgentChatStore,
@@ -64,6 +65,9 @@ const HeySnapImageViewer = lazy(() =>
 );
 const HeySnapMarkdownViewer = lazy(() =>
   import("heysnap-web-viewers/markdown").then((module) => ({ default: module.HeySnapMarkdownViewer })),
+);
+const ChatMarkdown = lazy(() =>
+  import("../agent/chat-markdown").then((module) => ({ default: module.ChatMarkdown })),
 );
 const HeySnapPdfViewer = lazy(() =>
   import("heysnap-web-viewers/pdf").then((module) => ({ default: module.HeySnapPdfViewer })),
@@ -399,9 +403,12 @@ export function FilesystemExplorer({
   const [activeLeftPaneSurface, setActiveLeftPaneSurface] = useState<ActiveLeftPaneSurface>("directory");
   const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>("connecting");
   const [internalWorkspacePanel, setInternalWorkspacePanel] = useState<WorkspacePanel>("chat");
+  const [sharedPromptDraft, setSharedPromptDraft] = useState("");
+  const [sharedPromptAttachments, setSharedPromptAttachments] = useState<PromptAttachment[]>([]);
   const activeWorkspacePanel = workspacePanel ?? internalWorkspacePanel;
   const currentPath = listing?.path ?? "";
   const currentDirectoryName = listing?.name ?? "workspace";
+  const isRightAgentAreaOpen = activeWorkspacePanel === "chat" && isRightWorkAreaOpen;
   const activeFileTab = activeLeftPaneSurface !== "file" || activeFilePath === null
     ? null
     : openFileTabs.find((tab) => tab.path === activeFilePath) ?? null;
@@ -583,6 +590,22 @@ export function FilesystemExplorer({
     setInternalWorkspacePanel("chat");
     onCloseConnectors?.();
   }, [onCloseConnectors]);
+
+  const handleToggleRightWorkArea = useCallback((): void => {
+    setIsRightWorkAreaOpen((current) => !current);
+  }, []);
+
+  const handleToggleRightSidebar = useCallback((): void => {
+    setIsRightSidebarOpen((current) => {
+      const nextIsOpen = !current;
+
+      if (nextIsOpen) {
+        setIsRightWorkAreaOpen(true);
+      }
+
+      return nextIsOpen;
+    });
+  }, []);
 
   const handleNewThread = useCallback((): void => {
     showChatPanel();
@@ -1104,7 +1127,7 @@ export function FilesystemExplorer({
         <ConnectorsWorkspaceToolbar
           isRightSidebarOpen={isRightSidebarOpen}
           onBack={closeConnectorsPanel}
-          onToggleRightSidebar={() => setIsRightSidebarOpen((current) => !current)}
+          onToggleRightSidebar={handleToggleRightSidebar}
         />
         <section className="connectors-workspace-main" aria-label="Connectors">
           <CapabilitiesPanel
@@ -1155,8 +1178,8 @@ export function FilesystemExplorer({
         onNewThread={handleNewThread}
         isRightSidebarOpen={isRightSidebarOpen}
         isRightWorkAreaOpen={isRightWorkAreaOpen}
-        onToggleRightWorkArea={() => setIsRightWorkAreaOpen((current) => !current)}
-        onToggleRightSidebar={() => setIsRightSidebarOpen((current) => !current)}
+        onToggleRightWorkArea={handleToggleRightWorkArea}
+        onToggleRightSidebar={handleToggleRightSidebar}
         activeLeftPaneSurface={activeLeftPaneSurface}
         isBrowserTabCollapsed={browserWindowId === null}
         isBrowserWindowOpening={isBrowserWindowOpening}
@@ -1178,16 +1201,21 @@ export function FilesystemExplorer({
       <DesktopSplitPane
         leftPaneRatio={leftPaneRatio}
         isRightWorkAreaOpen={isRightWorkAreaOpen}
+        isRightAgentAreaOpen={isRightAgentAreaOpen}
         onLeftPaneRatioChange={handleLeftPaneRatioChange}
         agentBaseUrl={agentBaseUrl}
         sarvamApiKey={sarvamApiKey}
         selectedThreadId={selectedThreadId}
         currentPath={currentPath}
         currentDirectoryName={currentDirectoryName}
+        promptDraft={sharedPromptDraft}
+        promptAttachments={sharedPromptAttachments}
         workspacePanel={activeWorkspacePanel}
         capabilitiesBaseUrl={capabilitiesBaseUrl}
         uiContext={agentUiContext}
         onOpenFilePath={openFilePath}
+        onPromptDraftChange={setSharedPromptDraft}
+        onPromptAttachmentsChange={setSharedPromptAttachments}
         onSelectThread={handleSelectThread}
         onThreadResolved={onThreadResolved}
       >
@@ -3412,37 +3440,66 @@ const DesktopSplitPane = ({
   children,
   leftPaneRatio,
   isRightWorkAreaOpen,
+  isRightAgentAreaOpen,
   onLeftPaneRatioChange,
   agentBaseUrl,
   sarvamApiKey,
   selectedThreadId,
   currentPath,
   currentDirectoryName,
+  promptDraft,
+  promptAttachments,
   workspacePanel,
   capabilitiesBaseUrl,
   uiContext,
   onOpenFilePath,
+  onPromptDraftChange,
+  onPromptAttachmentsChange,
   onSelectThread,
   onThreadResolved,
 }: {
   readonly children: React.ReactNode;
   readonly leftPaneRatio: number;
   readonly isRightWorkAreaOpen: boolean;
+  readonly isRightAgentAreaOpen: boolean;
   readonly onLeftPaneRatioChange: (ratio: number) => void;
   readonly agentBaseUrl: string;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId: string | null;
   readonly currentPath: string;
   readonly currentDirectoryName: string;
+  readonly promptDraft: string;
+  readonly promptAttachments: readonly PromptAttachment[];
   readonly workspacePanel: WorkspacePanel;
   readonly capabilitiesBaseUrl?: string;
   readonly uiContext: AgentUiContext;
   readonly onOpenFilePath: (path: string) => void;
+  readonly onPromptDraftChange: Dispatch<SetStateAction<string>>;
+  readonly onPromptAttachmentsChange: Dispatch<SetStateAction<PromptAttachment[]>>;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
 }): React.ReactElement => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = useState(false);
+  const [promptFocusToken, setPromptFocusToken] = useState(0);
+  const handleVoiceTranscript = useCallback((transcript: string): void => {
+    onPromptDraftChange((currentDraft) => appendPromptTranscript(currentDraft, transcript));
+    setPromptFocusToken((currentToken) => currentToken + 1);
+  }, [onPromptDraftChange]);
+  const voicePrompt = useFilesystemVoicePrompt({
+    sarvamApiKey,
+    onTranscript: handleVoiceTranscript,
+  });
+  const handleRightPromptVoiceToggle = useCallback((): void => {
+    if (voicePrompt.recordingState === "idle") {
+      void voicePrompt.startRecording();
+      return;
+    }
+
+    if (voicePrompt.recordingState === "recording") {
+      voicePrompt.stopRecording();
+    }
+  }, [voicePrompt]);
 
   useEffect(() => {
     if (!isResizing) {
@@ -3488,14 +3545,24 @@ const DesktopSplitPane = ({
         className="split-main"
         data-resizing={isResizing ? "true" : undefined}
         data-right-work-area-open={isRightWorkAreaOpen ? "true" : "false"}
+        data-right-agent-area-open={isRightAgentAreaOpen ? "true" : "false"}
       >
         <section className="split-left" style={{ flexBasis: `${leftPaneRatio * 100}%` }}>
           {children}
           <FilesystemHoverGrip
-            sarvamApiKey={sarvamApiKey}
+            isVisible={!isRightAgentAreaOpen}
+            promptDraft={promptDraft}
+            promptAttachments={promptAttachments}
+            focusToken={promptFocusToken}
+            voiceState={voicePrompt.recordingState}
             currentPath={currentPath}
             selectedThreadId={selectedThreadId}
             uiContext={uiContext}
+            onPromptDraftChange={onPromptDraftChange}
+            onPromptAttachmentsChange={onPromptAttachmentsChange}
+            onStartRecording={voicePrompt.startRecording}
+            onStopRecording={voicePrompt.stopRecording}
+            onOpenFilePath={onOpenFilePath}
             onSelectThread={onSelectThread}
             onThreadResolved={onThreadResolved}
           />
@@ -3535,7 +3602,14 @@ const DesktopSplitPane = ({
               currentPath={currentPath}
               currentDirectoryName={currentDirectoryName}
               uiContext={uiContext}
+              promptDraft={promptDraft}
+              promptAttachments={promptAttachments}
+              promptVoiceState={isRightAgentAreaOpen ? voicePrompt.recordingState : "idle"}
+              promptAutoFocusToken={isRightAgentAreaOpen ? promptFocusToken : undefined}
               onOpenFilePath={onOpenFilePath}
+              onPromptDraftChange={onPromptDraftChange}
+              onPromptAttachmentsChange={onPromptAttachmentsChange}
+              onPromptVoiceToggle={isRightAgentAreaOpen ? handleRightPromptVoiceToggle : undefined}
               onSelectThread={onSelectThread}
               onThreadResolved={onThreadResolved}
             />
@@ -3546,24 +3620,29 @@ const DesktopSplitPane = ({
   );
 };
 
-const FilesystemHoverGrip = ({
+const appendPromptTranscript = (draft: string, transcript: string): string => {
+  const trimmedTranscript = transcript.trim();
+
+  if (trimmedTranscript.length === 0) {
+    return draft;
+  }
+
+  const trimmedDraft = draft.trimEnd();
+  return trimmedDraft.length === 0 ? trimmedTranscript : `${trimmedDraft}\n${trimmedTranscript}`;
+};
+
+const useFilesystemVoicePrompt = ({
   sarvamApiKey,
-  currentPath,
-  selectedThreadId,
-  uiContext,
-  onSelectThread,
-  onThreadResolved,
+  onTranscript,
 }: {
   readonly sarvamApiKey?: string;
-  readonly currentPath: string;
-  readonly selectedThreadId: string | null;
-  readonly uiContext: AgentUiContext;
-  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
-  readonly onThreadResolved?: (threadId: string) => void;
-}): React.ReactElement => {
-  const [recordingState, setRecordingState] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
-  const [transcriptDraft, setTranscriptDraft] = useState<{ readonly id: number; readonly text: string } | null>(null);
-  const activeRun = useAgentChatStore((state) => state.activeRun);
+  readonly onTranscript: (transcript: string) => void;
+}): {
+  readonly recordingState: PromptVoiceState;
+  readonly startRecording: () => Promise<void>;
+  readonly stopRecording: () => void;
+} => {
+  const [recordingState, setRecordingState] = useState<PromptVoiceState>("idle");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -3571,18 +3650,6 @@ const FilesystemHoverGrip = ({
   const recordingStartedAtRef = useRef(0);
   const shouldTranscribeOnStopRef = useRef(false);
   const hotkeyRecordingRef = useRef(false);
-  const transcriptDraftIdRef = useRef(0);
-  const isAgentRunning = activeRun !== null;
-  const { cancel, steer, submit } = useAgentRunMutation({
-    currentPath,
-    uiContext,
-    selectedThreadId,
-    onSelectThread,
-    onThreadResolved,
-  });
-  const isRecording = recordingState === "recording";
-  const isTranscribing = recordingState === "transcribing";
-  const isExpanded = recordingState !== "idle";
 
   const discardRecording = useCallback(() => {
     audioChunksRef.current = [];
@@ -3591,6 +3658,29 @@ const FilesystemHoverGrip = ({
     mediaStreamRef.current = null;
     stream?.getTracks().forEach((track) => track.stop());
   }, []);
+
+  const handleRecordingStopped = useCallback(async (durationSeconds: number): Promise<void> => {
+    const audioType = normalizeSarvamAudioMimeType(audioChunksRef.current[0]?.type || "audio/webm");
+    const audioBlob = new Blob(audioChunksRef.current, { type: audioType });
+
+    try {
+      const result = await transcribeSarvamRecording({
+        apiKey: sarvamApiKey,
+        audioBlob,
+        durationSeconds,
+      });
+      const transcript = extractSarvamTranscript(result);
+
+      if (transcript !== null) {
+        onTranscript(transcript);
+      }
+    } catch (error) {
+      console.error("Sarvam STT failed.", error);
+    } finally {
+      discardRecording();
+      setRecordingState("idle");
+    }
+  }, [discardRecording, onTranscript, sarvamApiKey]);
 
   const stopRecording = useCallback(() => {
     hotkeyRecordingRef.current = false;
@@ -3608,32 +3698,7 @@ const FilesystemHoverGrip = ({
     }
   }, [discardRecording]);
 
-  const handleRecordingStopped = useCallback(async (durationSeconds: number): Promise<void> => {
-    const recorder = mediaRecorderRef.current;
-    const audioType = normalizeSarvamAudioMimeType(recorder?.mimeType || audioChunksRef.current[0]?.type || "audio/webm");
-    const audioBlob = new Blob(audioChunksRef.current, { type: audioType });
-
-    try {
-      const result = await transcribeSarvamRecording({
-        apiKey: sarvamApiKey,
-        audioBlob,
-        durationSeconds,
-      });
-      const transcript = extractSarvamTranscript(result);
-
-      if (transcript !== null) {
-        transcriptDraftIdRef.current += 1;
-        setTranscriptDraft({ id: transcriptDraftIdRef.current, text: transcript });
-      }
-    } catch (error) {
-      console.error("Sarvam STT failed.", error);
-    } finally {
-      discardRecording();
-      setRecordingState("idle");
-    }
-  }, [discardRecording, sarvamApiKey]);
-
-	  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async () => {
     if (
       typeof window === "undefined" ||
       typeof MediaRecorder === "undefined" ||
@@ -3643,7 +3708,6 @@ const FilesystemHoverGrip = ({
     }
 
     setRecordingState("starting");
-    setTranscriptDraft(null);
     const recordingSession = recordingSessionRef.current + 1;
     recordingSessionRef.current = recordingSession;
 
@@ -3694,7 +3758,7 @@ const FilesystemHoverGrip = ({
       event.altKey && (event.code === "KeyM" || event.key.toLowerCase() === "m");
 
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.repeat || !isRecordingHotkey(event) || isEditableKeyboardTarget(event.target)) {
+      if (event.repeat || !isRecordingHotkey(event)) {
         return;
       }
 
@@ -3754,65 +3818,275 @@ const FilesystemHoverGrip = ({
     discardRecording();
   }, [discardRecording]);
 
-  if (transcriptDraft !== null) {
-    return (
-      <div className="filesystem-voice-prompt-shell">
-        <RightPromptComposer
-          draftSeed={transcriptDraft}
-          isRunning={isAgentRunning}
-          onCancel={cancel}
-          onSubmit={async (input) => {
-            const didSubmit = isAgentRunning ? await steer(input) : submit(input);
+  return {
+    recordingState,
+    startRecording,
+    stopRecording,
+  };
+};
 
-            if (didSubmit === false) {
-              return false;
-            }
+const FilesystemHoverGrip = ({
+  isVisible,
+  promptDraft,
+  promptAttachments,
+  focusToken,
+  voiceState,
+  currentPath,
+  selectedThreadId,
+  uiContext,
+  onPromptDraftChange,
+  onPromptAttachmentsChange,
+  onStartRecording,
+  onStopRecording,
+  onOpenFilePath,
+  onSelectThread,
+  onThreadResolved,
+}: {
+  readonly isVisible: boolean;
+  readonly promptDraft: string;
+  readonly promptAttachments: readonly PromptAttachment[];
+  readonly focusToken: number;
+  readonly voiceState: PromptVoiceState;
+  readonly currentPath: string;
+  readonly selectedThreadId: string | null;
+  readonly uiContext: AgentUiContext;
+  readonly onPromptDraftChange: (draft: string) => void;
+  readonly onPromptAttachmentsChange: (attachments: PromptAttachment[]) => void;
+  readonly onStartRecording: () => Promise<void>;
+  readonly onStopRecording: () => void;
+  readonly onOpenFilePath: (path: string) => void;
+  readonly onSelectThread?: (thread: AgentThreadSummary) => void;
+  readonly onThreadResolved?: (threadId: string) => void;
+}): React.ReactElement | null => {
+  const activeRun = useAgentChatStore((state) => state.activeRun);
+  const messageOrder = useAgentChatStore((state) => state.messageOrder);
+  const messagesById = useAgentChatStore((state) => state.messagesById);
+  const streamingMessageIds = useAgentChatStore((state) => state.streamingMessageIds);
+  const latestAssistantResponse = useMemo<FilesystemAgentStatusResponse | null>(() => {
+    if (activeRun === null) {
+      return null;
+    }
 
-            setTranscriptDraft(null);
-            return didSubmit;
-          }}
-        />
-      </div>
-    );
+    const lastUserMessageIndex = findLastUserMessageIndex(messageOrder, messagesById);
+    let latestResponse: FilesystemAgentStatusResponse | null = null;
+
+    for (const messageId of messageOrder.slice(lastUserMessageIndex + 1)) {
+      const message = messagesById[messageId];
+
+      if (message?.role !== "assistant") {
+        continue;
+      }
+
+      const markdown = getAssistantMarkdown(message);
+
+      if (markdown.length === 0) {
+        continue;
+      }
+
+      latestResponse = {
+        id: messageId,
+        markdown,
+        isStreaming: streamingMessageIds.includes(messageId),
+      };
+    }
+
+    return latestResponse;
+  }, [activeRun, messageOrder, messagesById, streamingMessageIds]);
+  const isAgentRunning = activeRun !== null;
+  const [retainedAssistantResponse, setRetainedAssistantResponse] = useState<FilesystemAgentStatusResponse | null>(null);
+  const latestAssistantResponseRef = useRef<FilesystemAgentStatusResponse | null>(null);
+  const wasAgentRunningRef = useRef(isAgentRunning);
+  const { cancel, steer, submit } = useAgentRunMutation({
+    currentPath,
+    uiContext,
+    selectedThreadId,
+    onSelectThread,
+    onThreadResolved,
+  });
+  const isRecording = voiceState === "recording";
+  const isLoading = voiceState === "starting" || voiceState === "transcribing";
+  const isExpanded = voiceState !== "idle";
+  const hasPromptContent = promptDraft.trim().length > 0 || promptAttachments.length > 0;
+  const previousFocusTokenRef = useRef(focusToken);
+  const shouldAutoFocus = previousFocusTokenRef.current !== focusToken;
+
+  useEffect(() => {
+    previousFocusTokenRef.current = focusToken;
+  }, [focusToken]);
+
+  useEffect(() => {
+    if (!isAgentRunning || latestAssistantResponse === null) {
+      return;
+    }
+
+    latestAssistantResponseRef.current = latestAssistantResponse;
+    setRetainedAssistantResponse(null);
+  }, [isAgentRunning, latestAssistantResponse]);
+
+  useEffect(() => {
+    if (isAgentRunning) {
+      wasAgentRunningRef.current = true;
+      return;
+    }
+
+    if (!wasAgentRunningRef.current) {
+      return;
+    }
+
+    wasAgentRunningRef.current = false;
+    const finalResponse = latestAssistantResponse ?? latestAssistantResponseRef.current;
+
+    if (finalResponse === null) {
+      return;
+    }
+
+    setRetainedAssistantResponse({ ...finalResponse, isStreaming: false });
+    const timeoutId = window.setTimeout(() => {
+      setRetainedAssistantResponse(null);
+    }, 10_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isAgentRunning, latestAssistantResponse]);
+
+  if (!isVisible) {
+    return null;
   }
 
+  const visibleAssistantResponse = isAgentRunning ? latestAssistantResponse : retainedAssistantResponse;
+  const agentStatusDialog = isAgentRunning || retainedAssistantResponse !== null ? (
+    <FilesystemAgentStatusDialog
+      response={visibleAssistantResponse}
+      currentPath={currentPath}
+      onOpenFilePath={onOpenFilePath}
+    />
+  ) : null;
+
   return (
-    <button
-      className="filesystem-hover-grip"
-      type="button"
-      aria-label={isRecording ? "Stop recording" : "Start recording"}
-      aria-pressed={isRecording}
-      data-expanded={isExpanded ? "true" : "false"}
-      data-recording={isRecording ? "true" : "false"}
-      data-loading={isTranscribing ? "true" : "false"}
-      onClick={() => {
-        if (isTranscribing) {
-          return;
-        }
-
-        if (recordingState === "idle") {
-          void startRecording();
-          return;
-        }
-
-        stopRecording();
-      }}
-    >
-      {isTranscribing ? (
-        <span className="filesystem-hover-grip-loading" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
+    <div className="filesystem-voice-stack" data-with-prompt={hasPromptContent ? "true" : "false"}>
+      {agentStatusDialog}
+      {hasPromptContent ? (
+        <div className="filesystem-voice-prompt-shell">
+          <RightPromptComposer
+            draft={promptDraft}
+            attachments={promptAttachments}
+            voiceState={voiceState}
+            autoFocus={shouldAutoFocus}
+            isRunning={isAgentRunning}
+            onDraftChange={onPromptDraftChange}
+            onAttachmentsChange={onPromptAttachmentsChange}
+            onCancel={cancel}
+            onSubmit={async (input) => {
+              const didSubmit = isAgentRunning ? await steer(input) : submit(input);
+              return didSubmit;
+            }}
+          />
+        </div>
       ) : (
-        <span className="filesystem-hover-grip-dots" aria-hidden="true">
-          {Array.from({ length: 8 }, (_, index) => (
-            <span key={index} />
-          ))}
-        </span>
+        <button
+          className="filesystem-hover-grip"
+          type="button"
+          aria-label={isRecording ? "Stop recording" : "Start recording"}
+          aria-pressed={isRecording}
+          data-expanded={isExpanded ? "true" : "false"}
+          data-recording={isRecording ? "true" : "false"}
+          data-loading={isLoading ? "true" : "false"}
+          onClick={() => {
+            if (isLoading) {
+              return;
+            }
+
+            if (voiceState === "idle") {
+              void onStartRecording();
+              return;
+            }
+
+            onStopRecording();
+          }}
+        >
+          {isLoading ? (
+            <span className="filesystem-hover-grip-loading" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          ) : (
+            <span className="filesystem-hover-grip-dots" aria-hidden="true">
+              {Array.from({ length: 8 }, (_, index) => (
+                <span key={index} />
+              ))}
+            </span>
+          )}
+        </button>
       )}
-    </button>
+    </div>
   );
+};
+
+type FilesystemAgentStatusResponse = {
+  readonly id: string;
+  readonly markdown: string;
+  readonly isStreaming: boolean;
+};
+
+const FilesystemAgentStatusDialog = ({
+  response,
+  currentPath,
+  onOpenFilePath,
+}: {
+  readonly response: FilesystemAgentStatusResponse | null;
+  readonly currentPath: string;
+  readonly onOpenFilePath: (path: string) => void;
+}): React.ReactElement => (
+  <div
+    className="filesystem-agent-status-dialog"
+    data-state={response === null ? "working" : "response"}
+    role="status"
+    aria-live="polite"
+  >
+    {response === null ? (
+      <div className="filesystem-agent-status-working">
+        <span>Working</span>
+      </div>
+    ) : (
+      <div className="filesystem-agent-status-scroll">
+        <div
+          key={response.id}
+          className="filesystem-agent-status-message"
+          data-streaming={response.isStreaming ? "true" : "false"}
+        >
+          <Suspense fallback={<div className="chat-markdown" />}>
+            <ChatMarkdown
+              text={response.markdown}
+              cwd={currentPath}
+              isStreaming={response.isStreaming}
+              onOpenFilePath={onOpenFilePath}
+            />
+          </Suspense>
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+const findLastUserMessageIndex = (
+  messageOrder: readonly string[],
+  messagesById: Readonly<Record<string, unknown>>,
+): number => {
+  for (let index = messageOrder.length - 1; index >= 0; index -= 1) {
+    const messageId = messageOrder[index];
+    const message = messageId === undefined ? undefined : messagesById[messageId];
+
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      "role" in message &&
+      message.role === "user"
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
 };
 
 const SARVAM_API_BASE_URL = "https://api.sarvam.ai";
