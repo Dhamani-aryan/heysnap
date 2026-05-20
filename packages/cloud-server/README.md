@@ -53,6 +53,7 @@ For the full local Docker machine workflow, use the root commands documented in
 - `WS /gateway/computers/:computerId/browser-control`
 - `HTTP /gateway/computers/:computerId/agent/*`
 - `POST /llm/openai/v1/responses`
+- `POST /llm/openai/v1/responses/compact`
 - `POST /llm/openai/v1/images/generations`
 - `POST /llm/openai/v1/images/edits`
 - `HTTP /firecrawl/*`
@@ -87,6 +88,9 @@ as the `api-key` header. Cloud-server authenticates that token, replaces it with
 usage metadata against the owning user and computer. The Azure URL can be either
 a base path or the full Responses endpoint; if it already ends in `/responses`,
 Codex requests to `/llm/openai/v1/responses` are not double-appended.
+Codex compact requests to `/llm/openai/v1/responses/compact` also forward to
+the Azure Responses compact endpoint, and the gateway drops `api-version` query
+parameters for that route.
 
 Image generation clients use the same gateway prefix and same machine token:
 
