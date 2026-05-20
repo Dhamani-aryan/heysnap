@@ -31,6 +31,32 @@ describe("browser-control bridge protocol", () => {
     });
   });
 
+  it("parses request output metadata", () => {
+    expect(parseBrowserControlServerMessage(JSON.stringify({
+      type: "request",
+      requestId: "request-1",
+      command: "tab.screenshot",
+      params: { tabId: 123, outputId: "screenshot", format: "png" },
+      outputs: [{
+        id: "screenshot",
+        mimeType: "image/png",
+        maxBytes: 52428800,
+      }],
+    }))).toEqual({
+      type: "request",
+      requestId: "request-1",
+      command: "tab.screenshot",
+      params: { tabId: 123, outputId: "screenshot", format: "png" },
+      timeoutMs: undefined,
+      attachments: undefined,
+      outputs: [{
+        id: "screenshot",
+        mimeType: "image/png",
+        maxBytes: 52428800,
+      }],
+    });
+  });
+
   it("parses attachment chunk and error frames", () => {
     expect(parseBrowserControlServerMessage(JSON.stringify({
       type: "attachment.chunk",
@@ -67,6 +93,46 @@ describe("browser-control bridge protocol", () => {
       error: {
         code: "BROWSER_ATTACHMENT_CHANGED",
         message: "Attachment changed.",
+      },
+    });
+  });
+
+  it("parses output ack and error frames", () => {
+    expect(parseBrowserControlServerMessage(JSON.stringify({
+      type: "output.ack",
+      requestId: "request-1",
+      writeRequestId: "write-1",
+      outputId: "screenshot",
+      offset: 0,
+      bytesWritten: 42,
+      done: true,
+    }))).toEqual({
+      type: "output.ack",
+      requestId: "request-1",
+      writeRequestId: "write-1",
+      outputId: "screenshot",
+      offset: 0,
+      bytesWritten: 42,
+      done: true,
+    });
+
+    expect(parseBrowserControlServerMessage(JSON.stringify({
+      type: "output.error",
+      requestId: "request-1",
+      writeRequestId: "write-1",
+      outputId: "screenshot",
+      error: {
+        code: "BROWSER_OUTPUT_TOO_LARGE",
+        message: "Too large.",
+      },
+    }))).toEqual({
+      type: "output.error",
+      requestId: "request-1",
+      writeRequestId: "write-1",
+      outputId: "screenshot",
+      error: {
+        code: "BROWSER_OUTPUT_TOO_LARGE",
+        message: "Too large.",
       },
     });
   });

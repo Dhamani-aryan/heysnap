@@ -13,7 +13,9 @@ export interface BrowserControlExecutorInput {
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
   readonly attachments?: readonly BrowserControlAttachmentMetadata[];
+  readonly outputs?: readonly BrowserControlOutputMetadata[];
   readonly readAttachment?: BrowserControlAttachmentReader;
+  readonly writeOutput?: BrowserControlOutputWriter;
 }
 
 export type BrowserControlExecutor = (
@@ -52,6 +54,11 @@ interface PendingBrowserControlAttachmentRead {
   readonly resolve: (chunk: BrowserControlAttachmentChunk) => void;
 }
 
+interface PendingBrowserControlOutputWrite {
+  readonly reject: (error: Error) => void;
+  readonly resolve: (ack: BrowserControlOutputAck) => void;
+}
+
 export type BrowserControlServerMessage =
   | {
       readonly type: "request";
@@ -60,6 +67,7 @@ export type BrowserControlServerMessage =
       readonly params?: unknown;
       readonly timeoutMs?: number;
       readonly attachments?: readonly BrowserControlAttachmentMetadata[];
+      readonly outputs?: readonly BrowserControlOutputMetadata[];
     }
   | {
       readonly type: "cancel";
@@ -80,6 +88,25 @@ export type BrowserControlServerMessage =
       readonly requestId: string;
       readonly chunkRequestId: string;
       readonly attachmentId: string;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    }
+  | {
+      readonly type: "output.ack";
+      readonly requestId: string;
+      readonly writeRequestId: string;
+      readonly outputId: string;
+      readonly offset: number;
+      readonly bytesWritten: number;
+      readonly done: boolean;
+    }
+  | {
+      readonly type: "output.error";
+      readonly requestId: string;
+      readonly writeRequestId: string;
+      readonly outputId: string;
       readonly error: {
         readonly code: string;
         readonly message: string;
@@ -108,6 +135,29 @@ export type BrowserControlAttachmentReader = (
     readonly signal: AbortSignal;
   },
 ) => Promise<BrowserControlAttachmentChunk>;
+
+export interface BrowserControlOutputMetadata {
+  readonly id: string;
+  readonly mimeType: string;
+  readonly maxBytes: number;
+}
+
+export interface BrowserControlOutputAck {
+  readonly bytesWritten: number;
+  readonly done: boolean;
+  readonly offset: number;
+  readonly outputId: string;
+}
+
+export type BrowserControlOutputWriter = (
+  input: {
+    readonly dataBase64: string;
+    readonly done: boolean;
+    readonly offset: number;
+    readonly outputId: string;
+    readonly signal: AbortSignal;
+  },
+) => Promise<BrowserControlOutputAck>;
 
 export function BrowserControlBridge({
   websocketUrl,
@@ -143,6 +193,7 @@ export function BrowserControlBridge({
     let isCancelled = false;
     const pendingRequests = new Map<string, PendingBrowserControlRequest>();
     const pendingAttachmentReads = new Map<string, PendingBrowserControlAttachmentRead>();
+    const pendingOutputWrites = new Map<string, PendingBrowserControlOutputWrite>();
     const setStatus = (status: BrowserControlStatus): void => {
       if (!isCancelled) {
         onStatusChange?.(status);
@@ -159,6 +210,12 @@ export function BrowserControlBridge({
       for (const [chunkRequestId, pendingRead] of pendingAttachmentReads) {
         pendingAttachmentReads.delete(chunkRequestId);
         pendingRead.reject(new BrowserControlExtensionCommandError("BROWSER_ATTACHMENT_CANCELLED", reason));
+      }
+    };
+    const closePendingOutputWrites = (reason: string): void => {
+      for (const [writeRequestId, pendingWrite] of pendingOutputWrites) {
+        pendingOutputWrites.delete(writeRequestId);
+        pendingWrite.reject(new BrowserControlExtensionCommandError("BROWSER_OUTPUT_CANCELLED", reason));
       }
     };
 
@@ -217,6 +274,11 @@ export function BrowserControlBridge({
           return;
         }
 
+        if (message.type === "output.ack" || message.type === "output.error") {
+          settleOutputWrite(pendingOutputWrites, message);
+          return;
+        }
+
         if (message.type === "cancel") {
           pendingRequests.get(message.requestId)?.abortController.abort(message.reason);
           pendingRequests.delete(message.requestId);
@@ -244,6 +306,11 @@ export function BrowserControlBridge({
             webSocket: socket,
           }),
           webSocket: socket,
+          writeOutput: createOutputWriter({
+            pendingOutputWrites,
+            requestId: message.requestId,
+            webSocket: socket,
+          }),
         }).finally(() => {
           pendingRequests.delete(message.requestId);
         });
@@ -252,6 +319,7 @@ export function BrowserControlBridge({
       socket.addEventListener("close", () => {
         closePendingRequests("Browser-control socket closed");
         closePendingAttachmentReads("Browser-control socket closed");
+        closePendingOutputWrites("Browser-control socket closed");
         setStatus({ state: "disconnected", label: "Disconnected" });
       });
 
@@ -272,6 +340,7 @@ export function BrowserControlBridge({
       isCancelled = true;
       closePendingRequests("Browser-control bridge unmounted");
       closePendingAttachmentReads("Browser-control bridge unmounted");
+      closePendingOutputWrites("Browser-control bridge unmounted");
       webSocket?.close(1000, "Browser-control bridge unmounted");
     };
   }, [clientId, extensionId, onStatusChange, websocketUrl]);
@@ -286,6 +355,7 @@ const executeRequest = async (input: {
   readonly message: Extract<BrowserControlServerMessage, { readonly type: "request" }>;
   readonly readAttachment: BrowserControlAttachmentReader;
   readonly webSocket: WebSocket;
+  readonly writeOutput: BrowserControlOutputWriter;
 }): Promise<void> => {
   if (input.executor === undefined) {
     sendResponse(input.webSocket, {
@@ -324,7 +394,9 @@ const executeRequest = async (input: {
       signal: input.abortController.signal,
       timeoutMs: input.message.timeoutMs,
       attachments: input.message.attachments,
+      outputs: input.message.outputs,
       readAttachment: input.readAttachment,
+      writeOutput: input.writeOutput,
     });
 
     sendResponse(input.webSocket, {
@@ -359,6 +431,10 @@ const createExtensionExecutor = (extensionId: string | undefined): BrowserContro
       throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENTS_UNSUPPORTED", "Browser-control attachments require the workspace browser executor.");
     }
 
+    if ((input.outputs?.length ?? 0) > 0) {
+      throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "Browser-control outputs require the workspace browser executor.");
+    }
+
     return sendBrowserControlExtensionCommand(normalizedExtensionId, input.command, input.params, input.signal);
   };
 };
@@ -390,8 +466,9 @@ export const parseBrowserControlServerMessage = (data: unknown): BrowserControlS
 
   if (message["type"] === "request") {
     const attachments = parseAttachmentMetadata(message["attachments"]);
+    const outputs = parseOutputMetadata(message["outputs"]);
 
-    if (attachments === null) {
+    if (attachments === null || outputs === null) {
       return null;
     }
 
@@ -405,6 +482,7 @@ export const parseBrowserControlServerMessage = (data: unknown): BrowserControlS
           params: message["params"],
           timeoutMs: typeof message["timeoutMs"] === "number" ? message["timeoutMs"] : undefined,
           attachments,
+          outputs,
         }
       : null;
   }
@@ -461,6 +539,48 @@ export const parseBrowserControlServerMessage = (data: unknown): BrowserControlS
       : null;
   }
 
+  if (message["type"] === "output.ack") {
+    return typeof message["requestId"] === "string" &&
+      typeof message["writeRequestId"] === "string" &&
+      typeof message["outputId"] === "string" &&
+      typeof message["offset"] === "number" &&
+      typeof message["bytesWritten"] === "number" &&
+      typeof message["done"] === "boolean"
+      ? {
+          type: "output.ack",
+          requestId: message["requestId"],
+          writeRequestId: message["writeRequestId"],
+          outputId: message["outputId"],
+          offset: message["offset"],
+          bytesWritten: message["bytesWritten"],
+          done: message["done"],
+        }
+      : null;
+  }
+
+  if (message["type"] === "output.error") {
+    const error = typeof message["error"] === "object" && message["error"] !== null && !Array.isArray(message["error"])
+      ? message["error"] as Record<string, unknown>
+      : null;
+
+    return typeof message["requestId"] === "string" &&
+      typeof message["writeRequestId"] === "string" &&
+      typeof message["outputId"] === "string" &&
+      typeof error?.["code"] === "string" &&
+      typeof error["message"] === "string"
+      ? {
+          type: "output.error",
+          requestId: message["requestId"],
+          writeRequestId: message["writeRequestId"],
+          outputId: message["outputId"],
+          error: {
+            code: error["code"],
+            message: error["message"],
+          },
+        }
+      : null;
+  }
+
   return null;
 };
 
@@ -498,6 +618,40 @@ const parseAttachmentMetadata = (value: unknown): readonly BrowserControlAttachm
   }
 
   return attachments;
+};
+
+const parseOutputMetadata = (value: unknown): readonly BrowserControlOutputMetadata[] | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const outputs: BrowserControlOutputMetadata[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return null;
+    }
+
+    const output = entry as Record<string, unknown>;
+    if (
+      typeof output["id"] !== "string" ||
+      typeof output["mimeType"] !== "string" ||
+      typeof output["maxBytes"] !== "number"
+    ) {
+      return null;
+    }
+
+    outputs.push({
+      id: output["id"],
+      mimeType: output["mimeType"],
+      maxBytes: output["maxBytes"],
+    });
+  }
+
+  return outputs;
 };
 
 const createAttachmentReader = ({
@@ -576,6 +730,84 @@ const settleAttachmentRead = (
   });
 };
 
+const createOutputWriter = ({
+  pendingOutputWrites,
+  requestId,
+  webSocket,
+}: {
+  readonly pendingOutputWrites: Map<string, PendingBrowserControlOutputWrite>;
+  readonly requestId: string;
+  readonly webSocket: WebSocket;
+}): BrowserControlOutputWriter => async ({
+  dataBase64,
+  done,
+  offset,
+  outputId,
+  signal,
+}) => {
+  if (webSocket.readyState !== WebSocket.OPEN) {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUT_CANCELLED", "Browser-control socket is not open.");
+  }
+
+  const writeRequestId = createBrowserControlClientId();
+
+  return await new Promise<BrowserControlOutputAck>((resolve, reject) => {
+    const handleAbort = (): void => {
+      pendingOutputWrites.delete(writeRequestId);
+      reject(new BrowserControlExtensionCommandError("BROWSER_OUTPUT_CANCELLED", "Browser-control output write was cancelled."));
+    };
+
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    pendingOutputWrites.set(writeRequestId, { resolve, reject });
+    signal.addEventListener("abort", handleAbort, { once: true });
+
+    try {
+      webSocket.send(JSON.stringify({
+        type: "output.write",
+        requestId,
+        writeRequestId,
+        outputId,
+        offset,
+        dataBase64,
+        done,
+      }));
+    } catch (error) {
+      signal.removeEventListener("abort", handleAbort);
+      pendingOutputWrites.delete(writeRequestId);
+      reject(error instanceof Error ? error : new Error("Failed to write browser-control output chunk."));
+    }
+  });
+};
+
+const settleOutputWrite = (
+  pendingOutputWrites: Map<string, PendingBrowserControlOutputWrite>,
+  message: Extract<BrowserControlServerMessage, { readonly type: "output.ack" | "output.error" }>,
+): void => {
+  const pendingWrite = pendingOutputWrites.get(message.writeRequestId);
+
+  if (pendingWrite === undefined) {
+    return;
+  }
+
+  pendingOutputWrites.delete(message.writeRequestId);
+
+  if (message.type === "output.error") {
+    pendingWrite.reject(new BrowserControlExtensionCommandError(message.error.code, message.error.message));
+    return;
+  }
+
+  pendingWrite.resolve({
+    bytesWritten: message.bytesWritten,
+    done: message.done,
+    offset: message.offset,
+    outputId: message.outputId,
+  });
+};
+
 type BrowserControlCommandName =
   | "getTabs"
   | "createNewTab"
@@ -586,6 +818,7 @@ type BrowserControlCommandName =
   | "tab.goTo"
   | "tab.refresh"
   | "tab.evaluate"
+  | "tab.screenshot"
   | "tab.cdp";
 
 const browserControlCommandNames = new Set<string>([
@@ -598,6 +831,7 @@ const browserControlCommandNames = new Set<string>([
   "tab.goTo",
   "tab.refresh",
   "tab.evaluate",
+  "tab.screenshot",
   "tab.cdp",
 ]);
 

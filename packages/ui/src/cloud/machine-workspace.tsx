@@ -22,6 +22,8 @@ import {
   type BrowserControlAttachmentMetadata,
   type BrowserControlAttachmentReader,
   type BrowserControlExecutor,
+  type BrowserControlOutputMetadata,
+  type BrowserControlOutputWriter,
   type BrowserControlStatus,
 } from "./browser-control-bridge";
 import type { CloudComputer } from "./cloud-client";
@@ -33,6 +35,7 @@ const BROWSER_SCREENCAST_PORT_NAME = "heysnap-cdp-screencast";
 const BROWSER_TAB_EVENTS_PORT_NAME = "heysnap-tab-events";
 const CHROME_DEBUGGER_PROTOCOL_VERSION = "1.3";
 const BROWSER_CONTROL_ATTACHMENT_CHUNK_BYTES = 512 * 1024;
+const BROWSER_CONTROL_OUTPUT_CHUNK_BYTES = 512 * 1024;
 
 export interface MachineWorkspaceProps {
   readonly agentBaseUrl: string;
@@ -779,11 +782,13 @@ export function MachineWorkspace({
       command: input.command,
       executeDebuggerCommand: executeBrowserDebuggerCommand,
       executeExtensionCommand: executeBrowserExtensionCommand,
+      outputs: input.outputs,
       params: input.params,
       readAttachment: input.readAttachment,
       signal: input.signal,
       timeoutMs: input.timeoutMs,
       windowId,
+      writeOutput: input.writeOutput,
     });
 
     await refreshBrowserWindowTabs(windowId, input.signal).catch(() => undefined);
@@ -1279,10 +1284,12 @@ type BrowserControlCommandInput = {
     signal: AbortSignal,
   ) => Promise<unknown>;
   readonly params: unknown;
+  readonly outputs?: readonly BrowserControlOutputMetadata[];
   readonly readAttachment?: BrowserControlAttachmentReader;
   readonly signal: AbortSignal;
   readonly timeoutMs?: number;
   readonly windowId: number;
+  readonly writeOutput?: BrowserControlOutputWriter;
 };
 
 type BrowserDebuggerCommandExecutor = (input: {
@@ -1326,19 +1333,25 @@ type BrowserTabLoadState = {
   readonly pendingUrl?: string;
 };
 
-const executeBrowserControlExtensionCommand = async ({
+export const executeBrowserControlExtensionCommand = async ({
   attachments = [],
   command,
   executeDebuggerCommand,
   executeExtensionCommand,
   params,
+  outputs = [],
   readAttachment,
   signal,
   timeoutMs,
   windowId,
+  writeOutput,
 }: BrowserControlCommandInput): Promise<unknown> => {
   if (attachments.length > 0 && command !== "tab.evaluate") {
     throw new BrowserControlExtensionCommandError("BROWSER_ATTACHMENTS_UNSUPPORTED", "Browser-control attachments are only supported for tab.evaluate.");
+  }
+
+  if (outputs.length > 0 && command !== "tab.screenshot") {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "Browser-control outputs are only supported for tab.screenshot.");
   }
 
   switch (command) {
@@ -1442,6 +1455,16 @@ const executeBrowserControlExtensionCommand = async ({
         signal,
       });
     }
+    case "tab.screenshot":
+      return captureBrowserTabScreenshot({
+        executeDebuggerCommand,
+        executeExtensionCommand,
+        outputs,
+        params,
+        signal,
+        timeoutMs,
+        writeOutput,
+      });
     case "tab.cdp": {
       const parsed = readRequiredObject(params, "tab.cdp.params");
       return executeDebuggerCommand({
@@ -2003,6 +2026,206 @@ const evaluateInBrowserTab = async ({
     ok: true,
     result: readCdpEvaluationResult(cdpResult["result"]),
   };
+};
+
+const captureBrowserTabScreenshot = async ({
+  executeDebuggerCommand,
+  executeExtensionCommand,
+  outputs,
+  params,
+  signal,
+  timeoutMs,
+  writeOutput,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly executeExtensionCommand: BrowserControlCommandInput["executeExtensionCommand"];
+  readonly outputs: readonly BrowserControlOutputMetadata[];
+  readonly params: unknown;
+  readonly signal: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly writeOutput: BrowserControlOutputWriter | undefined;
+}): Promise<unknown> => {
+  if (writeOutput === undefined) {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "Browser-control output writer is unavailable.");
+  }
+
+  if (outputs.length !== 1) {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUTS_UNSUPPORTED", "tab.screenshot requires exactly one browser-control output.");
+  }
+
+  const parsed = readRequiredObject(params, "tab.screenshot.params");
+  const tabId = readRequiredNumber(parsed["tabId"], "tab.screenshot.params.tabId");
+  const waitForLoad = parseWaitForLoadOptions(parsed["waitForLoad"], timeoutMs);
+
+  if (waitForLoad !== null) {
+    await waitForBrowserLoad({
+      executeDebuggerCommand,
+      executeExtensionCommand,
+      options: waitForLoad,
+      signal,
+      tabId,
+    });
+  }
+
+  const screenshotParams = await buildScreenshotCdpParams({
+    executeDebuggerCommand,
+    params: parsed,
+    signal,
+    tabId,
+  });
+  const result = await executeDebuggerCommand({
+    tabId,
+    method: "Page.captureScreenshot",
+    params: screenshotParams,
+    signal,
+  });
+  const dataBase64 = readScreenshotData(result);
+  const size = getBase64ByteLength(dataBase64);
+  const output = outputs[0];
+
+  if (size > output.maxBytes) {
+    throw new BrowserControlExtensionCommandError("BROWSER_OUTPUT_TOO_LARGE", `Browser-control screenshot exceeds the ${String(output.maxBytes)} byte limit.`);
+  }
+
+  await streamBrowserControlOutput({
+    dataBase64,
+    outputId: output.id,
+    signal,
+    writeOutput,
+  });
+
+  return {
+    tabId,
+    outputId: output.id,
+    size,
+  };
+};
+
+const buildScreenshotCdpParams = async ({
+  executeDebuggerCommand,
+  params,
+  signal,
+  tabId,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly params: Record<string, unknown>;
+  readonly signal: AbortSignal;
+  readonly tabId: number;
+}): Promise<Record<string, unknown>> => {
+  const captureMode = readOptionalString(params["captureMode"], "tab.screenshot.params.captureMode") ?? "viewport";
+  const format = readRequiredString(params["format"], "tab.screenshot.params.format");
+  const clip = captureMode === "clip"
+    ? readScreenshotClip(params["clip"], "tab.screenshot.params.clip")
+    : captureMode === "fullPage"
+      ? await readFullPageScreenshotClip({ executeDebuggerCommand, signal, tabId })
+      : undefined;
+
+  return stripUndefined({
+    format,
+    quality: readOptionalNumber(params["quality"], "tab.screenshot.params.quality"),
+    clip,
+    fromSurface: readOptionalBoolean(params["fromSurface"], "tab.screenshot.params.fromSurface"),
+    captureBeyondViewport: captureMode === "fullPage"
+      ? true
+      : readOptionalBoolean(params["captureBeyondViewport"], "tab.screenshot.params.captureBeyondViewport"),
+    optimizeForSpeed: readOptionalBoolean(params["optimizeForSpeed"], "tab.screenshot.params.optimizeForSpeed"),
+  });
+};
+
+const readFullPageScreenshotClip = async ({
+  executeDebuggerCommand,
+  signal,
+  tabId,
+}: {
+  readonly executeDebuggerCommand: BrowserControlCommandInput["executeDebuggerCommand"];
+  readonly signal: AbortSignal;
+  readonly tabId: number;
+}): Promise<{ readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly scale: number }> => {
+  const metrics = readRequiredObject(
+    await executeDebuggerCommand({
+      tabId,
+      method: "Page.getLayoutMetrics",
+      signal,
+    }),
+    "Page.getLayoutMetrics.result",
+  );
+  const contentSize = readRequiredObject(
+    metrics["cssContentSize"] ?? metrics["contentSize"],
+    "Page.getLayoutMetrics.result.contentSize",
+  );
+
+  return {
+    x: typeof contentSize["x"] === "number" ? contentSize["x"] : 0,
+    y: typeof contentSize["y"] === "number" ? contentSize["y"] : 0,
+    width: Math.max(readRequiredNumber(contentSize["width"], "Page.getLayoutMetrics.result.contentSize.width"), 1),
+    height: Math.max(readRequiredNumber(contentSize["height"], "Page.getLayoutMetrics.result.contentSize.height"), 1),
+    scale: 1,
+  };
+};
+
+const readScreenshotClip = (
+  value: unknown,
+  label: string,
+): { readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly scale?: number } => {
+  const clip = readRequiredObject(value, label);
+
+  return stripUndefined({
+    x: readRequiredNumber(clip["x"], `${label}.x`),
+    y: readRequiredNumber(clip["y"], `${label}.y`),
+    width: readRequiredNumber(clip["width"], `${label}.width`),
+    height: readRequiredNumber(clip["height"], `${label}.height`),
+    scale: readOptionalNumber(clip["scale"], `${label}.scale`),
+  });
+};
+
+const readScreenshotData = (value: unknown): string => {
+  const result = readRequiredObject(value, "Page.captureScreenshot.result");
+  return readRequiredString(result["data"], "Page.captureScreenshot.result.data");
+};
+
+const streamBrowserControlOutput = async ({
+  dataBase64,
+  outputId,
+  signal,
+  writeOutput,
+}: {
+  readonly dataBase64: string;
+  readonly outputId: string;
+  readonly signal: AbortSignal;
+  readonly writeOutput: BrowserControlOutputWriter;
+}): Promise<void> => {
+  const maxChunkCharacters = Math.floor(BROWSER_CONTROL_OUTPUT_CHUNK_BYTES / 3) * 4;
+  let offset = 0;
+
+  for (let index = 0; index < dataBase64.length; index += maxChunkCharacters) {
+    throwIfAborted(signal);
+    const chunk = dataBase64.slice(index, index + maxChunkCharacters);
+    const done = index + maxChunkCharacters >= dataBase64.length;
+    const ack = await writeOutput({
+      dataBase64: chunk,
+      done,
+      offset,
+      outputId,
+      signal,
+    });
+    const byteLength = getBase64ByteLength(chunk);
+
+    if (ack.offset !== offset || ack.bytesWritten !== byteLength) {
+      throw new Error("Browser-control output acknowledged an unexpected write range.");
+    }
+
+    offset += byteLength;
+  }
+
+  if (dataBase64.length === 0) {
+    await writeOutput({
+      dataBase64: "",
+      done: true,
+      offset: 0,
+      outputId,
+      signal,
+    });
+  }
 };
 
 const parseWaitForLoadOptions = (
