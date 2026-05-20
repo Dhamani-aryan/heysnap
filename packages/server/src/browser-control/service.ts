@@ -16,8 +16,11 @@ const MAX_ATTACHMENT_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_ATTACHMENT_CHUNK_BYTES = 512 * 1024;
 const DEFAULT_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 const BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID = "screenshot";
+const MAX_DOWNLOAD_OUTPUT_COUNT = 10;
 const MAX_OUTPUT_CHUNK_BYTES = 512 * 1024;
 const MAX_SCREENSHOT_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_DOWNLOAD_OUTPUT_BYTES = 100 * 1024 * 1024;
+const DEFAULT_DOWNLOAD_OUTPUT_MIME_TYPE = "application/octet-stream";
 
 const jsonHeaders = {
   "access-control-allow-origin": "*",
@@ -48,6 +51,7 @@ export type BrowserControlCliInput = BrowserControlCliRequest & {
   readonly timeoutMs?: number;
   readonly clientRequestId?: string;
   readonly attachments?: readonly BrowserControlAttachmentInput[];
+  readonly outputs?: readonly BrowserControlOutputInput[];
 };
 
 export type BrowserControlBrokerInput = BrowserControlRequest & {
@@ -196,10 +200,19 @@ export interface BrowserControlOutputMetadata {
   readonly maxBytes: number;
 }
 
+export interface BrowserControlOutputInput {
+  readonly id: string;
+  readonly path: string;
+  readonly mimeType?: string;
+  readonly maxBytes?: number;
+  readonly overwrite?: boolean;
+}
+
 export interface BrowserControlResolvedOutput extends BrowserControlOutputMetadata {
   readonly absolutePath: string;
   readonly clientPath: string;
-  readonly format: BrowserControlScreenshotFormat;
+  readonly format?: BrowserControlScreenshotFormat;
+  readonly kind: "download" | "screenshot";
   readonly tempPath: string;
   readonly overwritten: boolean;
 }
@@ -808,6 +821,7 @@ const parseCliInput = (body: unknown): BrowserControlCliInput => {
   const timeoutMs = input["timeoutMs"];
   const clientRequestId = input["clientRequestId"];
   const attachments = parseBrowserControlAttachmentInputs(input["attachments"]);
+  const outputs = parseBrowserControlOutputInputs(input["outputs"]);
   const request = parseBrowserControlRequest(input);
 
   if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || typeof timeoutMs !== "number" || timeoutMs <= 0)) {
@@ -824,6 +838,7 @@ const parseCliInput = (body: unknown): BrowserControlCliInput => {
     timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
     clientRequestId: typeof clientRequestId === "string" ? clientRequestId : undefined,
     attachments,
+    outputs,
   };
 };
 
@@ -857,6 +872,46 @@ const parseBrowserControlAttachmentInputs = (value: unknown): readonly BrowserCo
       path: readRequiredNonEmptyString(attachment["path"], `${label}.path`),
       name: readOptionalNonEmptyString(attachment["name"], `${label}.name`),
       mimeType: readOptionalNonEmptyString(attachment["mimeType"], `${label}.mimeType`),
+    });
+  });
+};
+
+const parseBrowserControlOutputInputs = (value: unknown): readonly BrowserControlOutputInput[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("outputs must be an array.");
+  }
+
+  if (value.length > MAX_DOWNLOAD_OUTPUT_COUNT) {
+    throw new Error(`outputs cannot include more than ${String(MAX_DOWNLOAD_OUTPUT_COUNT)} files.`);
+  }
+
+  const seenIds = new Set<string>();
+  return value.map((entry, index) => {
+    const label = `outputs[${String(index)}]`;
+    const output = readRequiredObject(entry, label);
+    assertAllowedKeys(output, label, ["id", "path", "mimeType", "maxBytes", "overwrite"]);
+    const id = readRequiredNonEmptyString(output["id"], `${label}.id`);
+
+    if (seenIds.has(id)) {
+      throw new Error(`outputs includes duplicate id "${id}".`);
+    }
+    seenIds.add(id);
+
+    const maxBytes = readOptionalPositiveInteger(output["maxBytes"], `${label}.maxBytes`);
+    if (maxBytes !== undefined && maxBytes > MAX_DOWNLOAD_OUTPUT_BYTES) {
+      throw new Error(`outputs.${id}.maxBytes cannot exceed ${String(MAX_DOWNLOAD_OUTPUT_BYTES)} bytes.`);
+    }
+
+    return stripUndefined({
+      id,
+      path: readRequiredNonEmptyString(output["path"], `${label}.path`),
+      mimeType: readOptionalNonEmptyString(output["mimeType"], `${label}.mimeType`),
+      maxBytes,
+      overwrite: readOptionalBoolean(output["overwrite"], `${label}.overwrite`),
     });
   });
 };
@@ -939,11 +994,36 @@ const prepareBrowserControlBrokerInput = async (
     readonly timeoutMs?: number;
     readonly clientRequestId?: string;
     readonly attachments?: readonly BrowserControlResolvedAttachment[];
+    readonly outputs?: readonly BrowserControlOutputInput[];
   },
   filesystemRootPath: string | undefined,
 ): Promise<BrowserControlBrokerInput> => {
+  if (input.outputs !== undefined && input.outputs.length > 0) {
+    if (input.command !== "tab.evaluate") {
+      throw new Error("outputs are only supported for tab.evaluate.");
+    }
+
+    const resolvedOutputs = await resolveBrowserControlDownloadOutputs(input.outputs, filesystemRootPath);
+    return stripUndefined({
+      targetUserId: input.targetUserId,
+      timeoutMs: input.timeoutMs,
+      clientRequestId: input.clientRequestId,
+      attachments: input.attachments,
+      command: input.command,
+      params: input.params,
+      outputs: resolvedOutputs,
+    });
+  }
+
   if (input.command !== "tab.screenshot") {
-    return input as BrowserControlBrokerInput;
+    return {
+      targetUserId: input.targetUserId,
+      timeoutMs: input.timeoutMs,
+      clientRequestId: input.clientRequestId,
+      attachments: input.attachments,
+      command: input.command,
+      params: input.params,
+    } as BrowserControlBrokerInput;
   }
 
   const resolved = await resolveBrowserControlScreenshotOutput(input.params, filesystemRootPath);
@@ -967,7 +1047,7 @@ const toScreenshotForwardParams = (
   outputId: output.id,
   captureMode: params.captureMode,
   clip: params.clip,
-  format: output.format,
+  format: output.format ?? "png",
   quality: params.quality,
   waitForLoad: params.waitForLoad,
   fromSurface: params.fromSurface,
@@ -989,7 +1069,75 @@ const resolveBrowserControlScreenshotOutput = async (
     throw new Error("tab.screenshot.params.quality can only be used with jpeg or webp screenshots.");
   }
 
-  const targetPath = resolveClientPath(filesystemRootPath, params.path);
+  const target = await resolveBrowserControlOutputPath({
+    filesystemRootPath,
+    label: "tab.screenshot.params.path",
+    overwrite: params.overwrite,
+    path: params.path,
+  });
+
+  return {
+    id: BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID,
+    absolutePath: target.absolutePath,
+    clientPath: params.path,
+    format,
+    kind: "screenshot",
+    maxBytes: MAX_SCREENSHOT_FILE_BYTES,
+    mimeType: screenshotMimeType(format),
+    tempPath: target.tempPath,
+    overwritten: target.overwritten,
+  };
+};
+
+const resolveBrowserControlDownloadOutputs = async (
+  outputs: readonly BrowserControlOutputInput[],
+  filesystemRootPath: string | undefined,
+): Promise<readonly BrowserControlResolvedOutput[]> => {
+  if (filesystemRootPath === undefined) {
+    throw new Error("Browser-control outputs are unavailable because the filesystem root is not configured.");
+  }
+
+  const resolvedOutputs: BrowserControlResolvedOutput[] = [];
+
+  for (const output of outputs) {
+    const target = await resolveBrowserControlOutputPath({
+      filesystemRootPath,
+      label: `outputs.${output.id}.path`,
+      overwrite: output.overwrite,
+      path: output.path,
+    });
+
+    resolvedOutputs.push({
+      id: output.id,
+      absolutePath: target.absolutePath,
+      clientPath: output.path,
+      kind: "download",
+      maxBytes: output.maxBytes ?? MAX_DOWNLOAD_OUTPUT_BYTES,
+      mimeType: output.mimeType ?? DEFAULT_DOWNLOAD_OUTPUT_MIME_TYPE,
+      tempPath: target.tempPath,
+      overwritten: target.overwritten,
+    });
+  }
+
+  return resolvedOutputs;
+};
+
+const resolveBrowserControlOutputPath = async ({
+  filesystemRootPath,
+  label,
+  overwrite,
+  path,
+}: {
+  readonly filesystemRootPath: string;
+  readonly label: string;
+  readonly overwrite: boolean | undefined;
+  readonly path: string;
+}): Promise<{
+  readonly absolutePath: string;
+  readonly tempPath: string;
+  readonly overwritten: boolean;
+}> => {
+  const targetPath = resolveClientPath(filesystemRootPath, path);
   const realRootPath = await realpath(filesystemRootPath);
   const parentPath = dirname(targetPath);
 
@@ -1001,16 +1149,16 @@ const resolveBrowserControlScreenshotOutput = async (
   try {
     const targetStats = await lstat(targetPath);
 
-    if (!targetStats.isFile()) {
-      throw new Error("tab.screenshot.params.path must point to a file path.");
-    }
-
     if (targetStats.isSymbolicLink()) {
-      throw new Error("tab.screenshot.params.path cannot point to a symlink.");
+      throw new Error(`${label} cannot point to a symlink.`);
     }
 
-    if (params.overwrite !== true) {
-      throw new Error("tab.screenshot.params.path already exists. Pass overwrite: true to replace it.");
+    if (!targetStats.isFile()) {
+      throw new Error(`${label} must point to a file path.`);
+    }
+
+    if (overwrite !== true) {
+      throw new Error(`${label} already exists. Pass overwrite: true to replace it.`);
     }
 
     overwritten = true;
@@ -1020,16 +1168,9 @@ const resolveBrowserControlScreenshotOutput = async (
     }
   }
 
-  const tempPath = `${targetPath}.heysnap-${randomUUID()}.tmp`;
-
   return {
-    id: BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID,
     absolutePath: targetPath,
-    clientPath: params.path,
-    format,
-    maxBytes: MAX_SCREENSHOT_FILE_BYTES,
-    mimeType: screenshotMimeType(format),
-    tempPath,
+    tempPath: `${targetPath}.heysnap-${randomUUID()}.tmp`,
     overwritten,
   };
 };
@@ -1557,25 +1698,40 @@ const finalizeClientResult = (
     return { ok: true, result: clientResult };
   }
 
-  const screenshotOutput = pending.outputsById.get(BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID);
+  const outputs = [...pending.outputsById.values()];
+  const incompleteOutput = outputs.find((output) => !output.done);
 
-  if (screenshotOutput === undefined) {
-    return { ok: true, result: clientResult };
+  if (incompleteOutput !== undefined) {
+    return browserControlError("BROWSER_OUTPUT_INCOMPLETE", "Browser-control output did not complete before the client response.");
   }
 
-  if (!screenshotOutput.done) {
-    return browserControlError("BROWSER_OUTPUT_INCOMPLETE", "Browser-control screenshot output did not complete before the client response.");
+  const screenshotOutput = outputs.find((output) => output.output.kind === "screenshot");
+
+  if (screenshotOutput !== undefined) {
+    return {
+      ok: true,
+      result: {
+        tabId: readClientResultTabId(clientResult),
+        path: screenshotOutput.output.clientPath,
+        format: screenshotOutput.output.format ?? "png",
+        mimeType: screenshotOutput.output.mimeType,
+        size: screenshotOutput.bytesWritten,
+        overwritten: screenshotOutput.output.overwritten,
+      },
+    };
   }
 
   return {
     ok: true,
     result: {
-      tabId: readClientResultTabId(clientResult),
-      path: screenshotOutput.output.clientPath,
-      format: screenshotOutput.output.format,
-      mimeType: screenshotOutput.output.mimeType,
-      size: screenshotOutput.bytesWritten,
-      overwritten: screenshotOutput.output.overwritten,
+      evaluation: clientResult,
+      outputs: outputs.map((output) => ({
+        id: output.output.id,
+        path: output.output.clientPath,
+        mimeType: output.output.mimeType,
+        size: output.bytesWritten,
+        overwritten: output.output.overwritten,
+      })),
     },
   };
 };
