@@ -3185,6 +3185,17 @@ button:disabled {
   word-break: break-word;
 }
 
+.agent-compaction-status {
+  color: rgba(0, 0, 0, 0.46);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+:root.dark .agent-compaction-status {
+  color: rgba(255, 255, 255, 0.48);
+}
+
 .chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;

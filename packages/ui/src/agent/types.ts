@@ -283,6 +283,7 @@ export interface AgentRuntimeItem {
     | "dynamic_tool_call"
     | "web_search"
     | "image_view"
+    | "context_compaction"
     | "custom"
     | "unknown";
   readonly status: "running" | "completed" | "failed";

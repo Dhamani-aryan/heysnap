@@ -453,6 +453,61 @@ describe("agent chat store projector", () => {
     });
   });
 
+  it("marks an active turn as reconnecting until stream activity resumes", () => {
+    const store = createAgentChatStore();
+
+    store.getState().applyRuntimeEvent(baseEvent("turn.started", {}, 1));
+    store.getState().applyRuntimeEvent(baseEvent("runtime.warning", {
+      warning: {
+        phase: "server",
+        message: "Reconnecting... 1/5",
+        canRetry: true,
+        attempts: 1,
+      },
+    }, 2));
+
+    expect(store.getState().activeTurn?.status).toBe("reconnecting");
+
+    store.getState().applyRuntimeEvent(baseEvent("content.delta", {
+      messageId: "assistant-1",
+      contentIndex: 0,
+      streamKind: "assistant_text",
+      delta: "Back",
+    }, 3));
+
+    expect(store.getState().activeTurn?.status).toBe("running");
+  });
+
+  it("tracks context compaction only while the item is running", () => {
+    const store = createAgentChatStore();
+    const compactionItem: AgentRuntimeItem = {
+      id: "compact-1",
+      itemType: "context_compaction",
+      status: "running",
+      title: "Context compacted",
+    };
+
+    store.getState().applyRuntimeEvent(baseEvent("item.started", {
+      item: compactionItem,
+    }, 1));
+
+    expect(store.getState().activeCompactionItemIds).toEqual(["compact-1"]);
+    expect(store.getState().activitiesById["activity:compact-1"]).toMatchObject({
+      kind: "info",
+      tone: "info",
+      status: "running",
+    });
+
+    store.getState().applyRuntimeEvent(baseEvent("item.completed", {
+      item: { ...compactionItem, status: "completed" },
+    }, 2));
+
+    expect(store.getState().activeCompactionItemIds).toEqual([]);
+    expect(store.getState().activitiesById["activity:compact-1"]).toMatchObject({
+      status: "completed",
+    });
+  });
+
   it("completes streamed assistant messages without replacing streamed text or message object", () => {
     const store = createAgentChatStore();
     const message = assistantMessage("assistant-1");
