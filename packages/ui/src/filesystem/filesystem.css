@@ -1404,6 +1404,113 @@ button:disabled {
   background: rgba(166, 166, 166, 0.78);
 }
 
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots {
+  display: flex;
+  height: 14px;
+  align-items: center;
+  gap: 3px;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span {
+  animation: filesystem-recording-pulse 1180ms ease-in-out infinite;
+  transform: scaleY(1);
+  transform-origin: center;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(1) {
+  animation-delay: -420ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(2) {
+  animation-delay: -300ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(3) {
+  animation-delay: -180ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(4) {
+  animation-delay: -60ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(5) {
+  animation-delay: -240ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(6) {
+  animation-delay: -360ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(7) {
+  animation-delay: -120ms;
+}
+
+.filesystem-hover-grip[data-recording="true"] .filesystem-hover-grip-dots span:nth-child(8) {
+  animation-delay: 0ms;
+}
+
+.filesystem-hover-grip-loading {
+  display: flex;
+  height: 14px;
+  align-items: center;
+  gap: 7px;
+}
+
+.filesystem-hover-grip-loading span {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(166, 166, 166, 0.82);
+  animation: filesystem-loading-bounce 950ms ease-in-out infinite;
+}
+
+.filesystem-hover-grip-loading span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.filesystem-hover-grip-loading span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+.filesystem-voice-prompt-shell {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 10;
+  width: min(420px, calc(100% - 32px));
+  transform: translateX(-50%);
+}
+
+.filesystem-voice-prompt-shell .prompt-input {
+  border-radius: 18px;
+}
+
+@keyframes filesystem-recording-pulse {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  45% {
+    transform: scaleY(4.2);
+  }
+}
+
+@keyframes filesystem-loading-bounce {
+  0%,
+  100% {
+    transform: translateY(3px);
+    opacity: 0.48;
+  }
+
+  50% {
+    transform: translateY(-3px);
+    opacity: 0.96;
+  }
+}
+
 .split-resizer {
   position: relative;
   display: flex;
