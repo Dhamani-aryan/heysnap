@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -425,6 +425,172 @@ describe("browser-control service", () => {
     client.close();
   });
 
+  it("forwards screenshot capture params and writes streamed output atomically", async () => {
+    const root = await createTempRoot();
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+    client.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+
+    const responsePromise = fetch(`${baseUrl}/browser-control/requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "user-1",
+        command: "tab.screenshot",
+        params: {
+          tabId: 123,
+          path: "screenshots/page.png",
+          captureMode: "viewport",
+          fromSurface: true,
+        },
+      }),
+    });
+    const request = await waitForJsonMessage<BrowserControlRequestMessage>(client);
+
+    expect(request).toMatchObject({
+      type: "request",
+      command: "tab.screenshot",
+      params: {
+        tabId: 123,
+        outputId: "screenshot",
+        captureMode: "viewport",
+        format: "png",
+        fromSurface: true,
+      },
+      outputs: [{
+        id: "screenshot",
+        mimeType: "image/png",
+        maxBytes: 50 * 1024 * 1024,
+      }],
+    });
+    expect(JSON.stringify(request.params)).not.toContain("screenshots/page.png");
+
+    const bytes = Buffer.from("fake-png-bytes", "utf8");
+    client.send(JSON.stringify({
+      type: "output.write",
+      requestId: request.requestId,
+      writeRequestId: "write-1",
+      outputId: "screenshot",
+      offset: 0,
+      dataBase64: bytes.toString("base64"),
+      done: true,
+    }));
+    expect(await waitForJsonMessage<BrowserControlOutputAckMessage>(client)).toMatchObject({
+      type: "output.ack",
+      requestId: request.requestId,
+      writeRequestId: "write-1",
+      outputId: "screenshot",
+      offset: 0,
+      bytesWritten: bytes.byteLength,
+      done: true,
+    });
+
+    client.send(JSON.stringify({
+      type: "response",
+      requestId: request.requestId,
+      ok: true,
+      result: { tabId: 123, size: bytes.byteLength },
+    }));
+
+    expect(await (await responsePromise).json()).toEqual({
+      ok: true,
+      result: {
+        tabId: 123,
+        path: "screenshots/page.png",
+        format: "png",
+        mimeType: "image/png",
+        size: bytes.byteLength,
+        overwritten: false,
+      },
+    });
+    expect(await readFile(join(root, "screenshots/page.png"), "utf8")).toBe("fake-png-bytes");
+
+    client.close();
+  });
+
+  it("rejects invalid screenshot requests and late output writes", async () => {
+    const root = await createTempRoot();
+    await mkdir(join(root, "folder"));
+    await writeFile(join(root, "exists.png"), "old");
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+
+    await expectInvalidScreenshotRequest(baseUrl, {
+      tabId: 123,
+      path: "../outside.png",
+    }, "Path cannot contain parent directory segments");
+
+    await expectInvalidScreenshotRequest(baseUrl, {
+      tabId: 123,
+      path: "exists.png",
+    }, "already exists");
+
+    await expectInvalidScreenshotRequest(baseUrl, {
+      tabId: 123,
+      path: "folder",
+    }, "must point to a file path");
+
+    await expectInvalidScreenshotRequest(baseUrl, {
+      tabId: 123,
+      path: "image.png",
+      format: "jpeg",
+    }, "format must match");
+
+    await expectInvalidScreenshotRequest(baseUrl, {
+      tabId: 123,
+      path: "image.jpeg",
+      quality: 101,
+    }, "quality must be between");
+
+    await expectInvalidScreenshotRequest(baseUrl, {
+      tabId: 123,
+      path: "image.png",
+      captureMode: "clip",
+    }, "clip is required");
+
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+    client.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+    const responsePromise = fetch(`${baseUrl}/browser-control/requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "user-1",
+        command: "tab.screenshot",
+        params: { tabId: 123, path: "late.png" },
+      }),
+    });
+    const request = await waitForJsonMessage<BrowserControlRequestMessage>(client);
+
+    client.send(JSON.stringify({
+      type: "response",
+      requestId: request.requestId,
+      ok: false,
+      error: { code: "BROWSER_EXECUTOR_ERROR", message: "capture failed" },
+    }));
+    expect(await (await responsePromise).json()).toMatchObject({
+      ok: false,
+      error: { code: "BROWSER_EXECUTOR_ERROR" },
+    });
+
+    client.send(JSON.stringify({
+      type: "output.write",
+      requestId: request.requestId,
+      writeRequestId: "late-write",
+      outputId: "screenshot",
+      offset: 0,
+      dataBase64: Buffer.from("late").toString("base64"),
+      done: true,
+    }));
+    expect(await waitForJsonMessage<BrowserControlOutputErrorMessage>(client)).toMatchObject({
+      type: "output.error",
+      requestId: request.requestId,
+      writeRequestId: "late-write",
+      outputId: "screenshot",
+      error: { code: "BROWSER_OUTPUT_REQUEST_NOT_FOUND" },
+    });
+
+    client.close();
+  });
+
   it("returns stable errors when no client is connected or a client times out", async () => {
     const { baseUrl } = await startBrowserControlServer();
 
@@ -540,6 +706,7 @@ interface BrowserControlRequestMessage {
   readonly command: string;
   readonly params?: unknown;
   readonly attachments?: unknown;
+  readonly outputs?: unknown;
 }
 
 interface BrowserControlAttachmentChunkMessage {
@@ -557,6 +724,27 @@ interface BrowserControlAttachmentErrorMessage {
   readonly requestId: string;
   readonly chunkRequestId: string;
   readonly attachmentId: string;
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
+interface BrowserControlOutputAckMessage {
+  readonly type: "output.ack";
+  readonly requestId: string;
+  readonly writeRequestId: string;
+  readonly outputId: string;
+  readonly offset: number;
+  readonly bytesWritten: number;
+  readonly done: boolean;
+}
+
+interface BrowserControlOutputErrorMessage {
+  readonly type: "output.error";
+  readonly requestId: string;
+  readonly writeRequestId: string;
+  readonly outputId: string;
   readonly error: {
     readonly code: string;
     readonly message: string;
@@ -611,6 +799,30 @@ const expectInvalidAttachmentRequest = async (
       command: "tab.evaluate",
       params: { tabId: 123, expression: "location.href" },
       attachments,
+    }),
+  });
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({
+    ok: false,
+    error: {
+      code: "INVALID_REQUEST",
+      message: expect.stringContaining(expectedMessage),
+    },
+  });
+};
+
+const expectInvalidScreenshotRequest = async (
+  baseUrl: string,
+  params: unknown,
+  expectedMessage: string,
+): Promise<void> => {
+  const response = await fetch(`${baseUrl}/browser-control/requests`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      command: "tab.screenshot",
+      params,
     }),
   });
 

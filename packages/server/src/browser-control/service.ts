@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { open, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, open, realpath, rename, rm, stat } from "node:fs/promises";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { basename } from "node:path";
+import { basename, dirname, extname } from "node:path";
 
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
@@ -15,6 +15,9 @@ const MAX_ATTACHMENT_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_ATTACHMENT_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_ATTACHMENT_CHUNK_BYTES = 512 * 1024;
 const DEFAULT_ATTACHMENT_MIME_TYPE = "application/octet-stream";
+const BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID = "screenshot";
+const MAX_OUTPUT_CHUNK_BYTES = 512 * 1024;
+const MAX_SCREENSHOT_FILE_BYTES = 50 * 1024 * 1024;
 
 const jsonHeaders = {
   "access-control-allow-origin": "*",
@@ -40,7 +43,7 @@ export interface BrowserControlStatus {
   readonly lastSeenAt: string | null;
 }
 
-export type BrowserControlCliInput = BrowserControlRequest & {
+export type BrowserControlCliInput = BrowserControlCliRequest & {
   readonly targetUserId?: string;
   readonly timeoutMs?: number;
   readonly clientRequestId?: string;
@@ -52,6 +55,7 @@ export type BrowserControlBrokerInput = BrowserControlRequest & {
   readonly timeoutMs?: number;
   readonly clientRequestId?: string;
   readonly attachments?: readonly BrowserControlResolvedAttachment[];
+  readonly outputs?: readonly BrowserControlResolvedOutput[];
 };
 
 export type BrowserControlRequest =
@@ -64,7 +68,12 @@ export type BrowserControlRequest =
   | { readonly command: "tab.goTo"; readonly params: BrowserControlTabGoToParams }
   | { readonly command: "tab.refresh"; readonly params: BrowserControlTabRefreshParams }
   | { readonly command: "tab.evaluate"; readonly params: BrowserControlTabEvaluateParams }
+  | { readonly command: "tab.screenshot"; readonly params: BrowserControlTabScreenshotForwardParams }
   | { readonly command: "tab.cdp"; readonly params: BrowserControlTabCdpParams };
+
+export type BrowserControlCliRequest =
+  | Exclude<BrowserControlRequest, { readonly command: "tab.screenshot" }>
+  | { readonly command: "tab.screenshot"; readonly params: BrowserControlTabScreenshotParams };
 
 export interface BrowserControlGetTabsParams {
   readonly windowId?: number;
@@ -126,6 +135,42 @@ export interface BrowserControlTabCdpParams extends BrowserControlTabTargetParam
   readonly params?: Record<string, unknown>;
 }
 
+export type BrowserControlScreenshotFormat = "png" | "jpeg" | "webp";
+export type BrowserControlScreenshotCaptureMode = "viewport" | "fullPage" | "clip";
+
+export interface BrowserControlScreenshotClip {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly scale?: number;
+}
+
+export interface BrowserControlTabScreenshotParams extends BrowserControlTabTargetParams {
+  readonly path: string;
+  readonly captureMode?: BrowserControlScreenshotCaptureMode;
+  readonly clip?: BrowserControlScreenshotClip;
+  readonly format?: BrowserControlScreenshotFormat;
+  readonly quality?: number;
+  readonly overwrite?: boolean;
+  readonly waitForLoad?: BrowserControlWaitForLoad;
+  readonly fromSurface?: boolean;
+  readonly captureBeyondViewport?: boolean;
+  readonly optimizeForSpeed?: boolean;
+}
+
+export interface BrowserControlTabScreenshotForwardParams extends BrowserControlTabTargetParams {
+  readonly outputId: string;
+  readonly captureMode?: BrowserControlScreenshotCaptureMode;
+  readonly clip?: BrowserControlScreenshotClip;
+  readonly format: BrowserControlScreenshotFormat;
+  readonly quality?: number;
+  readonly waitForLoad?: BrowserControlWaitForLoad;
+  readonly fromSurface?: boolean;
+  readonly captureBeyondViewport?: boolean;
+  readonly optimizeForSpeed?: boolean;
+}
+
 export interface BrowserControlAttachmentInput {
   readonly id: string;
   readonly path: string;
@@ -143,6 +188,20 @@ export interface BrowserControlAttachmentMetadata {
 export interface BrowserControlResolvedAttachment extends BrowserControlAttachmentMetadata {
   readonly absolutePath: string;
   readonly mtimeMs: number;
+}
+
+export interface BrowserControlOutputMetadata {
+  readonly id: string;
+  readonly mimeType: string;
+  readonly maxBytes: number;
+}
+
+export interface BrowserControlResolvedOutput extends BrowserControlOutputMetadata {
+  readonly absolutePath: string;
+  readonly clientPath: string;
+  readonly format: BrowserControlScreenshotFormat;
+  readonly tempPath: string;
+  readonly overwritten: boolean;
 }
 
 type BrowserControlCliResult =
@@ -171,9 +230,17 @@ interface PendingBrowserControlRequest {
   readonly requestId: string;
   readonly client: BrowserControlClient;
   readonly attachmentsById: Map<string, BrowserControlResolvedAttachment>;
+  readonly outputsById: Map<string, PendingBrowserControlOutput>;
   readonly timeout: ReturnType<typeof setTimeout>;
   readonly resolve: (result: BrowserControlCliResult) => void;
   completed: boolean;
+}
+
+interface PendingBrowserControlOutput {
+  readonly output: BrowserControlResolvedOutput;
+  bytesWritten: number;
+  file: Awaited<ReturnType<typeof open>> | null;
+  done: boolean;
 }
 
 type BrowserControlClientMessage =
@@ -202,6 +269,15 @@ type BrowserControlClientMessage =
       readonly attachmentId: string;
       readonly offset: number;
       readonly length: number;
+    }
+  | {
+      readonly type: "output.write";
+      readonly requestId: string;
+      readonly writeRequestId: string;
+      readonly outputId: string;
+      readonly offset: number;
+      readonly dataBase64: string;
+      readonly done: boolean;
     };
 
 export const createBrowserControlService = (
@@ -320,6 +396,7 @@ export class BrowserControlBroker {
         this.pendingRequests.delete(requestId);
         client.pendingRequestIds.delete(requestId);
         options.signal?.removeEventListener("abort", handleAbort);
+        void cleanupPendingOutputs(pending);
         resolve(result);
       };
 
@@ -343,6 +420,12 @@ export class BrowserControlBroker {
         requestId,
         client,
         attachmentsById: new Map((input.attachments ?? []).map((attachment) => [attachment.id, attachment])),
+        outputsById: new Map((input.outputs ?? []).map((output) => [output.id, {
+          output,
+          bytesWritten: 0,
+          file: null,
+          done: false,
+        }])),
         timeout,
         resolve: complete,
         completed: false,
@@ -364,6 +447,7 @@ export class BrowserControlBroker {
         timeoutMs,
         clientRequestId: input.clientRequestId,
         attachments: input.attachments?.map(attachmentToMetadata),
+        outputs: input.outputs?.map(outputToMetadata),
       }));
     });
   }
@@ -391,6 +475,11 @@ export class BrowserControlBroker {
       return;
     }
 
+    if (message.type === "output.write") {
+      void this.handleOutputWrite(client, message);
+      return;
+    }
+
     const pending = this.pendingRequests.get(message.requestId);
 
     if (pending === undefined || pending.client !== client) {
@@ -398,7 +487,8 @@ export class BrowserControlBroker {
     }
 
     if (message.ok) {
-      pending.resolve({ ok: true, result: message.result });
+      const result = finalizeClientResult(pending, message.result);
+      pending.resolve(result);
       return;
     }
 
@@ -467,6 +557,114 @@ export class BrowserControlBroker {
       requestId: message.requestId,
       chunkRequestId: message.chunkRequestId,
       attachmentId: message.attachmentId,
+      error: {
+        code,
+        message: errorMessage,
+      },
+    });
+  }
+
+  private async handleOutputWrite(
+    client: BrowserControlClient,
+    message: Extract<BrowserControlClientMessage, { readonly type: "output.write" }>,
+  ): Promise<void> {
+    const pending = this.pendingRequests.get(message.requestId);
+
+    if (pending === undefined || pending.client !== client || pending.completed) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_REQUEST_NOT_FOUND", "Browser-control request is no longer pending.");
+      return;
+    }
+
+    const output = pending.outputsById.get(message.outputId);
+
+    if (output === undefined) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_NOT_FOUND", "Browser-control output was not found on this request.");
+      return;
+    }
+
+    if (output.done) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_ALREADY_DONE", "Browser-control output is already complete.");
+      return;
+    }
+
+    if (message.offset !== output.bytesWritten) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_RANGE_INVALID", "Browser-control output write offset was unexpected.");
+      return;
+    }
+
+    let data: Buffer;
+
+    try {
+      data = Buffer.from(message.dataBase64, "base64");
+    } catch {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_INVALID_DATA", "Browser-control output chunk must be valid base64.");
+      return;
+    }
+
+    if (data.byteLength > MAX_OUTPUT_CHUNK_BYTES) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_CHUNK_TOO_LARGE", `Browser-control output chunks cannot exceed ${String(MAX_OUTPUT_CHUNK_BYTES)} bytes.`);
+      return;
+    }
+
+    if (!message.done && data.byteLength === 0) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_INVALID_DATA", "Browser-control output chunk cannot be empty unless it completes the output.");
+      return;
+    }
+
+    if (output.bytesWritten + data.byteLength > output.output.maxBytes) {
+      this.sendOutputError(client, message, "BROWSER_OUTPUT_TOO_LARGE", `Browser-control output exceeds the ${String(output.output.maxBytes)} byte limit.`);
+      return;
+    }
+
+    try {
+      if (output.file === null) {
+        output.file = await open(output.output.tempPath, "wx");
+      }
+
+      if (data.byteLength > 0) {
+        await output.file.write(data, 0, data.byteLength, output.bytesWritten);
+        output.bytesWritten += data.byteLength;
+      }
+
+      if (message.done) {
+        output.done = true;
+        await output.file.close();
+        output.file = null;
+        await rename(output.output.tempPath, output.output.absolutePath);
+      }
+
+      const currentPending = this.pendingRequests.get(message.requestId);
+
+      if (currentPending === undefined || currentPending.client !== client || currentPending.completed) {
+        return;
+      }
+
+      sendWebSocketJson(client.webSocket, {
+        type: "output.ack",
+        requestId: message.requestId,
+        writeRequestId: message.writeRequestId,
+        outputId: message.outputId,
+        offset: message.offset,
+        bytesWritten: data.byteLength,
+        done: message.done,
+      });
+    } catch (error) {
+      const outputError = toOutputWriteError(error);
+      this.sendOutputError(client, message, outputError.code, outputError.message);
+    }
+  }
+
+  private sendOutputError(
+    client: BrowserControlClient,
+    message: Extract<BrowserControlClientMessage, { readonly type: "output.write" }>,
+    code: string,
+    errorMessage: string,
+  ): void {
+    sendWebSocketJson(client.webSocket, {
+      type: "output.error",
+      requestId: message.requestId,
+      writeRequestId: message.writeRequestId,
+      outputId: message.outputId,
       error: {
         code,
         message: errorMessage,
@@ -566,10 +764,8 @@ const handleBrowserControlHttpRequest = async (
     try {
       const input = parseCliInput(await readJsonBody(request));
       const attachments = await resolveBrowserControlAttachments(input.attachments, options.filesystemRootPath);
-      const result = await broker.execute({
-        ...input,
-        attachments,
-      }, { signal: abortController.signal });
+      const brokerInput = await prepareBrowserControlBrokerInput({ ...input, attachments }, options.filesystemRootPath);
+      const result = await broker.execute(brokerInput, { signal: abortController.signal });
       sendJson(response, 200, result);
     } catch (error) {
       sendJson(response, 400, browserControlError(
@@ -729,6 +925,157 @@ const attachmentToMetadata = (
   size: attachment.size,
 });
 
+const outputToMetadata = (
+  output: BrowserControlResolvedOutput,
+): BrowserControlOutputMetadata => ({
+  id: output.id,
+  mimeType: output.mimeType,
+  maxBytes: output.maxBytes,
+});
+
+const prepareBrowserControlBrokerInput = async (
+  input: BrowserControlCliRequest & {
+    readonly targetUserId?: string;
+    readonly timeoutMs?: number;
+    readonly clientRequestId?: string;
+    readonly attachments?: readonly BrowserControlResolvedAttachment[];
+  },
+  filesystemRootPath: string | undefined,
+): Promise<BrowserControlBrokerInput> => {
+  if (input.command !== "tab.screenshot") {
+    return input as BrowserControlBrokerInput;
+  }
+
+  const resolved = await resolveBrowserControlScreenshotOutput(input.params, filesystemRootPath);
+
+  return stripUndefined({
+    targetUserId: input.targetUserId,
+    timeoutMs: input.timeoutMs,
+    clientRequestId: input.clientRequestId,
+    attachments: input.attachments,
+    command: input.command,
+    params: toScreenshotForwardParams(input.params, resolved),
+    outputs: [resolved],
+  });
+};
+
+const toScreenshotForwardParams = (
+  params: BrowserControlTabScreenshotParams,
+  output: BrowserControlResolvedOutput,
+): BrowserControlTabScreenshotForwardParams => stripUndefined({
+  tabId: params.tabId,
+  outputId: output.id,
+  captureMode: params.captureMode,
+  clip: params.clip,
+  format: output.format,
+  quality: params.quality,
+  waitForLoad: params.waitForLoad,
+  fromSurface: params.fromSurface,
+  captureBeyondViewport: params.captureBeyondViewport,
+  optimizeForSpeed: params.optimizeForSpeed,
+});
+
+const resolveBrowserControlScreenshotOutput = async (
+  params: BrowserControlTabScreenshotParams,
+  filesystemRootPath: string | undefined,
+): Promise<BrowserControlResolvedOutput> => {
+  if (filesystemRootPath === undefined) {
+    throw new Error("Browser-control screenshots are unavailable because the filesystem root is not configured.");
+  }
+
+  const format = resolveScreenshotFormat(params.path, params.format);
+
+  if (params.quality !== undefined && format === "png") {
+    throw new Error("tab.screenshot.params.quality can only be used with jpeg or webp screenshots.");
+  }
+
+  const targetPath = resolveClientPath(filesystemRootPath, params.path);
+  const realRootPath = await realpath(filesystemRootPath);
+  const parentPath = dirname(targetPath);
+
+  ensureWithinRoot(filesystemRootPath, targetPath);
+  await mkdir(parentPath, { recursive: true });
+  ensureWithinRoot(realRootPath, await realpath(parentPath));
+
+  let overwritten = false;
+  try {
+    const targetStats = await lstat(targetPath);
+
+    if (!targetStats.isFile()) {
+      throw new Error("tab.screenshot.params.path must point to a file path.");
+    }
+
+    if (targetStats.isSymbolicLink()) {
+      throw new Error("tab.screenshot.params.path cannot point to a symlink.");
+    }
+
+    if (params.overwrite !== true) {
+      throw new Error("tab.screenshot.params.path already exists. Pass overwrite: true to replace it.");
+    }
+
+    overwritten = true;
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  const tempPath = `${targetPath}.heysnap-${randomUUID()}.tmp`;
+
+  return {
+    id: BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID,
+    absolutePath: targetPath,
+    clientPath: params.path,
+    format,
+    maxBytes: MAX_SCREENSHOT_FILE_BYTES,
+    mimeType: screenshotMimeType(format),
+    tempPath,
+    overwritten,
+  };
+};
+
+const resolveScreenshotFormat = (
+  path: string,
+  requestedFormat: BrowserControlScreenshotFormat | undefined,
+): BrowserControlScreenshotFormat => {
+  const extensionFormat = screenshotFormatFromExtension(path);
+
+  if (requestedFormat !== undefined && extensionFormat !== undefined && requestedFormat !== extensionFormat) {
+    throw new Error("tab.screenshot.params.format must match the path extension.");
+  }
+
+  return requestedFormat ?? extensionFormat ?? "png";
+};
+
+const screenshotFormatFromExtension = (path: string): BrowserControlScreenshotFormat | undefined => {
+  const extension = extname(path).toLowerCase();
+
+  if (extension === ".png") {
+    return "png";
+  }
+
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "jpeg";
+  }
+
+  if (extension === ".webp") {
+    return "webp";
+  }
+
+  return undefined;
+};
+
+const screenshotMimeType = (format: BrowserControlScreenshotFormat): string => {
+  switch (format) {
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "png":
+      return "image/png";
+  }
+};
+
 const supportedBrowserControlCommands = [
   "getTabs",
   "createNewTab",
@@ -739,10 +1086,11 @@ const supportedBrowserControlCommands = [
   "tab.goTo",
   "tab.refresh",
   "tab.evaluate",
+  "tab.screenshot",
   "tab.cdp",
 ] as const;
 
-const parseBrowserControlRequest = (input: Record<string, unknown>): BrowserControlRequest => {
+const parseBrowserControlRequest = (input: Record<string, unknown>): BrowserControlCliRequest => {
   const command = readNonEmptyString(input["command"]);
 
   if (command === undefined) {
@@ -767,6 +1115,8 @@ const parseBrowserControlRequest = (input: Record<string, unknown>): BrowserCont
       return { command, params: parseTabRefreshParams(input["params"]) };
     case "tab.evaluate":
       return { command, params: parseTabEvaluateParams(input["params"]) };
+    case "tab.screenshot":
+      return { command, params: parseTabScreenshotParams(input["params"]) };
     case "tab.cdp":
       return { command, params: parseTabCdpParams(input["params"]) };
     default:
@@ -903,6 +1253,82 @@ const parseTabEvaluateParams = (value: unknown): BrowserControlTabEvaluateParams
   });
 };
 
+const parseTabScreenshotParams = (value: unknown): BrowserControlTabScreenshotParams => {
+  const params = readRequiredObject(value, "tab.screenshot.params");
+  assertAllowedKeys(params, "tab.screenshot.params", [
+    "tabId",
+    "path",
+    "captureMode",
+    "clip",
+    "format",
+    "quality",
+    "overwrite",
+    "waitForLoad",
+    "fromSurface",
+    "captureBeyondViewport",
+    "optimizeForSpeed",
+  ]);
+  const captureMode = readOptionalScreenshotCaptureMode(params["captureMode"], "tab.screenshot.params.captureMode");
+  const clip = params["clip"] === undefined ? undefined : parseScreenshotClip(params["clip"], "tab.screenshot.params.clip");
+  const quality = readOptionalInteger(params["quality"], "tab.screenshot.params.quality");
+
+  if (captureMode === "clip" && clip === undefined) {
+    throw new Error("tab.screenshot.params.clip is required when captureMode is clip.");
+  }
+
+  if (captureMode !== "clip" && clip !== undefined) {
+    throw new Error("tab.screenshot.params.clip can only be used when captureMode is clip.");
+  }
+
+  if (quality !== undefined && (quality < 0 || quality > 100)) {
+    throw new Error("tab.screenshot.params.quality must be between 0 and 100.");
+  }
+
+  const format = readOptionalScreenshotFormat(params["format"], "tab.screenshot.params.format");
+
+  if (quality !== undefined && format === "png") {
+    throw new Error("tab.screenshot.params.quality can only be used with jpeg or webp screenshots.");
+  }
+
+  return stripUndefined({
+    tabId: readRequiredInteger(params["tabId"], "tab.screenshot.params.tabId"),
+    path: readRequiredNonEmptyString(params["path"], "tab.screenshot.params.path"),
+    captureMode,
+    clip,
+    format,
+    quality,
+    overwrite: readOptionalBoolean(params["overwrite"], "tab.screenshot.params.overwrite"),
+    waitForLoad: parseWaitForLoad(params["waitForLoad"], "tab.screenshot.params.waitForLoad"),
+    fromSurface: readOptionalBoolean(params["fromSurface"], "tab.screenshot.params.fromSurface"),
+    captureBeyondViewport: readOptionalBoolean(params["captureBeyondViewport"], "tab.screenshot.params.captureBeyondViewport"),
+    optimizeForSpeed: readOptionalBoolean(params["optimizeForSpeed"], "tab.screenshot.params.optimizeForSpeed"),
+  });
+};
+
+const parseScreenshotClip = (value: unknown, label: string): BrowserControlScreenshotClip => {
+  const clip = readRequiredObject(value, label);
+  assertAllowedKeys(clip, label, ["x", "y", "width", "height", "scale"]);
+  const width = readRequiredNumber(clip["width"], `${label}.width`);
+  const height = readRequiredNumber(clip["height"], `${label}.height`);
+  const scale = readOptionalNumber(clip["scale"], `${label}.scale`);
+
+  if (width <= 0 || height <= 0) {
+    throw new Error(`${label}.width and ${label}.height must be positive numbers.`);
+  }
+
+  if (scale !== undefined && scale <= 0) {
+    throw new Error(`${label}.scale must be a positive number.`);
+  }
+
+  return stripUndefined({
+    x: readRequiredNumber(clip["x"], `${label}.x`),
+    y: readRequiredNumber(clip["y"], `${label}.y`),
+    width,
+    height,
+    scale,
+  });
+};
+
 const parseTabCdpParams = (value: unknown): BrowserControlTabCdpParams => {
   const params = readRequiredObject(value, "tab.cdp.params");
   assertAllowedKeys(params, "tab.cdp.params", ["tabId", "method", "params"]);
@@ -1031,6 +1457,36 @@ const parseClientMessage = (data: RawData): BrowserControlClientMessage | null =
     };
   }
 
+  if (message["type"] === "output.write") {
+    const requestId = readNonEmptyString(message["requestId"]);
+    const writeRequestId = readNonEmptyString(message["writeRequestId"]);
+    const outputId = readNonEmptyString(message["outputId"]);
+    const offset = message["offset"];
+    const dataBase64 = message["dataBase64"];
+    const done = message["done"];
+
+    if (
+      requestId === undefined ||
+      writeRequestId === undefined ||
+      outputId === undefined ||
+      !isNonNegativeInteger(offset) ||
+      typeof dataBase64 !== "string" ||
+      typeof done !== "boolean"
+    ) {
+      return null;
+    }
+
+    return {
+      type: "output.write",
+      requestId,
+      writeRequestId,
+      outputId,
+      offset,
+      dataBase64,
+      done,
+    };
+  }
+
   return null;
 };
 
@@ -1092,6 +1548,62 @@ const toAttachmentReadError = (error: unknown): BrowserControlErrorPayload => {
     message: error instanceof Error ? error.message : "Failed to read browser-control attachment.",
   };
 };
+
+const finalizeClientResult = (
+  pending: PendingBrowserControlRequest,
+  clientResult: unknown,
+): BrowserControlCliResult => {
+  if (pending.outputsById.size === 0) {
+    return { ok: true, result: clientResult };
+  }
+
+  const screenshotOutput = pending.outputsById.get(BROWSER_CONTROL_SCREENSHOT_OUTPUT_ID);
+
+  if (screenshotOutput === undefined) {
+    return { ok: true, result: clientResult };
+  }
+
+  if (!screenshotOutput.done) {
+    return browserControlError("BROWSER_OUTPUT_INCOMPLETE", "Browser-control screenshot output did not complete before the client response.");
+  }
+
+  return {
+    ok: true,
+    result: {
+      tabId: readClientResultTabId(clientResult),
+      path: screenshotOutput.output.clientPath,
+      format: screenshotOutput.output.format,
+      mimeType: screenshotOutput.output.mimeType,
+      size: screenshotOutput.bytesWritten,
+      overwritten: screenshotOutput.output.overwritten,
+    },
+  };
+};
+
+const readClientResultTabId = (value: unknown): number | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const tabId = (value as Record<string, unknown>)["tabId"];
+  return typeof tabId === "number" && Number.isFinite(tabId) ? tabId : null;
+};
+
+const cleanupPendingOutputs = async (pending: PendingBrowserControlRequest): Promise<void> => {
+  await Promise.all([...pending.outputsById.values()].map(async (output) => {
+    if (output.file !== null) {
+      await output.file.close().catch(() => undefined);
+      output.file = null;
+    }
+
+    await rm(output.output.tempPath, { force: true }).catch(() => undefined);
+  }));
+};
+
+const toOutputWriteError = (error: unknown): BrowserControlErrorPayload => ({
+  code: "BROWSER_OUTPUT_WRITE_FAILED",
+  message: error instanceof Error ? error.message : "Failed to write browser-control output.",
+});
 
 const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
   const chunks: Buffer[] = [];
@@ -1200,6 +1712,46 @@ const readOptionalPositiveInteger = (value: unknown, label: string): number | un
   return value;
 };
 
+const readRequiredNumber = (value: unknown, label: string): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number.`);
+  }
+
+  return value;
+};
+
+const readOptionalNumber = (value: unknown, label: string): number | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return readRequiredNumber(value, label);
+};
+
+const readOptionalScreenshotFormat = (value: unknown, label: string): BrowserControlScreenshotFormat | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === "png" || value === "jpeg" || value === "webp") {
+    return value;
+  }
+
+  throw new Error(`${label} must be png, jpeg, or webp.`);
+};
+
+const readOptionalScreenshotCaptureMode = (value: unknown, label: string): BrowserControlScreenshotCaptureMode | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === "viewport" || value === "fullPage" || value === "clip") {
+    return value;
+  }
+
+  throw new Error(`${label} must be viewport, fullPage, or clip.`);
+};
+
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0;
 
@@ -1255,6 +1807,12 @@ const readHeader = (request: IncomingMessage, name: string): string | undefined 
   const first = Array.isArray(value) ? value[0] : value;
   return first === undefined || first.trim().length === 0 ? undefined : first.trim();
 };
+
+const isNotFoundError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { readonly code?: unknown }).code === "ENOENT";
 
 const rawDataToText = (data: RawData): string => {
   if (typeof data === "string") {
