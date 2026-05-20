@@ -255,6 +255,7 @@ describe("agent HTTP API", () => {
             openFiles: [
               { path: "Projects/app/src/App.tsx", isFocused: false },
               { path: "Projects/app/src/Test.ts", isFocused: true },
+              { path: "chrome", isFocused: false },
             ],
           },
         }),
@@ -273,6 +274,7 @@ describe("agent HTTP API", () => {
         openFiles: [
           { path: "Projects/app/src/App.tsx", isFocused: false },
           { path: "Projects/app/src/Test.ts", isFocused: true },
+          { path: "chrome", isFocused: false },
         ],
       },
     }]);
@@ -299,6 +301,38 @@ describe("agent HTTP API", () => {
           path: "Projects/app",
           content: textContent("Invalid"),
           uiContext: { openFiles: [{ path: "Projects/app/src/App.tsx" }] },
+        }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    expect(steerResponse.status).toBe(400);
+    harness.resume();
+  });
+
+  it("rejects unsupported UI context fields for steer requests", async () => {
+    const harness = new PausedAfterDeltaHarness();
+    const { url } = await startAgentHttpServer(harness);
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "Projects/app", content: textContent("Build the UI") }),
+      headers: { "content-type": "application/json" },
+    });
+    const firstMessages = await readSseMessages(response, 1);
+    const threadId = readThreadId(firstMessages);
+    const runId = readRunId(firstMessages);
+
+    const steerResponse = await fetch(
+      `${url}/agent/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/steer`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          path: "Projects/app",
+          content: textContent("Invalid"),
+          uiContext: {
+            openFiles: [],
+            chrome: { isFocused: true },
+          },
         }),
         headers: { "content-type": "application/json" },
       },
