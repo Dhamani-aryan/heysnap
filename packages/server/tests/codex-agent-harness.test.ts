@@ -907,6 +907,7 @@ describe("codex agent harness", () => {
         openFiles: [
           { path: "Projects/app/src/App.tsx", isFocused: true },
           { path: "Projects/app/src/index.tsx", isFocused: false },
+          { path: "chrome", isFocused: false },
         ],
       },
     }));
@@ -938,6 +939,10 @@ describe("codex agent harness", () => {
                 "  },",
                 "  {",
                 "    \"filepath\": \"/workspace/Desktop/Projects/app/src/index.tsx\",",
+                "    \"isFocused\": false",
+                "  },",
+                "  {",
+                "    \"filepath\": \"chrome\",",
                 "    \"isFocused\": false",
                 "  }",
                 "]",

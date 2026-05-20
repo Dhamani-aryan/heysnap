@@ -1025,7 +1025,7 @@ const formatHeySnapContext = (input: {
 }): string => {
   const absolutePath = resolveClientPath(input.filesystemRoot, input.path);
   const openFiles = (input.uiContext?.openFiles ?? []).map((file) => ({
-    filepath: resolveClientPath(input.filesystemRoot, file.path),
+    filepath: file.path === "chrome" ? "chrome" : resolveClientPath(input.filesystemRoot, file.path),
     isFocused: file.isFocused,
   }));
   const openFilesJson = JSON.stringify(openFiles, null, 2);
