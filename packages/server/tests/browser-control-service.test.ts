@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -508,6 +508,137 @@ describe("browser-control service", () => {
     client.close();
   });
 
+  it("forwards tab.evaluate downloadable outputs and writes streamed files atomically", async () => {
+    const root = await createTempRoot();
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+    client.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+
+    const responsePromise = fetch(`${baseUrl}/browser-control/requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "user-1",
+        command: "tab.evaluate",
+        params: {
+          tabId: 123,
+          expression: "await window.__heysnapDownloads.save('export', 'hello')",
+        },
+        outputs: [{
+          id: "export",
+          path: "downloads/export.txt",
+          mimeType: "text/plain",
+        }],
+      }),
+    });
+    const request = await waitForJsonMessage<BrowserControlRequestMessage>(client);
+
+    expect(request).toMatchObject({
+      type: "request",
+      command: "tab.evaluate",
+      params: {
+        tabId: 123,
+        expression: "await window.__heysnapDownloads.save('export', 'hello')",
+      },
+      outputs: [{
+        id: "export",
+        mimeType: "text/plain",
+        maxBytes: 100 * 1024 * 1024,
+      }],
+    });
+    expect(JSON.stringify(request.outputs)).not.toContain("downloads/export.txt");
+
+    const bytes = Buffer.from("downloaded bytes", "utf8");
+    client.send(JSON.stringify({
+      type: "output.write",
+      requestId: request.requestId,
+      writeRequestId: "write-download",
+      outputId: "export",
+      offset: 0,
+      dataBase64: bytes.toString("base64"),
+      done: true,
+    }));
+    expect(await waitForJsonMessage<BrowserControlOutputAckMessage>(client)).toMatchObject({
+      type: "output.ack",
+      requestId: request.requestId,
+      writeRequestId: "write-download",
+      outputId: "export",
+      offset: 0,
+      bytesWritten: bytes.byteLength,
+      done: true,
+    });
+
+    client.send(JSON.stringify({
+      type: "response",
+      requestId: request.requestId,
+      ok: true,
+      result: { ok: true, result: { saved: true } },
+    }));
+
+    expect(await (await responsePromise).json()).toEqual({
+      ok: true,
+      result: {
+        evaluation: { ok: true, result: { saved: true } },
+        outputs: [{
+          id: "export",
+          path: "downloads/export.txt",
+          mimeType: "text/plain",
+          size: bytes.byteLength,
+          overwritten: false,
+        }],
+      },
+    });
+    expect(await readFile(join(root, "downloads/export.txt"), "utf8")).toBe("downloaded bytes");
+
+    client.close();
+  });
+
+  it("rejects invalid downloadable output requests", async () => {
+    const root = await createTempRoot();
+    await mkdir(join(root, "folder"));
+    await writeFile(join(root, "exists.txt"), "old");
+    await writeFile(join(root, "target.txt"), "target");
+    await symlink(join(root, "target.txt"), join(root, "link.txt"));
+    const { baseUrl } = await startBrowserControlServer({ filesystemRootPath: root });
+
+    await expectInvalidOutputRequest(baseUrl, [{
+      id: "outside",
+      path: "../outside.txt",
+    }], "Path cannot contain parent directory segments");
+
+    await expectInvalidOutputRequest(baseUrl, [
+      { id: "same", path: "one.txt" },
+      { id: "same", path: "two.txt" },
+    ], "duplicate id");
+
+    await expectInvalidOutputRequest(baseUrl, [{
+      id: "directory",
+      path: "folder",
+    }], "must point to a file path");
+
+    await expectInvalidOutputRequest(baseUrl, [{
+      id: "exists",
+      path: "exists.txt",
+    }], "already exists");
+
+    await expectInvalidOutputRequest(baseUrl, [{
+      id: "symlink",
+      path: "link.txt",
+      overwrite: true,
+    }], "cannot point to a symlink");
+
+    await expectInvalidOutputRequest(baseUrl, [{
+      id: "large",
+      path: "large.bin",
+      maxBytes: (100 * 1024 * 1024) + 1,
+    }], "maxBytes cannot exceed");
+
+    await expectInvalidOutputRequest(baseUrl, [{
+      id: "wrong-command",
+      path: "tabs.txt",
+    }], "outputs are only supported for tab.evaluate", "getTabs", {});
+  });
+
   it("rejects invalid screenshot requests and late output writes", async () => {
     const root = await createTempRoot();
     await mkdir(join(root, "folder"));
@@ -823,6 +954,33 @@ const expectInvalidScreenshotRequest = async (
     body: JSON.stringify({
       command: "tab.screenshot",
       params,
+    }),
+  });
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({
+    ok: false,
+    error: {
+      code: "INVALID_REQUEST",
+      message: expect.stringContaining(expectedMessage),
+    },
+  });
+};
+
+const expectInvalidOutputRequest = async (
+  baseUrl: string,
+  outputs: unknown,
+  expectedMessage: string,
+  command = "tab.evaluate",
+  params: unknown = { tabId: 123, expression: "location.href" },
+): Promise<void> => {
+  const response = await fetch(`${baseUrl}/browser-control/requests`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      command,
+      params,
+      outputs,
     }),
   });
 

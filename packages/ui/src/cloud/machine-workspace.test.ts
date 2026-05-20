@@ -22,6 +22,104 @@ describe("machine workspace browser load waiting", () => {
 });
 
 describe("machine workspace browser screenshots", () => {
+  it("installs tab.evaluate download helper and streams saved outputs", async () => {
+    const methods: string[] = [];
+    const expressions: string[] = [];
+    const writes: Array<{ readonly dataBase64: string; readonly done: boolean; readonly offset: number; readonly outputId: string }> = [];
+    const bytes = Buffer.from("downloaded text", "utf8");
+
+    const result = await executeBrowserControlExtensionCommand({
+      command: "tab.evaluate",
+      executeDebuggerCommand: async (command) => {
+        methods.push(command.method);
+        if (command.method !== "Runtime.evaluate") {
+          throw new Error(`Unexpected debugger command ${command.method}`);
+        }
+
+        const expression = String(command.params?.["expression"] ?? "");
+        expressions.push(expression);
+
+        if (expression.includes(".__info(")) {
+          return { result: { value: { size: bytes.byteLength } } };
+        }
+
+        if (expression.includes(".__read(")) {
+          return {
+            result: {
+              value: {
+                dataBase64: bytes.toString("base64"),
+                done: true,
+                offset: 0,
+              },
+            },
+          };
+        }
+
+        if (expression === "await window.__heysnapDownloads.save('export', 'downloaded text')") {
+          expect(command.params).toMatchObject({ awaitPromise: true, returnByValue: true });
+          return { result: { value: { saved: true } } };
+        }
+
+        return { result: { value: true } };
+      },
+      executeExtensionCommand: async () => ({}),
+      outputs: [{ id: "export", mimeType: "text/plain", maxBytes: 1024 }],
+      params: {
+        tabId: 123,
+        expression: "await window.__heysnapDownloads.save('export', 'downloaded text')",
+      },
+      signal: new AbortController().signal,
+      windowId: 1,
+      writeOutput: async (write) => {
+        writes.push(write);
+        return {
+          bytesWritten: Buffer.from(write.dataBase64, "base64").byteLength,
+          done: write.done,
+          offset: write.offset,
+          outputId: write.outputId,
+        };
+      },
+    });
+
+    expect(result).toEqual({ ok: true, result: { saved: true } });
+    expect(methods).toEqual(["Runtime.evaluate", "Runtime.evaluate", "Runtime.evaluate", "Runtime.evaluate", "Runtime.evaluate"]);
+    expect(expressions[0]).toContain("__heysnapDownloads");
+    expect(expressions[1]).toContain("__prepare");
+    expect(expressions[3]).toContain("__info");
+    expect(expressions[4]).toContain("__read");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      dataBase64: bytes.toString("base64"),
+      done: true,
+      offset: 0,
+      outputId: "export",
+    });
+  });
+
+  it("rejects tab.evaluate outputs when the page does not save the declared output", async () => {
+    await expect(executeBrowserControlExtensionCommand({
+      command: "tab.evaluate",
+      executeDebuggerCommand: async (command) => {
+        const expression = String(command.params?.["expression"] ?? "");
+        if (expression.includes(".__info(")) {
+          return { exceptionDetails: { text: "missing output" } };
+        }
+        return { result: { value: true } };
+      },
+      executeExtensionCommand: async () => ({}),
+      outputs: [{ id: "export", mimeType: "text/plain", maxBytes: 1024 }],
+      params: {
+        tabId: 123,
+        expression: "true",
+      },
+      signal: new AbortController().signal,
+      windowId: 1,
+      writeOutput: async () => {
+        throw new Error("should not write");
+      },
+    })).rejects.toThrow("browser-control downloads");
+  });
+
   it("captures and streams a viewport screenshot", async () => {
     const debuggerCommands: Array<{ readonly method: string; readonly params?: Record<string, unknown>; readonly tabId: number }> = [];
     const writes: Array<{ readonly dataBase64: string; readonly done: boolean; readonly offset: number; readonly outputId: string }> = [];

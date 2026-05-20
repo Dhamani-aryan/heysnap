@@ -30,6 +30,7 @@ type BrowserControlPostRequest = BrowserControlCommand & {
   timeoutMs?: number;
   clientRequestId?: string;
   attachments?: BrowserControlAttachment[];
+  outputs?: BrowserControlOutput[];
 };
 
 type BrowserControlAttachment = {
@@ -37,6 +38,14 @@ type BrowserControlAttachment = {
   path: string;
   name?: string;
   mimeType?: string;
+};
+
+type BrowserControlOutput = {
+  id: string;
+  path: string;
+  mimeType?: string;
+  maxBytes?: number;
+  overwrite?: boolean;
 };
 ```
 
@@ -50,6 +59,7 @@ Fields:
 | `timeoutMs` | number | no | Positive number. Defaults to `30000`; max is `300000`. |
 | `clientRequestId` | string | no | Caller-provided trace id. It is forwarded through the websocket frame but is not currently echoed in the HTTP response. |
 | `attachments` | array | no | Request-scoped files from the machine filesystem root. V1 hydrates attachments only for `tab.evaluate`. |
+| `outputs` | array | no | Request-scoped save targets inside the machine filesystem root. V1 supports public outputs only for `tab.evaluate`. |
 
 All tab commands are scoped to the managed Chrome window remembered by the web
 client. If no `windowId` exists in the web client's browser-window store, the
@@ -95,6 +105,90 @@ await window.__heysnapFiles.dropFiles(selectorOrElement, ids);
 window.__heysnapFiles.clear(ids);
 ```
 
+## Download Outputs
+
+Outputs let `tab.evaluate` save bytes that page JavaScript can read back into
+the machine filesystem. Output `path` values are root-relative filesystem paths,
+using the same path model as the filesystem UI.
+
+Limits: at most 10 files, and at most 100 MiB per file. `maxBytes` defaults to
+100 MiB and cannot exceed 100 MiB. Existing files fail unless `overwrite: true`.
+The server validates paths before forwarding the browser-control request, then
+writes streamed chunks to a temp file and renames atomically after completion.
+
+During `tab.evaluate`, the web client installs:
+
+```ts
+await window.__heysnapDownloads.save(id, source, options?);
+window.__heysnapDownloads.clear(ids?);
+```
+
+`source` may be a `Response`, `Blob`, `File`, `ArrayBuffer`, typed array,
+`DataView`, or string. This only works for bytes the page can read. Cross-origin
+images, PDFs, or downloads without CORS may be visible in the browser but still
+blocked from page JavaScript.
+
+Example: save a page-readable image.
+
+```json
+{
+  "command": "tab.evaluate",
+  "params": {
+    "tabId": 123,
+    "expression": "await window.__heysnapDownloads.save('image', await fetch(document.querySelector('img').currentSrc))"
+  },
+  "outputs": [
+    {
+      "id": "image",
+      "path": "downloads/image.png",
+      "mimeType": "image/png",
+      "overwrite": true
+    }
+  ],
+  "timeoutMs": 120000
+}
+```
+
+Example: save a PDF URL.
+
+```json
+{
+  "command": "tab.evaluate",
+  "params": {
+    "tabId": 123,
+    "expression": "await window.__heysnapDownloads.save('pdf', await fetch('/invoice.pdf'))"
+  },
+  "outputs": [
+    {
+      "id": "pdf",
+      "path": "downloads/invoice.pdf",
+      "mimeType": "application/pdf"
+    }
+  ]
+}
+```
+
+Example: save a Blob URL or generated text.
+
+```js
+await window.__heysnapDownloads.save('blob', await fetch(blobUrl));
+await window.__heysnapDownloads.save('text', 'generated report text');
+```
+
+Observed manual E2E behavior:
+
+- Direct page-readable PDFs work. `https://arxiv.org/pdf/1706.03762` saved as
+  a valid PDF from page `fetch(...)`.
+- Direct page-readable images work. A direct `encrypted-tbn0.gstatic.com`
+  image saved successfully; callers should choose the output extension from the
+  actual response content type when possible.
+- X/Twitter tweet media is visible in the DOM but not readable by Phase 1 page
+  JavaScript. Page `fetch(...)` against `pbs.twimg.com/media/...` failed, and
+  drawing the loaded image to canvas produced a tainted-canvas `SecurityError`.
+  The discovered media URL was still fetchable from the machine with `curl`, so
+  this case needs a Phase 2 native/extension or server-side discovered-URL
+  download path.
+
 ## Response Envelope
 
 Successful command:
@@ -135,9 +229,9 @@ Common errors:
 | `BROWSER_EXECUTOR_ERROR` | The web client or extension command failed. |
 | `BROWSER_ATTACHMENTS_UNSUPPORTED` | Attachments were used with a command other than `tab.evaluate`, or without the workspace browser executor. |
 | `BROWSER_ATTACHMENT_CHANGED` | An attachment changed after request validation and before chunk streaming completed. |
-| `BROWSER_OUTPUTS_UNSUPPORTED` | Output streaming was used without the workspace browser executor. |
-| `BROWSER_OUTPUT_TOO_LARGE` | A screenshot output exceeded the configured file-size limit. |
-| `BROWSER_OUTPUT_INCOMPLETE` | The browser client responded before finishing the screenshot output stream. |
+| `BROWSER_OUTPUTS_UNSUPPORTED` | Outputs were used with an unsupported command, or without the workspace browser executor. |
+| `BROWSER_OUTPUT_TOO_LARGE` | An output exceeded the configured file-size limit. |
+| `BROWSER_OUTPUT_INCOMPLETE` | The browser client responded before finishing an output stream. |
 | `INVALID_REQUEST` | Request JSON or params failed server validation. |
 
 ## Shared Result Types
@@ -556,15 +650,35 @@ type TabEvaluateResponse = BrowserControlSuccess<
       ok: false;
       exceptionDetails: unknown;
     }
+  | {
+      evaluation: {
+        ok: true;
+        result: unknown;
+      } | {
+        ok: false;
+        exceptionDetails: unknown;
+      };
+      outputs: Array<{
+        id: string;
+        path: string;
+        mimeType: string;
+        size: number;
+        overwritten: boolean;
+      }>;
+    }
 >;
 ```
 
 Notes:
 
 - `returnByValue` defaults to `true`.
-- If the expression throws, the command itself still returns `ok: true` at the
-  browser-control envelope level, with `result.ok = false` and CDP
-  `exceptionDetails` inside the result.
+- When top-level `outputs` are present, `awaitPromise` is forced to `true` so
+  asynchronous `window.__heysnapDownloads.save(...)` calls finish before output
+  streaming starts.
+- Without outputs, if the expression throws, the command itself still returns
+  `ok: true` at the browser-control envelope level, with `result.ok = false`
+  and CDP `exceptionDetails` inside the result. With outputs, expression failure
+  fails the command so the server can clean up incomplete output temp files.
 
 Example: read URL, title, and page metadata.
 
