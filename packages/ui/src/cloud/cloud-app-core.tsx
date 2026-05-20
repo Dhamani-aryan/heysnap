@@ -36,6 +36,7 @@ const CLOUD_SCREEN_TRANSITION = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as co
 
 export interface CloudAppProps {
   readonly cloudServerUrl?: string;
+  readonly browserControlExtensionId?: string;
   readonly route?: CloudAppRoute;
   readonly onRouteChange?: (route: CloudAppRoute, options?: CloudRouteChangeOptions) => void;
   readonly onMachineCreateStarted?: () => void;
@@ -49,6 +50,8 @@ export interface CloudAppCoreProps extends CloudAppProps {
 
 export interface CloudWorkspaceRendererProps {
   readonly agentBaseUrl: string;
+  readonly browserControlWebSocketUrl?: string;
+  readonly browserControlExtensionId?: string;
   readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
@@ -104,6 +107,7 @@ export function CloudAppCore(props: CloudAppCoreProps): React.ReactElement {
 }
 
 function CloudAppContent({
+  browserControlExtensionId,
   route,
   onRouteChange,
   onMachineCreateStarted,
@@ -455,6 +459,12 @@ function CloudAppContent({
           path: workspaceSession.accessSession.routes.agentBaseUrl,
           token: workspaceSession.accessSession.accessSession.token,
         }),
+        browserControlWebSocketUrl: workspaceSession.accessSession.routes.browserControlWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
+          baseUrl: client.baseUrl,
+          path: workspaceSession.accessSession.routes.browserControlWebSocketUrl,
+          token: workspaceSession.accessSession.accessSession.token,
+        }),
+        browserControlExtensionId,
         capabilitiesBaseUrl: workspaceSession.accessSession.routes.capabilitiesBaseUrl === undefined ? undefined : buildGatewayHttpUrl({
           baseUrl: client.baseUrl,
           path: workspaceSession.accessSession.routes.capabilitiesBaseUrl,
