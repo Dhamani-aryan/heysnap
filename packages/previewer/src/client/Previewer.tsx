@@ -1,101 +1,195 @@
-import { useMemo } from "react";
-import { HeySnapCodeViewer } from "heysnap-web-viewers/code";
-import { HeySnapDocxViewer } from "heysnap-web-viewers/docx";
-import { HeySnapMarkdownViewer } from "heysnap-web-viewers/markdown";
-import { HeySnapPdfViewer } from "heysnap-web-viewers/pdf";
-import { HeySnapPPTViewer } from "heysnap-web-viewers/ppt";
-import { HeySnapXlsxViewer } from "heysnap-web-viewers/xlsx";
+import { useEffect, useMemo } from "react";
 
 import type { PreviewFile, PreviewHtml, PreviewItem, PreviewWorkbook } from "../protocol";
+import { HeySnapAudioPlayer } from "./components/viewers/HeySnapAudioPlayer";
+import {
+  HEYSNAP_DARK_ID,
+  HEYSNAP_LIGHT_ID,
+  HeySnapCodeViewer,
+} from "./components/viewers/HeySnapCodeViewer";
+import { HeySnapDocxViewer } from "./components/viewers/HeySnapDocxViewer";
+import { HeySnapHtmlViewer } from "./components/viewers/HeySnapHtmlViewer";
+import { HeySnapImageViewer } from "./components/viewers/HeySnapImageViewer";
+import { HeySnapMarkdownViewer } from "./components/viewers/HeySnapMarkdownViewer";
+import { HeySnapPdfViewer } from "./components/viewers/HeySnapPdfViewer";
+import { HeySnapPPTViewer } from "./components/viewers/HeySnapPPTViewer";
+import { HeySnapVideoViewer } from "./components/viewers/HeySnapVideoViewer";
+import { HeySnapXlsxViewer } from "./components/viewers/HeySnapXlsxViewer";
 
-const DARK_VIEWER_PROPS = {
-  headerBackground: "#0f0f11",
-  headerForeground: "#f4f6fb",
-  bodyBackground: "#0b0e13",
-} as const;
+export type PreviewTheme = "dark" | "light";
 
-const PDF_DARK_PROPS = {
-  ...DARK_VIEWER_PROPS,
-  sidebarBackground: "#161b22",
-} as const;
+type ViewerThemeConfig = {
+  readonly mode: PreviewTheme;
+  readonly headerBackground: string;
+  readonly headerForeground: string;
+  readonly bodyBackground: string;
+  readonly codeBodyBackground: string;
+  readonly mediaBodyBackground: string;
+  readonly sidebarBackground: string;
+  readonly codeTheme: string;
+  readonly xlsxClassName: string;
+};
 
-const PPT_DARK_PROPS = {
-  ...DARK_VIEWER_PROPS,
-  sidebarBackground: "#161b22",
-} as const;
+const VIEWER_THEMES: Record<PreviewTheme, ViewerThemeConfig> = {
+  dark: {
+    mode: "dark",
+    headerBackground: "#0f0f11",
+    headerForeground: "#f4f6fb",
+    bodyBackground: "#0b0e13",
+    codeBodyBackground: "#0f0f11",
+    mediaBodyBackground: "#000000",
+    sidebarBackground: "#161b22",
+    codeTheme: HEYSNAP_DARK_ID,
+    xlsxClassName: "theme-dark",
+  },
+  light: {
+    mode: "light",
+    headerBackground: "#ffffff",
+    headerForeground: "#15171c",
+    bodyBackground: "#f3f4f6",
+    codeBodyBackground: "#ffffff",
+    mediaBodyBackground: "#f3f4f6",
+    sidebarBackground: "#eef1f5",
+    codeTheme: HEYSNAP_LIGHT_ID,
+    xlsxClassName: "theme-light",
+  },
+};
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 const PPT_SERVER_URL =
   import.meta.env.VITE_PPT_SERVER_URL ||
   "http://13.126.207.124/Kd5QihM3zhwV2WztLXAnBc6n07Goa6O3mByrs-rqWjU/ppt";
 
-export function Previewer({ item }: { readonly item: PreviewItem }): React.ReactElement {
+type PreviewerCallbacks = {
+  readonly onReady?: () => void;
+  readonly onError?: (error: Error) => void;
+};
+
+type ThemedPreviewerCallbacks = PreviewerCallbacks & {
+  readonly theme: ViewerThemeConfig;
+};
+
+export function Previewer({
+  item,
+  theme = "dark",
+  onReady,
+  onError,
+}: {
+  readonly item: PreviewItem;
+  readonly theme?: PreviewTheme;
+} & PreviewerCallbacks): React.ReactElement {
+  const viewerTheme = VIEWER_THEMES[theme];
+
   if (item.kind === "workbook") {
-    return <XlsxPreview data={item.data} />;
+    return <XlsxPreview data={item.data} theme={viewerTheme} onReady={onReady} onError={onError} />;
   }
 
   if (item.kind === "html") {
-    return <HtmlPreview data={item.data} />;
+    return <HtmlPreview data={item.data} theme={viewerTheme} onReady={onReady} onError={onError} />;
   }
 
-  return renderFile(item.file);
+  return renderFile(item.file, { theme: viewerTheme, onReady, onError });
 }
 
-const HtmlPreview = ({ data }: { readonly data: PreviewHtml }): React.ReactElement => {
+const HtmlPreview = ({
+  data,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly data: PreviewHtml;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const separator = data.url.includes("?") ? "&" : "?";
   const src = `${data.url}${separator}v=${String(data.mtime)}`;
 
   return (
-    <iframe
+    <HeySnapHtmlViewer
       key={`${data.path}:${String(data.mtime)}`}
-      className="preview-html-frame"
       src={src}
-      title={data.name}
+      documentName={data.name}
+      codeTheme={theme.codeTheme}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.codeBodyBackground}
+      onReady={onReady}
+      onError={onError}
     />
   );
 };
 
-const renderFile = (file: PreviewFile): React.ReactElement => {
+const renderFile = (file: PreviewFile, callbacks: ThemedPreviewerCallbacks): React.ReactElement => {
   const lowerPath = file.path.toLowerCase();
 
   if (file.mime === "application/pdf" || lowerPath.endsWith(".pdf")) {
-    return <PdfPreview file={file} />;
+    return <PdfPreview file={file} {...callbacks} />;
   }
 
   if (file.mime === DOCX_MIME || lowerPath.endsWith(".docx")) {
-    return <DocxPreview file={file} />;
+    return <DocxPreview file={file} {...callbacks} />;
   }
 
   if (file.mime === PPTX_MIME || lowerPath.endsWith(".pptx")) {
-    return <PptPreview file={file} />;
+    return <PptPreview file={file} {...callbacks} />;
   }
 
   if (isMarkdown(file)) {
-    return <MarkdownPreview file={file} />;
+    return <MarkdownPreview file={file} {...callbacks} />;
   }
 
   if (isCode(file)) {
-    return <CodePreview file={file} />;
+    return <CodePreview file={file} {...callbacks} />;
   }
 
-  return <FallbackPreview file={file} />;
+  if (file.mime.startsWith("image/")) {
+    return <ImagePreview file={file} {...callbacks} />;
+  }
+
+  if (file.mime.startsWith("video/")) {
+    return <VideoPreview file={file} {...callbacks} />;
+  }
+
+  if (file.mime.startsWith("audio/")) {
+    return <AudioPreview file={file} {...callbacks} />;
+  }
+
+  return <FallbackPreview file={file} {...callbacks} />;
 };
 
-const PdfPreview = ({ file }: { readonly file: PreviewFile }): React.ReactElement => {
+const PdfPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
 
   return (
     <HeySnapPdfViewer
       key={`${file.path}:${String(file.mtime)}`}
       src={bytes}
-      {...PDF_DARK_PROPS}
+      onReady={onReady}
+      onError={onError}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.bodyBackground}
+      sidebarBackground={theme.sidebarBackground}
     />
   );
 };
 
-const DocxPreview = ({ file }: { readonly file: PreviewFile }): React.ReactElement => {
+const DocxPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
 
   return (
@@ -103,12 +197,23 @@ const DocxPreview = ({ file }: { readonly file: PreviewFile }): React.ReactEleme
       key={`${file.path}:${String(file.mtime)}`}
       src={bytes}
       documentName={file.name}
-      {...DARK_VIEWER_PROPS}
+      onReady={onReady}
+      onError={onError}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.bodyBackground}
     />
   );
 };
 
-const PptPreview = ({ file }: { readonly file: PreviewFile }): React.ReactElement => {
+const PptPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
 
   return (
@@ -117,12 +222,24 @@ const PptPreview = ({ file }: { readonly file: PreviewFile }): React.ReactElemen
       src={bytes}
       serverUrl={PPT_SERVER_URL}
       documentName={file.name}
-      {...PPT_DARK_PROPS}
+      onReady={onReady}
+      onError={onError}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.bodyBackground}
+      sidebarBackground={theme.sidebarBackground}
     />
   );
 };
 
-const CodePreview = ({ file }: { readonly file: PreviewFile }): React.ReactElement => {
+const CodePreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const src = useMemo(
     () => new File([base64ToBytes(file.data)], file.name, { type: "text/plain" }),
     [file.data, file.name],
@@ -133,15 +250,24 @@ const CodePreview = ({ file }: { readonly file: PreviewFile }): React.ReactEleme
       key={`${file.path}:${String(file.mtime)}`}
       src={src}
       documentName={file.name}
-      theme="vs-dark"
-      headerBackground={DARK_VIEWER_PROPS.headerBackground}
-      headerForeground={DARK_VIEWER_PROPS.headerForeground}
-      bodyBackground={DARK_VIEWER_PROPS.headerBackground}
+      theme={theme.codeTheme}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.codeBodyBackground}
+      onReady={onReady}
+      onError={onError}
     />
   );
 };
 
-const MarkdownPreview = ({ file }: { readonly file: PreviewFile }): React.ReactElement => {
+const MarkdownPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const src = useMemo(
     () => new File([base64ToBytes(file.data)], file.name, { type: "text/markdown" }),
     [file.data, file.name],
@@ -152,67 +278,168 @@ const MarkdownPreview = ({ file }: { readonly file: PreviewFile }): React.ReactE
       key={`${file.path}:${String(file.mtime)}`}
       src={src}
       documentName={file.name}
-      codeTheme="heysnap-dark"
-      headerBackground={DARK_VIEWER_PROPS.headerBackground}
-      headerForeground={DARK_VIEWER_PROPS.headerForeground}
-      bodyBackground={DARK_VIEWER_PROPS.bodyBackground}
+      codeTheme={theme.codeTheme}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.codeBodyBackground}
+      onReady={onReady}
+      onError={onError}
     />
   );
 };
 
-const XlsxPreview = ({ data }: { readonly data: PreviewWorkbook }): React.ReactElement => (
-  <div className="theme-dark preview-xlsx-shell">
-    <HeySnapXlsxViewer
-      key={`${data.path}:${String(data.mtime)}`}
-      workbook={data.workbook}
-      title={data.name}
-      darkBgColor="#0b0e13"
+const XlsxPreview = ({
+  data,
+  theme,
+  onReady,
+}: {
+  readonly data: PreviewWorkbook;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
+  const downloadFile = useMemo(
+    () =>
+      typeof data.data === "string"
+        ? new Blob([base64ToBytes(data.data)], { type: XLSX_MIME })
+        : null,
+    [data.data],
+  );
+
+  return (
+    <div className={`${theme.xlsxClassName} preview-xlsx-shell`}>
+      <HeySnapXlsxViewer
+        key={`${data.path}:${String(data.mtime)}`}
+        workbook={data.workbook}
+        title={data.name}
+        darkBgColor={VIEWER_THEMES.dark.bodyBackground}
+        lightBgColor={VIEWER_THEMES.light.codeBodyBackground}
+        downloadFile={downloadFile}
+        downloadFileName={data.name}
+        downloadMime={XLSX_MIME}
+        allowJsonDownloadFallback={false}
+        onReady={onReady}
+      />
+    </div>
+  );
+};
+
+const ImagePreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
+  const src = useMemo(() => fileToBrowserFile(file), [file]);
+
+  return (
+    <HeySnapImageViewer
+      key={`${file.path}:${String(file.mtime)}`}
+      src={src}
+      documentName={file.name}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.bodyBackground}
+      onReady={onReady}
+      onError={onError}
     />
-  </div>
-);
+  );
+};
 
-const FallbackPreview = ({ file }: { readonly file: PreviewFile }): React.ReactElement => {
+const VideoPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
+  const src = useMemo(() => fileToBrowserFile(file), [file]);
+
+  return (
+    <HeySnapVideoViewer
+      key={`${file.path}:${String(file.mtime)}`}
+      src={src}
+      documentName={file.name}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.mediaBodyBackground}
+      onReady={onReady}
+      onError={onError}
+    />
+  );
+};
+
+const AudioPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
+  const src = useMemo(() => fileToBrowserFile(file), [file]);
+
+  return (
+    <HeySnapAudioPlayer
+      key={`${file.path}:${String(file.mtime)}`}
+      src={src}
+      documentName={file.name}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.bodyBackground}
+      onReady={onReady}
+      onError={onError}
+    />
+  );
+};
+
+const FallbackPreview = ({
+  file,
+  onReady,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
   const dataUrl = useMemo(() => `data:${file.mime};base64,${file.data}`, [file.data, file.mime]);
-
-  if (file.mime.startsWith("image/")) {
-    return (
-      <div className="preview-media-shell">
-        <img src={dataUrl} alt={file.name} />
-      </div>
-    );
-  }
-
-  if (file.mime.startsWith("video/")) {
-    return (
-      <div className="preview-media-shell">
-        <video src={dataUrl} controls />
-      </div>
-    );
-  }
-
-  if (file.mime.startsWith("audio/")) {
-    return (
-      <div className="preview-media-shell">
-        <audio src={dataUrl} controls />
-      </div>
-    );
-  }
 
   if (
     file.mime.startsWith("text/") ||
     file.mime === "application/json" ||
     file.mime === "application/xml"
   ) {
-    return <pre className="preview-text-fallback">{decodeTextFile(file.data)}</pre>;
+    return (
+      <ReadyAfterPaint onReady={onReady}>
+        <pre className="preview-text-fallback">{decodeTextFile(file.data)}</pre>
+      </ReadyAfterPaint>
+    );
   }
 
   return (
-    <div className="preview-download-fallback">
-      <a href={dataUrl} download={file.name}>
-        Download {file.name} ({formatBytes(file.size)})
-      </a>
-    </div>
+    <ReadyAfterPaint onReady={onReady}>
+      <div className="preview-download-fallback">
+        <a href={dataUrl} download={file.name}>
+          Download {file.name} ({formatBytes(file.size)})
+        </a>
+      </div>
+    </ReadyAfterPaint>
   );
+};
+
+const fileToBrowserFile = (file: PreviewFile): File =>
+  new File([base64ToBytes(file.data)], file.name, { type: file.mime });
+
+const ReadyAfterPaint = ({
+  children,
+  onReady,
+}: {
+  readonly children: React.ReactElement;
+  readonly onReady?: () => void;
+}): React.ReactElement => {
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => onReady?.());
+    return () => window.cancelAnimationFrame(frame);
+  }, [onReady]);
+
+  return children;
 };
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdx"]);
