@@ -18,6 +18,7 @@ inherit("docker", [
 ]);
 
 inherit("docker", ["compose", "-f", "docker-compose.local.yml", "up", "-d"]);
+inherit("docker", ["compose", "-f", "docker-compose.local.yml", "up", "-d", "--force-recreate", "artifacts"]);
 
 for (let attempt = 0; attempt < 60; attempt += 1) {
   const containerId = run("docker", [

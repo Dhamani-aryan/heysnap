@@ -3,5 +3,5 @@
   "label": "Chrome",
   "version": "1.0.0",
   "description": "Control the user's dedicated Chrome window through an agent-friendly CLI. Use this skill for browser tasks, authenticated websites, user-visible web workflows, or when the HeySnap UI context includes filepath \"chrome\". The browser runs on the user's device, so it can use the user's logged-in sessions, extensions, cookies, location/IP, and real browser state. If Chrome is not already open, browser commands can create the dedicated window automatically. Prefer this skill for most of web related tasks except for quick web searches (use web skill for that).",
-  "activeByDefault": false
+  "activeByDefault": true
 }
