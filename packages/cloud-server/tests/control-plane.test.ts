@@ -621,6 +621,8 @@ describe("cloud server computer access sessions", () => {
     });
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
+      filesystemPreviewBaseUrl: `/gateway/computers/${computer.id}/preview`,
+      filesystemPreviewWebSocketUrl: `/gateway/computers/${computer.id}/preview/ws`,
       browserControlWebSocketUrl: `/gateway/computers/${computer.id}/browser-control`,
       agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
       capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
@@ -717,6 +719,61 @@ describe("cloud server computer access sessions", () => {
     expect(response.headers.get("content-disposition")).toBe("inline; filename=\"Budget.pdf\"");
     expect(await response.text()).toBe("%PDF preview");
     expect(requestedPaths).toEqual(["/filesystem/preview?path=Budget.xlsx&format=pdf"]);
+  });
+
+  it("proxies standalone preview assets through authenticated gateway access sessions", async () => {
+    const requestedPaths: string[] = [];
+    const requestedHeaders: Array<Record<string, string> | undefined> = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async (_computerId, input) => {
+        requestedPaths.push(input.path);
+        requestedHeaders.push(input.headers);
+        return {
+          statusCode: 200,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+          },
+          body: Buffer.from("<!doctype html><title>Preview</title>", "utf8"),
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "standalone-preview-user@example.com");
+    const computer = await createComputer(app, auth.token, "Standalone Preview VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const indexResponse = await app.request(
+      `/gateway/computers/${computer.id}/preview?accessToken=${accessBody.accessSession.token}&path=Budget.xlsx`,
+    );
+    const cookie = indexResponse.headers.get("set-cookie")?.split(";")[0];
+
+    expect(indexResponse.status).toBe(200);
+    expect(cookie).toBe(`heysnap_preview_access=${encodeURIComponent(accessBody.accessSession.token)}`);
+    expect(indexResponse.headers.get("set-cookie")).toContain(`Path=/gateway/computers/${computer.id}/preview`);
+
+    const assetResponse = await app.request(
+      `/gateway/computers/${computer.id}/preview/assets/app.js?path=Budget.xlsx`,
+      { headers: { cookie: cookie ?? "" } },
+    );
+
+    expect(assetResponse.status).toBe(200);
+    expect(assetResponse.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(assetResponse.headers.get("cache-control")).toBe("no-store");
+    expect(await assetResponse.text()).toBe("<!doctype html><title>Preview</title>");
+    expect(requestedPaths).toEqual([
+      "/preview?path=Budget.xlsx",
+      "/preview/assets/app.js?path=Budget.xlsx",
+    ]);
+    expect(requestedHeaders).toEqual([
+      { "x-heysnap-preview-public-base-path": `/gateway/computers/${computer.id}/preview` },
+      { "x-heysnap-preview-public-base-path": `/gateway/computers/${computer.id}/preview` },
+    ]);
   });
 
   it("proxies XLSX previews and exposes asset metadata through authenticated gateway access sessions", async () => {
@@ -1282,6 +1339,8 @@ interface AccessSessionResponse {
   };
   readonly routes: {
     readonly filesystemWebSocketUrl: string;
+    readonly filesystemPreviewBaseUrl: string;
+    readonly filesystemPreviewWebSocketUrl: string;
     readonly browserControlWebSocketUrl: string;
     readonly agentBaseUrl: string;
     readonly capabilitiesBaseUrl: string;
