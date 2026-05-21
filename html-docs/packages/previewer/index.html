@@ -1123,9 +1123,9 @@
               <h4>The viewer choice &amp; the UI lifecycle</h4>
               <p>
                 URL parsing, WebSocket lifecycle (<code>idle &middot; connecting
-                &middot; open &middot; closed</code>), and the
-                viewer&hyphen;router that turns a <code>PreviewItem</code> into
-                a concrete component.
+                &middot; open &middot; closed</code>), a double-buffered render
+                machine, and the local <code>components/viewers</code>
+                directory that holds every concrete viewer.
               </p>
             </div>
             <div class="prv-layer">
@@ -1166,28 +1166,34 @@
               <!-- Client file cards -->
               <g font-family="Geist, sans-serif">
                 <!-- main.tsx -->
-                <rect x="44" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <rect x="44" y="72" width="160" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
                 <text x="60" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">main.tsx</text>
                 <text x="60" y="120" font-size="12.5" fill="#787771">React bootstrap</text>
                 <text x="60" y="138" font-size="12.5" fill="#787771">mounts &lt;App /&gt;</text>
 
                 <!-- App.tsx -->
-                <rect x="264" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
-                <text x="280" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">App.tsx</text>
-                <text x="280" y="120" font-size="12.5" fill="#787771">WebSocket lifecycle</text>
-                <text x="280" y="138" font-size="12.5" fill="#787771">URL &rarr; watch message</text>
+                <rect x="224" y="72" width="180" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="240" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">App.tsx</text>
+                <text x="240" y="120" font-size="12.5" fill="#787771">WS lifecycle + buffer</text>
+                <text x="240" y="138" font-size="12.5" fill="#787771">URL &rarr; watch message</text>
 
                 <!-- Previewer.tsx -->
-                <rect x="484" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
-                <text x="500" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">Previewer.tsx</text>
-                <text x="500" y="120" font-size="12.5" fill="#787771">Viewer router</text>
-                <text x="500" y="138" font-size="12.5" fill="#787771">PDF / DOCX / XLSX / &hellip;</text>
+                <rect x="424" y="72" width="180" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="440" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">Previewer.tsx</text>
+                <text x="440" y="120" font-size="12.5" fill="#787771">Viewer router</text>
+                <text x="440" y="138" font-size="12.5" fill="#787771">theme: dark | light</text>
+
+                <!-- components/ -->
+                <rect x="624" y="72" width="160" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" stroke-dasharray="5 4" />
+                <text x="640" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">components/</text>
+                <text x="640" y="120" font-size="12.5" fill="#787771">9 local viewers</text>
+                <text x="640" y="138" font-size="12.5" fill="#787771">+ _internal helpers</text>
 
                 <!-- styles.css -->
-                <rect x="704" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
-                <text x="720" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">styles.css</text>
-                <text x="720" y="120" font-size="12.5" fill="#787771">Shell + iframe + status</text>
-                <text x="720" y="138" font-size="12.5" fill="#787771">dark theme tokens</text>
+                <rect x="804" y="72" width="100" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="820" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">styles.css</text>
+                <text x="820" y="120" font-size="12.5" fill="#787771">shell +</text>
+                <text x="820" y="138" font-size="12.5" fill="#787771">theme tokens</text>
               </g>
 
               <!-- Down arrow CLIENT → PROTOCOL -->
@@ -1543,10 +1549,13 @@
                   <code>node_modules</code>, <code>.git</code>,
                   <code>dist</code>, and other noisy directories. Each change
                   schedules a 20&thinsp;ms-debounced timer; on fire,
-                  <code>sendUpdate</code> runs again and the client re-keys
-                  on <code>path:mtime</code> to remount the viewer. On socket
-                  close the watcher is destroyed and the connection&rsquo;s
-                  asset directory is removed.
+                  <code>sendUpdate</code> runs again. The client&rsquo;s
+                  buffer reducer queues the new item as
+                  <code>pendingSlot</code>; the new viewer paints
+                  off-screen and swaps in on
+                  <code>onReady</code>, so the cross-fade between versions
+                  is flicker-free. On socket close the watcher is destroyed
+                  and the connection&rsquo;s asset directory is removed.
                 </p>
                 <span class="prv-step-files">src/server/service.ts &middot; src/client/Previewer.tsx</span>
               </div>
@@ -1769,7 +1778,10 @@
                 <code>workbook.json</code>, strips chart asset fields, and
                 rewrites every image <code>assetPath</code> into an
                 <code>assetUrl</code> that lands on
-                <code>/api/xlsx-assets/&lt;connId&gt;/&hellip;</code>.
+                <code>/api/xlsx-assets/&lt;connId&gt;/&hellip;</code>. The
+                original <code>.xlsx</code> bytes also ride along as
+                base64 in <code>data</code> so the viewer can expose a
+                download.
               </p>
               <div class="prv-codes">
                 <div class="prv-code-block">
@@ -1778,7 +1790,9 @@
   type: "workbook";
   path: string;
   name: string;
+  size: number;
   mtime: number;
+  data: string;       // base64 .xlsx
   workbook: unknown;  // shape from CLI
 }</pre>
                 </div>
@@ -1788,7 +1802,9 @@
   "type": "workbook",
   "path": "sheets/q3.xlsx",
   "name": "q3.xlsx",
+  "size": 28412,
   "mtime": 1716302400000,
+  "data": "UEsDBBQABgAIAA...",
   "workbook": {
     "workbook": {
       "sheets": [ { "name": "Sheet1", ... } ]
@@ -2119,7 +2135,9 @@ pong        &rarr; (ignored by viewer)</pre>
                   change re-enters <code>sendUpdate</code>, which branches by
                   extension into <code>sendBytes</code>,
                   <code>sendHtmlPreview</code>, or
-                  <code>sendWorkbook</code>.
+                  <code>sendWorkbook</code> (the workbook branch reads the
+                  raw bytes alongside the parsed JSON so the viewer can
+                  expose a download).
                 </p>
               </div>
               <div class="prv-srv-meta">
@@ -2361,13 +2379,14 @@ pong        &rarr; (ignored by viewer)</pre>
 
           <div class="prv-prose">
             <p>
-              Four files cover the entire browser side. <code>main.tsx</code>
-              is a one-screen React bootstrap. <code>App.tsx</code> owns the
-              WebSocket lifecycle and the URL contract. <code>Previewer.tsx</code>
-              is a pure router: given a <code>PreviewItem</code>, it picks one
-              of nine concrete components and hands it the file data.
-              <code>styles.css</code> carries the dark-theme tokens and shell
-              layout.
+              Four files plus the <code>components/</code> directory cover the
+              entire browser side. <code>main.tsx</code> is a one-screen React
+              bootstrap. <code>App.tsx</code> owns the WebSocket lifecycle, the
+              URL contract, and a double-buffered render machine.
+              <code>Previewer.tsx</code> is a pure router: given a
+              <code>PreviewItem</code> and a theme, it picks one of nine
+              concrete viewers from <code>components/viewers</code>.
+              <code>styles.css</code> carries the dark and light theme tokens.
             </p>
             <p>
               Cards below detail each file. After them, a two-stage decision
@@ -2385,13 +2404,12 @@ pong        &rarr; (ignored by viewer)</pre>
               </header>
               <div class="prv-srv-body">
                 <p>
-                  Imports the three Geist font weights, the
-                  <code>heysnap-web-viewers</code> stylesheet, and
-                  <code>./styles.css</code> in that order so global tokens are
-                  available before any viewer mounts. Looks up
-                  <code>#root</code>, throws if missing, and mounts
-                  <code>&lt;App /&gt;</code> inside <code>&lt;StrictMode&gt;</code>
-                  with React 18&rsquo;s <code>createRoot</code>.
+                  Imports the three Geist font weights and
+                  <code>./styles.css</code> so global tokens are available
+                  before any viewer mounts. Looks up <code>#root</code>,
+                  throws if missing, and mounts <code>&lt;App /&gt;</code>
+                  inside <code>&lt;StrictMode&gt;</code> with React 19&rsquo;s
+                  <code>createRoot</code>.
                 </p>
               </div>
               <div class="prv-srv-meta">
@@ -2399,7 +2417,6 @@ pong        &rarr; (ignored by viewer)</pre>
                   <span class="prv-srv-rowlabel">Side effects</span>
                   <div class="prv-srv-chips">
                     <span class="prv-srv-chip">@fontsource/geist-sans 400/500/600</span>
-                    <span class="prv-srv-chip">heysnap-web-viewers/style.css</span>
                     <span class="prv-srv-chip">./styles.css</span>
                   </div>
                 </div>
@@ -2418,12 +2435,14 @@ pong        &rarr; (ignored by viewer)</pre>
             <article class="prv-srv-card">
               <header class="prv-srv-head">
                 <span class="prv-srv-path">src/client/App.tsx</span>
-                <h4>URL &rarr; WebSocket &rarr; state</h4>
+                <h4>URL &rarr; WebSocket &rarr; double-buffered render</h4>
               </header>
               <div class="prv-srv-body">
                 <p>
                   <code>usePreviewQuery</code> reads <code>?path</code>,
-                  <code>?root</code>, and <code>?chrome</code> from
+                  <code>?root</code>, <code>?chrome</code>, and
+                  <code>?theme</code> (<code>dark</code> default,
+                  <code>light</code> opt-in) from
                   <code>window.location.search</code>. With no path, the
                   component renders <code>PreviewPlayground</code> &mdash; a
                   tiny form that just updates the URL.
@@ -2436,13 +2455,19 @@ pong        &rarr; (ignored by viewer)</pre>
                   <code>open</code> sends one <code>watch</code> message
                   carrying the path, optional root, and the
                   <code>publicBasePath</code> read from the injected
-                  <code>window.__HEYSNAP_PREVIEWER_BASE_PATH__</code>. Incoming
-                  messages flow through <code>handlePreviewMessage</code>,
-                  which maps the five server message types to
-                  <code>setItem</code> / <code>setError</code>. A
-                  <code>cancelled</code> flag and the cleanup function close
-                  the socket on unmount so React Strict Mode&rsquo;s
-                  double-invoke is safe.
+                  <code>window.__HEYSNAP_PREVIEWER_BASE_PATH__</code>.
+                </p>
+                <p>
+                  Incoming messages are routed through
+                  <code>handlePreviewMessage</code> into a
+                  <code>useReducer</code>-driven
+                  <code>PreviewBufferState</code>. The reducer keeps two
+                  slots &mdash; <code>visibleSlot</code> and
+                  <code>pendingSlot</code> &mdash; so a new file mounts off-screen
+                  and only swaps in once it fires its
+                  <code>onReady</code> callback. The result is a flicker-free
+                  cross-fade between previews instead of a tear-down /
+                  remount blink.
                 </p>
               </div>
               <div class="prv-srv-meta">
@@ -2458,7 +2483,16 @@ pong        &rarr; (ignored by viewer)</pre>
                     <span class="prv-srv-chip">?path</span>
                     <span class="prv-srv-chip">?root</span>
                     <span class="prv-srv-chip">?chrome</span>
+                    <span class="prv-srv-chip">?theme</span>
                     <span class="prv-srv-chip">window.__HEYSNAP_PREVIEWER_BASE_PATH__</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">State</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">PreviewBufferState</span>
+                    <span class="prv-srv-chip">visibleSlot / pendingSlot</span>
+                    <span class="prv-srv-chip">previewBufferReducer</span>
                   </div>
                 </div>
                 <div class="prv-srv-row">
@@ -2486,32 +2520,42 @@ pong        &rarr; (ignored by viewer)</pre>
               </header>
               <div class="prv-srv-body">
                 <p>
-                  Pure dispatch. The top-level switch is on
-                  <code>item.kind</code>: <code>workbook</code> renders an
-                  <code>HeySnapXlsxViewer</code> with the parsed workbook
-                  JSON; <code>html</code> renders an <code>&lt;iframe&gt;</code>
-                  whose <code>src</code> is the server-built URL with
-                  <code>v=&lt;mtime&gt;</code> appended to bust the cache;
+                  Pure dispatch. Takes an <code>item</code> plus a
+                  <code>theme: "dark" | "light"</code> prop and an
+                  <code>onReady</code> / <code>onError</code> pair that the
+                  app&rsquo;s buffer uses to know when a viewer has painted.
+                  A local <code>VIEWER_THEMES</code> table turns the theme
+                  name into the concrete header / body / sidebar colors and
+                  the Monaco theme id used by the code and markdown viewers.
+                </p>
+                <p>
+                  The top-level switch is on <code>item.kind</code>:
+                  <code>workbook</code> renders <code>HeySnapXlsxViewer</code>
+                  with the parsed JSON and a download blob built from the
+                  base64 <code>data</code>; <code>html</code> renders
+                  <code>HeySnapHtmlViewer</code> with the server-built URL
+                  (<code>v=&lt;mtime&gt;</code> appended to bust the cache);
                   <code>file</code> falls into <code>renderFile()</code>.
                 </p>
                 <p>
-                  <code>renderFile()</code> checks MIME and extension in this
-                  order: PDF, DOCX, PPTX, Markdown, code. Each branch
-                  decodes the base64 via <code>base64ToBytes</code> &mdash;
-                  <code>useMemo</code>&rsquo;d so re-renders don&rsquo;t
-                  re-decode &mdash; and feeds the corresponding
-                  <code>heysnap-web-viewers</code> component with dark-theme
-                  props. The fallback path handles
-                  <code>image/</code>, <code>video/</code>,
-                  <code>audio/</code>, <code>text/</code> &middot;
-                  <code>json</code> &middot; <code>xml</code>, and finally a
-                  download link for everything else.
+                  <code>renderFile()</code> walks an if-ladder in this order:
+                  PDF, DOCX, PPTX, Markdown, code, then
+                  <code>image/</code>, <code>video/</code>, and
+                  <code>audio/</code> by MIME prefix. Each branch decodes the
+                  base64 via a <code>useMemo</code>&rsquo;d
+                  <code>base64ToBytes</code> and feeds the matching local
+                  viewer with theme props. Anything that doesn&rsquo;t match
+                  lands in <code>FallbackPreview</code>: <code>text/</code>
+                  &middot; <code>json</code> &middot; <code>xml</code> get a
+                  <code>&lt;pre&gt;</code>, everything else gets a download
+                  link.
                 </p>
                 <p>
                   Every viewer is keyed on
-                  <code>${file.path}:${file.mtime}</code> so a change on disk
-                  remounts the component cleanly, throwing away any internal
-                  viewer state from the previous version.
+                  <code>${file.path}:${file.mtime}</code>, but the actual
+                  remount blink is hidden by the buffer in <code>App.tsx</code>
+                  &mdash; the new viewer paints into the pending pane and
+                  swaps in once ready.
                 </p>
               </div>
               <div class="prv-srv-meta">
@@ -2519,6 +2563,7 @@ pong        &rarr; (ignored by viewer)</pre>
                   <span class="prv-srv-rowlabel">Exports</span>
                   <div class="prv-srv-chips">
                     <span class="prv-srv-chip">Previewer</span>
+                    <span class="prv-srv-chip">PreviewTheme</span>
                   </div>
                 </div>
                 <div class="prv-srv-row">
@@ -2530,6 +2575,10 @@ pong        &rarr; (ignored by viewer)</pre>
                     <span class="prv-srv-chip">HeySnapXlsxViewer</span>
                     <span class="prv-srv-chip">HeySnapMarkdownViewer</span>
                     <span class="prv-srv-chip">HeySnapCodeViewer</span>
+                    <span class="prv-srv-chip">HeySnapHtmlViewer</span>
+                    <span class="prv-srv-chip">HeySnapImageViewer</span>
+                    <span class="prv-srv-chip">HeySnapVideoViewer</span>
+                    <span class="prv-srv-chip">HeySnapAudioPlayer</span>
                   </div>
                 </div>
                 <div class="prv-srv-row">
@@ -2541,29 +2590,79 @@ pong        &rarr; (ignored by viewer)</pre>
               </div>
             </article>
 
+            <!-- components/ -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/client/components/</span>
+                <h4>Local viewer library</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Every concrete viewer lives here. Previously these came from
+                  the external <code>heysnap-web-viewers</code> package; they
+                  now ship inside the previewer so the surface, the theming,
+                  and the build are all owned in one place. Each viewer has
+                  its own folder with the component, a header, and the
+                  hooks it needs (source resolution, conversion, zoom).
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">viewers/</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">HeySnapPdfViewer/</span>
+                    <span class="prv-srv-chip">HeySnapDocxViewer/</span>
+                    <span class="prv-srv-chip">HeySnapPPTViewer/</span>
+                    <span class="prv-srv-chip">HeySnapXlsxViewer/</span>
+                    <span class="prv-srv-chip">HeySnapMarkdownViewer/</span>
+                    <span class="prv-srv-chip">HeySnapCodeViewer/</span>
+                    <span class="prv-srv-chip">HeySnapHtmlViewer/</span>
+                    <span class="prv-srv-chip">HeySnapImageViewer/</span>
+                    <span class="prv-srv-chip">HeySnapVideoViewer/</span>
+                    <span class="prv-srv-chip">HeySnapAudioPlayer/</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">_internal/</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">IconButton.tsx</span>
+                    <span class="prv-srv-chip">documentZoom.tsx</span>
+                    <span class="prv-srv-chip">previewReady.tsx</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Shared</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">types.ts</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
             <!-- styles.css -->
             <article class="prv-srv-card">
               <header class="prv-srv-head">
                 <span class="prv-srv-path">src/client/styles.css</span>
-                <h4>Dark-theme shell &amp; iframe layout</h4>
+                <h4>Theme tokens &amp; shell layout</h4>
               </header>
               <div class="prv-srv-body">
                 <p>
                   Owns the preview shell layout (<code>.preview-shell</code>,
                   <code>.preview-shell-embedded</code>) used when
                   <code>?chrome=0</code> is set, the connection status pill
-                  driven by <code>data-state</code>, the
-                  <code>&lt;iframe&gt;</code> sizing rules for HTML previews,
-                  and the dark backgrounds passed into the viewer components.
+                  driven by <code>data-state</code>, the double-buffer pane
+                  styles, and the dark / light theme variables that switch on
+                  <code>data-theme="light"</code>.
                 </p>
               </div>
               <div class="prv-srv-meta">
                 <div class="prv-srv-row">
                   <span class="prv-srv-rowlabel">Owns</span>
                   <div class="prv-srv-chips">
-                    <span class="prv-srv-chip">.preview-shell</span>
+                    <span class="prv-srv-chip">.preview-shell[data-theme]</span>
                     <span class="prv-srv-chip">.preview-status[data-state]</span>
-                    <span class="prv-srv-chip">.preview-html-frame</span>
+                    <span class="prv-srv-chip">.preview-buffer</span>
+                    <span class="prv-srv-chip">.preview-buffer-pane*</span>
                     <span class="prv-srv-chip">.preview-xlsx-shell</span>
                     <span class="prv-srv-chip">.preview-playground</span>
                   </div>
@@ -2574,7 +2673,7 @@ pong        &rarr; (ignored by viewer)</pre>
 
           <!-- Viewer decision tree (two-stage) -->
           <figure class="prv-diagram">
-            <svg viewBox="0 0 940 660" role="img" aria-label="Two-stage viewer routing decision tree used by Previewer.tsx.">
+            <svg viewBox="0 0 940 800" role="img" aria-label="Two-stage viewer routing decision tree used by Previewer.tsx.">
               <defs>
                 <marker id="prv-s6-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
                   <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
@@ -2606,7 +2705,7 @@ pong        &rarr; (ignored by viewer)</pre>
 
                 <rect x="380" y="140" width="180" height="64" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
                 <text x="470" y="164" text-anchor="middle" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#F54E00">kind === "html"</text>
-                <text x="470" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#26251e">&lt;iframe src={url}&gt;</text>
+                <text x="470" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#26251e">&lt;HeySnapHtmlViewer&gt;</text>
 
                 <rect x="670" y="140" width="180" height="64" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
                 <text x="760" y="164" text-anchor="middle" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#F54E00">kind === "file"</text>
@@ -2620,7 +2719,6 @@ pong        &rarr; (ignored by viewer)</pre>
               <text x="470" y="290" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" font-weight="600" fill="#F54E00" letter-spacing="0.08em">STAGE 2 &middot; renderFile() &middot; mime + extension ladder</text>
 
               <!-- Ladder rows -->
-              <!-- Row helper: at x=40 condition, x=540 arrow, x=580 result -->
               <g font-family="Geist, sans-serif">
                 <!-- Row 1: PDF -->
                 <rect x="40" y="306" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
@@ -2655,34 +2753,53 @@ pong        &rarr; (ignored by viewer)</pre>
                 <text x="56" y="506" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">isCode(file) &middot; CODE_EXTENSIONS or text/*</text>
                 <path d="M530 500 L575 500" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
                 <rect x="585" y="482" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
-                <text x="600" y="506" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapCodeViewer theme="vs-dark"&gt;</text>
+                <text x="600" y="506" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapCodeViewer theme={&hellip;}&gt;</text>
 
-                <!-- Row 6: Fallback -->
+                <!-- Row 6: Image -->
                 <rect x="40" y="526" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
-                <text x="56" y="550" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">else &rarr; FallbackPreview(file)</text>
+                <text x="56" y="550" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">mime.startsWith("image/")</text>
                 <path d="M530 544 L575 544" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
                 <rect x="585" y="526" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
-                <text x="600" y="550" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">see fallback sub-routing below</text>
+                <text x="600" y="550" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapImageViewer&gt;</text>
+
+                <!-- Row 7: Video -->
+                <rect x="40" y="570" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="594" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">mime.startsWith("video/")</text>
+                <path d="M530 588 L575 588" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="570" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="594" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapVideoViewer&gt;</text>
+
+                <!-- Row 8: Audio -->
+                <rect x="40" y="614" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="638" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">mime.startsWith("audio/")</text>
+                <path d="M530 632 L575 632" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="614" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="638" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapAudioPlayer&gt;</text>
+
+                <!-- Row 9: Fallback -->
+                <rect x="40" y="658" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="682" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">else &rarr; FallbackPreview(file)</text>
+                <path d="M530 676 L575 676" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="658" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="682" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">see fallback sub-routing below</text>
               </g>
 
               <!-- Fallback sub-routing strip -->
               <g font-family="Geist, sans-serif">
-                <rect x="40" y="586" width="860" height="56" rx="10" fill="#fdf0e8" stroke="rgba(245,78,0,0.25)" />
-                <text x="56" y="608" font-family="Geist Mono, monospace" font-size="11.5" font-weight="600" fill="#F54E00" letter-spacing="0.06em">FALLBACK &middot; by mime prefix</text>
+                <rect x="40" y="716" width="860" height="56" rx="10" fill="#fdf0e8" stroke="rgba(245,78,0,0.25)" />
+                <text x="56" y="738" font-family="Geist Mono, monospace" font-size="11.5" font-weight="600" fill="#F54E00" letter-spacing="0.06em">FALLBACK &middot; what&rsquo;s left after the ladder</text>
                 <g font-family="Geist Mono, monospace" font-size="12" fill="#26251e">
-                  <text x="56" y="630">image/* &rarr; &lt;img&gt;</text>
-                  <text x="220" y="630">video/* &rarr; &lt;video controls&gt;</text>
-                  <text x="430" y="630">audio/* &rarr; &lt;audio controls&gt;</text>
-                  <text x="640" y="630">text|json|xml &rarr; &lt;pre&gt;</text>
-                  <text x="820" y="630">else &rarr; &lt;a download&gt;</text>
+                  <text x="56" y="760">text/* | application/json | application/xml &rarr; &lt;pre&gt;</text>
+                  <text x="560" y="760">else &rarr; &lt;a download&gt;</text>
                 </g>
               </g>
             </svg>
             <figcaption class="prv-diagram-caption">
               Stage 1 picks one of three top-level viewers. Stage 2 walks the
-              MIME-then-extension ladder; whatever falls past the last rule
-              lands in <code>FallbackPreview</code>, whose own sub-routing is
-              shown along the bottom strip.
+              MIME-then-extension ladder &mdash; image, video, and audio are
+              first-class branches with their own viewers. Anything that
+              falls past the last rule lands in <code>FallbackPreview</code>,
+              which only has to handle text and the generic download.
             </figcaption>
           </figure>
         </section>
@@ -3126,24 +3243,27 @@ server.listen(4719);</pre>
 
             <article class="prv-gotcha">
               <span class="prv-gotcha-label">Re-render</span>
-              <h4>Viewers remount on every change</h4>
+              <h4>Remounts are hidden by the double buffer</h4>
               <p>
-                <code>Previewer.tsx</code> keys every viewer component on
-                <code>${path}:${mtime}</code>. Any update with a newer
-                <code>mtime</code> remounts the component, discarding scroll
-                position and any internal viewer state. Stateful viewers
-                must persist externally if they need to survive a reload.
+                <code>Previewer.tsx</code> keys every viewer on
+                <code>${path}:${mtime}</code>, so each update remounts the
+                component and discards its internal state.
+                <code>App.tsx</code> hides that blink: the new viewer paints
+                into a pending pane and only swaps in when it fires
+                <code>onReady</code>. Stateful viewers still lose their
+                state across reloads and must persist externally if needed.
               </p>
             </article>
 
             <article class="prv-gotcha">
               <span class="prv-gotcha-label">Bytes</span>
-              <h4>Plain files are inlined as base64</h4>
+              <h4>Workbooks ride bytes too</h4>
               <p>
-                Anything that&rsquo;s not a workbook or HTML is read fully
-                into memory and base64-encoded into the <code>file</code>
-                message. Very large binaries make for very large messages;
-                if that becomes a problem, swap in a custom
+                Plain files are read fully into memory and base64-encoded
+                into the <code>file</code> message. Workbooks now do the
+                same on top of the parsed JSON so the viewer can offer a
+                download &mdash; very large <code>.xlsx</code> files pay
+                double. For huge binaries, swap in a custom
                 <code>resolvePath</code> + handler pair that streams instead.
               </p>
             </article>
