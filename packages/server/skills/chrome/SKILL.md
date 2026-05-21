@@ -1,6 +1,6 @@
 ---
 name: "chrome"
-description: "Control the user's dedicated Chrome window through an agent-friendly CLI. Use this skill for browser tasks, authenticated websites, user-visible web workflows, or when the HeySnap UI context includes filepath \"chrome\". The browser runs on the user's device, so it can use the user's logged-in sessions, extensions, cookies, location/IP, and real browser state. If Chrome is not already open, browser commands can create the dedicated window automatically. Prefer this skill for most of web related tasks except for quick web searches (use web skill for that)."
+description: "Control the user's dedicated Chrome window. Use this skill for browser tasks, authenticated websites, user-visible web workflows, or when the HeySnap UI context includes filepath \"chrome\". The browser runs on the user's device, so it can use the user's logged-in sessions, cookies, location/IP, and real browser state. If Chrome is not already open, browser commands can create the dedicated window automatically. Prefer this skill for most of web related tasks except for quick web searches (use web skill for that)."
 ---
 
 # Chrome Skill
@@ -107,24 +107,6 @@ Exit codes:
 
 ## Tabs Commands
 
-The primary command namespace is `chrome tabs ...`.
-
-Aliases are also supported:
-
-| Primary | Alias |
-| --- | --- |
-| `chrome tabs list` | `chrome tabs` |
-| `chrome tabs ...` | `chrome tab ...` |
-| `chrome tabs new` | `chrome new-tab` |
-| `chrome tabs close` | `chrome close-tab` |
-| `chrome tabs focus` | `chrome focus-tab` |
-| `chrome tabs goto` | `chrome goto` |
-| `chrome tabs refresh` | `chrome refresh` |
-| `chrome tabs back` | `chrome back` |
-| `chrome tabs forward` | `chrome forward` |
-| `chrome tabs eval` | `chrome eval` |
-| `chrome tabs cdp` | `chrome cdp` |
-
 ### `tabs list`
 
 Lists tabs in the managed browser window.
@@ -132,7 +114,6 @@ Lists tabs in the managed browser window.
 ```bash
 chrome tabs list [--active] [global options]
 ```
-
 
 Options:
 
@@ -149,10 +130,10 @@ chrome tabs list --active --json
 
 ### `tabs new`
 
-Creates a tab in the managed browser window.
+Creates one or more tabs in the managed browser window.
 
 ```bash
-chrome tabs new [url] [--inactive] [wait options] [global options]
+chrome tabs new [url...] [--inactive] [wait options] [global options]
 ```
 
 Options:
@@ -169,6 +150,7 @@ Examples:
 ```bash
 chrome tabs new
 chrome tabs new https://example.com/ --wait
+chrome tabs new https://example.com/ https://example.org/ --wait
 chrome tabs new https://example.com/ --inactive --wait-until networkIdle --load-timeout 15000
 ```
 
@@ -274,9 +256,10 @@ Evaluates JavaScript in a tab using the browser-control `tab.evaluate`
 command.
 
 ```bash
-chrome tabs eval <tabId> <expression> [--await-promise] [--no-return-by-value] [--eval-timeout <ms>] [global options]
-chrome tabs eval <tabId> --file <script.js> [--await-promise] [--no-return-by-value] [--eval-timeout <ms>] [global options]
+chrome tabs eval <tabId> <expression> [--await-promise] [--no-return-by-value] [--eval-timeout <ms>] [file options] [global options]
+chrome tabs eval <tabId> --file <script.js> [--await-promise] [--no-return-by-value] [--eval-timeout <ms>] [file options] [global options]
 ```
+
 
 Options:
 
@@ -286,6 +269,64 @@ Options:
 | `--file` | Read the JavaScript expression from a file. |
 | `--no-return-by-value` | Set `returnByValue: false`. Defaults to return-by-value. |
 | `--eval-timeout` | Set the CDP evaluation timeout in milliseconds. |
+| `--attach` | Add an attachment as `id:path`. Repeatable. |
+| `--output` | Add an output target as `id:path`. Repeatable. |
+| `--attachments` / `--attachments-file` | Pass full attachment metadata, including `name` and `mimeType`. |
+| `--outputs` / `--outputs-file` | Pass full output metadata, including `mimeType`, `maxBytes`, and `overwrite`. |
+
+## Request Attachments
+
+Attachments let `tab.evaluate` work with files that exist inside the machine,
+even though Chrome is running on the user's side. Attachment `path` values are
+root-relative filesystem paths, using the same path model as the filesystem UI.
+
+Limits: at most 10 files, at most 50 MiB per file, and at most 100 MiB total.
+The server validates files before forwarding the browser-control request, then
+serves request-scoped chunks over the existing browser-control websocket.
+
+During `tab.evaluate`, the web client hydrates files into the page and exposes:
+
+```ts
+await window.__heysnapFiles.get(id);
+await window.__heysnapFiles.getAll(ids);
+await window.__heysnapFiles.setInputFiles(selectorOrElement, ids);
+await window.__heysnapFiles.dropFiles(selectorOrElement, ids);
+window.__heysnapFiles.clear(ids);
+```
+
+## Download Outputs
+
+Outputs let `tab.evaluate` save bytes that page JavaScript can read back into
+the machine filesystem. Output `path` values are root-relative filesystem paths,
+using the same path model as the filesystem UI.
+
+Limits: at most 10 files, and at most 100 MiB per file. `maxBytes` defaults to
+100 MiB and cannot exceed 100 MiB. Existing files fail unless `overwrite: true`.
+The server validates paths before forwarding the browser-control request, then
+writes streamed chunks to a temp file and renames atomically after completion.
+
+During `tab.evaluate`, the web client installs:
+
+```ts
+await window.__heysnapDownloads.save(id, source, options?);
+window.__heysnapDownloads.clear(ids?);
+```
+
+`source` may be a `Response`, `Blob`, `File`, `ArrayBuffer`, typed array,
+`DataView`, or string. This only works for bytes the page can read. Cross-origin
+images, PDFs, or downloads without CORS may be visible in the browser but still
+blocked from page JavaScript.
+
+Example tab.eval downloads
+
+```
+
+await window.__heysnapDownloads.save('blob', await fetch(blobUrl));
+await window.__heysnapDownloads.save('text', 'generated report text');
+await window.__heysnapDownloads.save('pdf', await fetch('/invoice.pdf'))
+await window.__heysnapDownloads.save('image', await fetch(document.querySelector('img').currentSrc))
+```
+
 
 Examples:
 
@@ -293,6 +334,8 @@ Examples:
 chrome tabs eval 123 'document.title'
 chrome tabs eval 123 '({ href: location.href, title: document.title })' --await-promise
 chrome tabs eval 123 --file ./scripts/read-page.js --await-promise --json
+chrome tabs eval 123 "await window.__heysnapFiles.setInputFiles('input[type=file]', ['avatar'])" --attach avatar:assets/avatar.png
+chrome tabs eval 123 "await window.__heysnapDownloads.save('text', 'hello')" --output text:downloads/text.txt --timeout 120000
 ```
 
 ### `tabs cdp`
@@ -315,4 +358,36 @@ Examples:
 ```bash
 chrome tabs cdp 123 Runtime.evaluate --params '{"expression":"document.title","returnByValue":true}'
 chrome tabs cdp 123 Page.captureScreenshot --params '{"format":"png"}' --json
+```
+
+### `tabs screenshot`
+
+Captures a screenshot from a tab and saves it inside the machine filesystem
+root.
+
+```bash
+chrome tabs screenshot <tabId> <path> [screenshot options] [wait options] [global options]
+```
+
+Options:
+
+| Option | Description |
+| --- | --- |
+| `--full-page` | Capture the full page. |
+| `--clip` | Capture `x,y,width,height[,scale]`. Sets `captureMode: "clip"`. |
+| `--capture-mode` | Set `viewport`, `fullPage`, or `clip`. |
+| `--format` | Set `png`, `jpeg`, or `webp`. |
+| `--png`, `--jpeg`, `--webp` | Format shortcuts. |
+| `--quality` | JPEG/WebP quality from 1 to 100. |
+| `--overwrite` | Replace an existing output file. |
+| `--from-surface` | Set CDP `fromSurface`. |
+| `--capture-beyond-viewport` | Set CDP `captureBeyondViewport`. |
+| `--optimize-for-speed` | Set CDP `optimizeForSpeed`. |
+
+Examples:
+
+```bash
+chrome tabs screenshot 123 screenshots/example.png
+chrome tabs screenshot 123 screenshots/example-full.jpeg --full-page --jpeg --quality 85 --overwrite --wait
+chrome tabs screenshot 123 screenshots/clip.webp --clip 0,0,600,400 --webp
 ```
