@@ -45,6 +45,10 @@ import pdfFileIconSrc from "../../../../apps/assets/files/pdf_file_icon.png";
 import xlsxFileIconSrc from "../../../../apps/assets/files/xlsx_file_icon.png";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
+import {
+  buildFilesystemPreviewerUrl,
+  resolveFilesystemPreviewBaseUrl,
+} from "./file-preview";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
@@ -296,6 +300,7 @@ const toListingErrorMessage = (message: string | null): string | null => {
 
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly agentBaseUrl?: string;
   readonly sarvamApiKey?: string;
   readonly browserControlStatus?: BrowserControlStatus;
@@ -341,6 +346,7 @@ export interface FilesystemExplorerProps {
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
+  filesystemPreviewBaseUrl,
   agentBaseUrl = "http://localhost:4000/agent",
   sarvamApiKey,
   browserControlStatus,
@@ -1288,6 +1294,7 @@ export function FilesystemExplorer({
             openFileTabs={openFileTabs}
             activeFilePath={activeFileTab?.path ?? null}
             websocketUrl={websocketUrl}
+            filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
           />
         </div>
         {activeLeftPaneSurface === "directory" ? (
@@ -2097,132 +2104,36 @@ const ToolbarButton = ({
 
 const FileViewer = ({
   file,
+  filesystemPreviewBaseUrl,
   websocketUrl,
 }: {
   readonly file: OpenFileTab;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly websocketUrl: string;
 }): React.ReactElement => {
   const fileVersion = getOpenFileTabVersion(file);
+  const previewBaseUrl = resolveFilesystemPreviewBaseUrl(websocketUrl, filesystemPreviewBaseUrl);
 
-  if (isPdfFile(file.name)) {
+  if (previewBaseUrl === null) {
     return (
-      <PdfViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
-      />
+      <section className="heysnap-document-viewer" aria-label={file.name}>
+        <DocumentViewerState
+          message="File preview is not available on this server yet. Restart or update the cloud server and machine server."
+          variant="error"
+        />
+      </section>
     );
   }
 
-  if (isDocxFile(file.name)) {
-    return (
-      <DocxViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+  return (
+    <section className="heysnap-document-viewer" aria-label={file.name}>
+      <iframe
+        className="heysnap-file-preview-frame"
+        src={buildFilesystemPreviewerUrl(previewBaseUrl, file.path, fileVersion)}
+        title={file.name}
       />
-    );
-  }
-
-  if (isPptxFile(file.name)) {
-    return (
-      <PptViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isXlsxFile(file.name)) {
-    return (
-      <XlsxViewer
-        fileName={file.name}
-        xlsxUrl={buildFilesystemXlsxUrl(websocketUrl, file.path, fileVersion)}
-      />
-    );
-  }
-
-  if (isOfficePdfPreviewFile(file.name)) {
-    return (
-      <PdfViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
-      />
-    );
-  }
-
-  if (isDelimitedTextFile(file.name)) {
-    return (
-      <DelimitedTextViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-        delimiter={getDelimitedTextDelimiter(file.name)}
-      />
-    );
-  }
-
-  if (isImageFile(file.name)) {
-    return (
-      <ImageViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isMarkdownFile(file.name)) {
-    return (
-      <MarkdownViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isHtmlFile(file.name)) {
-    return (
-      <HtmlViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isCodeFile(file.name)) {
-    return (
-      <CodeViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isPlainTextFile(file.name)) {
-    return (
-      <PlainTextViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isAudioFile(file.name)) {
-    return (
-      <AudioViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isVideoFile(file.name)) {
-    return (
-      <VideoViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  return <FileViewerPlaceholder file={file} />;
+    </section>
+  );
 };
 
 const MemoizedFileViewer = memo(FileViewer);
@@ -2687,10 +2598,12 @@ const BrowserControlPanel = ({
 const FileViewerStack = ({
   openFileTabs,
   activeFilePath,
+  filesystemPreviewBaseUrl,
   websocketUrl,
 }: {
   readonly openFileTabs: OpenFileTab[];
   readonly activeFilePath: string | null;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly websocketUrl: string;
 }): React.ReactElement => (
   <>
@@ -2703,7 +2616,11 @@ const FileViewerStack = ({
           className={isActive ? "left-pane-surface active" : "left-pane-surface inactive"}
           aria-hidden={!isActive}
         >
-          <MemoizedFileViewer file={tab} websocketUrl={websocketUrl} />
+          <MemoizedFileViewer
+            file={tab}
+            filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
+            websocketUrl={websocketUrl}
+          />
         </div>
       );
     })}
