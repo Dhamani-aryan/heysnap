@@ -5,9 +5,11 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY patches patches
+COPY packages/previewer/package.json packages/previewer/package.json
 COPY packages/server/package.json packages/server/package.json
 RUN pnpm install --filter @ank1015-app/server... --frozen-lockfile
 
+COPY packages/previewer packages/previewer
 COPY packages/server packages/server
 RUN pnpm --filter @ank1015-app/server build
 
@@ -25,6 +27,7 @@ RUN corepack enable \
 
 COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/previewer ./packages/previewer
 COPY --from=build /app/packages/server ./packages/server
 
 EXPOSE 4000
