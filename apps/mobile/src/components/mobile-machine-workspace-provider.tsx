@@ -42,6 +42,7 @@ type MobileMachineWorkspaceContextValue = {
   currentPath: string;
   error: string | null;
   filesystemClient: FilesystemClient | null;
+  filesystemPreviewBaseUrl: string | null;
   filesystemWebsocketUrl: string | null;
   goBack: () => void;
   goForward: () => void;
@@ -110,6 +111,18 @@ export function MobileMachineWorkspaceProvider({
     return buildGatewayWebsocketUrl({
       baseUrl: client.baseUrl,
       path: session.accessSession.routes.filesystemWebSocketUrl,
+      token: session.accessSession.accessSession.token,
+    });
+  }, [client.baseUrl, session.accessSession]);
+
+  const filesystemPreviewBaseUrl = useMemo(() => {
+    if (session.accessSession?.routes.filesystemPreviewBaseUrl === undefined) {
+      return null;
+    }
+
+    return buildGatewayHttpUrl({
+      baseUrl: client.baseUrl,
+      path: session.accessSession.routes.filesystemPreviewBaseUrl,
       token: session.accessSession.accessSession.token,
     });
   }, [client.baseUrl, session.accessSession]);
@@ -387,6 +400,7 @@ export function MobileMachineWorkspaceProvider({
     currentPath,
     error: filesystemError ?? session.error,
     filesystemClient,
+    filesystemPreviewBaseUrl,
     filesystemWebsocketUrl,
     goBack,
     goForward,
@@ -414,6 +428,7 @@ export function MobileMachineWorkspaceProvider({
     currentPath,
     filesystemClient,
     filesystemError,
+    filesystemPreviewBaseUrl,
     filesystemWebsocketUrl,
     goBack,
     goForward,

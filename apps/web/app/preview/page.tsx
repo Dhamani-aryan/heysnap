@@ -2,24 +2,14 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import {
-  FilePreview,
-  buildFilesystemDownloadUrl,
-  buildFilesystemPreviewUrl,
-  buildFilesystemXlsxUrl,
-  isDocxFile,
-  isImageFile,
-  isOfficePdfPreviewFile,
-  isPdfFile,
-  isPptxFile,
-  isXlsxFile,
-} from "@ank1015-app/ui/file-preview";
+import { FilePreview } from "@ank1015-app/ui/file-preview";
 
 type PreviewState = {
-  websocketUrl: string;
-  path: string;
-  name: string;
-  version: string;
+  readonly websocketUrl: string;
+  readonly previewBaseUrl?: string;
+  readonly path: string;
+  readonly name: string;
+  readonly version: string;
 };
 
 type PreviewMessage =
@@ -29,6 +19,7 @@ type PreviewMessage =
       path?: string;
       name?: string;
       websocketUrl?: string;
+      previewBaseUrl?: string;
     }
   | {
       type: "ping";
@@ -52,21 +43,20 @@ function PreviewPageContent(): React.ReactElement {
     const websocketUrl = searchParams.get("websocketUrl");
     const path = searchParams.get("path");
     const name = searchParams.get("name");
+    const previewBaseUrl = searchParams.get("previewBaseUrl") ?? undefined;
     const version = searchParams.get("v") ?? "";
 
     if (websocketUrl === null || path === null || name === null) {
       return null;
     }
 
-    return { websocketUrl, path, name, version };
+    return { websocketUrl, previewBaseUrl, path, name, version };
   }, [searchParams]);
 
   const [state, setState] = useState<PreviewState | null>(initial);
-  const [stagedState, setStagedState] = useState<PreviewState | null>(null);
 
   useEffect(() => {
     setState(initial);
-    setStagedState(null);
   }, [initial]);
 
   useEffect(() => {
@@ -87,20 +77,13 @@ function PreviewPageContent(): React.ReactElement {
           return current;
         }
 
-        const next = {
+        return {
           websocketUrl: message.websocketUrl ?? current.websocketUrl,
+          previewBaseUrl: message.previewBaseUrl ?? current.previewBaseUrl,
           path: message.path ?? current.path,
           name: message.name ?? current.name,
           version: message.version ?? current.version,
         };
-
-        if (isSamePreviewDocument(current, next)) {
-          setStagedState(next);
-          return current;
-        }
-
-        setStagedState(null);
-        return next;
       });
     };
 
@@ -120,106 +103,19 @@ function PreviewPageContent(): React.ReactElement {
     );
   }
 
-  const visibleState = state;
-
   return (
     <main style={shellStyle}>
       <FilePreview
-        key={`${visibleState.path}:${visibleState.name}`}
-        name={visibleState.name}
-        path={visibleState.path}
-        websocketUrl={visibleState.websocketUrl}
-        version={visibleState.version}
+        key={`${state.path}:${state.name}`}
+        name={state.name}
+        path={state.path}
+        previewBaseUrl={state.previewBaseUrl}
+        websocketUrl={state.websocketUrl}
+        version={state.version}
       />
-      {stagedState === null ? null : (
-        <PreviewPreloader
-          state={stagedState}
-          onReady={(readyState) => {
-            setState((current) => {
-              if (current === null || !isSamePreviewDocument(current, readyState)) {
-                return current;
-              }
-
-              return readyState;
-            });
-            setStagedState((current) => (
-              current !== null && isSamePreviewVersion(current, readyState) ? null : current
-            ));
-          }}
-        />
-      )}
     </main>
   );
 }
-
-function PreviewPreloader({
-  state,
-  onReady,
-}: {
-  state: PreviewState;
-  onReady: (state: PreviewState) => void;
-}): null {
-  useEffect(() => {
-    const abortController = new AbortController();
-
-    void preloadPreviewState(state, abortController.signal)
-      .catch(() => undefined)
-      .then(() => {
-        if (!abortController.signal.aborted) {
-          onReady(state);
-        }
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [onReady, state]);
-
-  return null;
-}
-
-const preloadPreviewState = async (
-  state: PreviewState,
-  signal: AbortSignal,
-): Promise<void> => {
-  const url = getPreviewAssetUrl(state);
-
-  if (url === null) {
-    return;
-  }
-
-  const response = await fetch(url, { signal });
-
-  if (!response.ok) {
-    throw new Error(`Failed to preload preview (${String(response.status)}).`);
-  }
-
-  await response.blob();
-};
-
-const getPreviewAssetUrl = (state: PreviewState): string | null => {
-  if (isPdfFile(state.name) || isOfficePdfPreviewFile(state.name)) {
-    return buildFilesystemPreviewUrl(state.websocketUrl, state.path, "pdf", state.version);
-  }
-
-  if (isXlsxFile(state.name)) {
-    return buildFilesystemXlsxUrl(state.websocketUrl, state.path, state.version);
-  }
-
-  if (isDocxFile(state.name) || isPptxFile(state.name) || isImageFile(state.name)) {
-    return buildFilesystemDownloadUrl(state.websocketUrl, [state.path], state.version);
-  }
-
-  return buildFilesystemDownloadUrl(state.websocketUrl, [state.path], state.version);
-};
-
-const isSamePreviewDocument = (left: PreviewState, right: PreviewState): boolean =>
-  left.websocketUrl === right.websocketUrl &&
-  left.path === right.path &&
-  left.name === right.name;
-
-const isSamePreviewVersion = (left: PreviewState, right: PreviewState): boolean =>
-  isSamePreviewDocument(left, right) && left.version === right.version;
 
 const parsePreviewMessage = (raw: unknown): PreviewMessage | null => {
   if (typeof raw === "string") {
@@ -247,7 +143,6 @@ const parsePreviewMessage = (raw: unknown): PreviewMessage | null => {
 
 const notifyHost = (payload: { type: "ready" | "pong" }): void => {
   const message = JSON.stringify(payload);
-  // React Native WebView injects a global ReactNativeWebView with postMessage.
   const bridge = (window as unknown as { ReactNativeWebView?: { postMessage: (data: string) => void } })
     .ReactNativeWebView;
 
@@ -279,6 +174,6 @@ const messageStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "rgba(244,246,251,0.55)",
+  color: "rgba(244,246,251,0.62)",
   fontSize: 14,
 };
