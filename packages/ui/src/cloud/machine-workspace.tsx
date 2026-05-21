@@ -44,6 +44,7 @@ export interface MachineWorkspaceProps {
   readonly browserControlExecutor?: BrowserControlExecutor;
   readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
@@ -65,6 +66,7 @@ export function MachineWorkspace({
   browserControlExecutor,
   capabilitiesBaseUrl,
   computer,
+  filesystemPreviewBaseUrl,
   filesystemWebsocketUrl,
   sarvamApiKey,
   selectedThreadId = null,
@@ -1176,6 +1178,7 @@ export function MachineWorkspace({
           />
           <FilesystemExplorer
             websocketUrl={filesystemWebsocketUrl}
+            filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
             agentBaseUrl={agentBaseUrl}
             sarvamApiKey={sarvamApiKey}
             browserControlStatus={browserControlStatus}
