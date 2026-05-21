@@ -56,7 +56,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     },
     allowHeaders: ["Authorization", "Content-Type", "Last-Event-ID"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    exposeHeaders: ["Content-Disposition", "Content-Length", "Content-Range", "X-HeySnap-Xlsx-Asset-Id"],
+    exposeHeaders: ["Content-Disposition", "Content-Length", "Content-Range"],
     maxAge: 600,
   }));
 
@@ -78,30 +78,6 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
       gatewayAccessService,
       tunnelRegistry,
       "/filesystem/download",
-    );
-  });
-  app.get("/gateway/computers/:computerId/filesystem/preview", async (context) => {
-    return await proxyGatewayFilesystemHttpRequest(
-      context,
-      gatewayAccessService,
-      tunnelRegistry,
-      "/filesystem/preview",
-    );
-  });
-  app.get("/gateway/computers/:computerId/filesystem/xlsx", async (context) => {
-    return await proxyGatewayFilesystemHttpRequest(
-      context,
-      gatewayAccessService,
-      tunnelRegistry,
-      "/filesystem/xlsx",
-    );
-  });
-  app.get("/gateway/computers/:computerId/filesystem/xlsx-assets/*", async (context) => {
-    return await proxyGatewayFilesystemHttpRequest(
-      context,
-      gatewayAccessService,
-      tunnelRegistry,
-      "/filesystem/xlsx-assets",
     );
   });
   app.get("/gateway/computers/:computerId/preview", async (context) => {
@@ -158,7 +134,7 @@ const proxyGatewayFilesystemHttpRequest = async (
   context: Context<{ Variables: AppVariables }>,
   gatewayAccessService: GatewayAccessService,
   tunnelRegistry: TunnelStatusRegistry,
-  targetPathname: "/filesystem/download" | "/filesystem/preview" | "/filesystem/xlsx" | "/filesystem/xlsx-assets",
+  targetPathname: "/filesystem/download",
 ): Promise<Response> => {
   const computerId = context.req.param("computerId");
   const requestUrl = new URL(context.req.url);
@@ -187,7 +163,7 @@ const proxyGatewayFilesystemHttpRequest = async (
   }
 
   const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
-    path: buildFilesystemProxyTargetPath(computerId, requestUrl, targetPathname),
+    path: buildFilesystemProxyTargetPath(requestUrl, targetPathname),
   });
 
   if (proxied === null) {
@@ -342,21 +318,15 @@ const proxyGatewayCapabilitiesHttpRequest = async (
 };
 
 const buildFilesystemProxyTargetPath = (
-  computerId: string,
   requestUrl: URL,
-  targetPathname: "/filesystem/download" | "/filesystem/preview" | "/filesystem/xlsx" | "/filesystem/xlsx-assets",
+  targetPathname: "/filesystem/download",
 ): string => {
-  const gatewayPrefix = `/gateway/computers/${encodeURIComponent(computerId)}`;
-  const sourcePrefix = `${gatewayPrefix}${targetPathname}`;
-  const suffix = targetPathname === "/filesystem/xlsx-assets" && requestUrl.pathname.startsWith(sourcePrefix)
-    ? requestUrl.pathname.slice(sourcePrefix.length)
-    : "";
   const query = new URLSearchParams(requestUrl.searchParams);
   query.delete("accessToken");
   query.delete("token");
   const queryString = query.toString();
 
-  return `${targetPathname}${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
+  return `${targetPathname}${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
 
 const buildPreviewProxyTargetPath = (computerId: string, requestUrl: URL): string => {
@@ -513,16 +483,14 @@ const isForwardedDownloadHeader = (name: string): boolean => {
   const normalized = name.toLowerCase();
   return normalized === "content-type" ||
     normalized === "content-disposition" ||
-    normalized === "cache-control" ||
-    normalized === "x-heysnap-xlsx-asset-id";
+    normalized === "cache-control";
 };
 
 const isForwardedPreviewHeader = (name: string): boolean => {
   const normalized = name.toLowerCase();
   return normalized === "content-type" ||
     normalized === "content-disposition" ||
-    normalized === "cache-control" ||
-    normalized === "x-heysnap-xlsx-asset-id";
+    normalized === "cache-control";
 };
 
 const isForwardedAgentHeader = (name: string): boolean => {

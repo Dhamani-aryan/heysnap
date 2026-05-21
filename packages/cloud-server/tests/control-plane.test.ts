@@ -685,42 +685,6 @@ describe("cloud server computer access sessions", () => {
     expect(requestedPaths).toEqual(["/filesystem/download?path=Project"]);
   });
 
-  it("proxies filesystem previews through authenticated gateway access sessions", async () => {
-    const requestedPaths: string[] = [];
-    const tunnelRegistry: TunnelStatusRegistry = {
-      isConnected: () => true,
-      proxyHttpRequest: async (_computerId, input) => {
-        requestedPaths.push(input.path);
-        return {
-          statusCode: 200,
-          headers: {
-            "content-type": "application/pdf",
-            "content-disposition": "inline; filename=\"Budget.pdf\"",
-          },
-          body: Buffer.from("%PDF preview", "utf8"),
-        };
-      },
-    };
-    const { app } = createTestApp({ tunnelRegistry });
-    const auth = await registerUser(app, "preview-user@example.com");
-    const computer = await createComputer(app, auth.token, "Preview VM");
-    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
-      method: "POST",
-      headers: authHeaders(auth.token),
-    });
-    const accessBody = await accessResponse.json() as AccessSessionResponse;
-
-    const response = await app.request(
-      `/gateway/computers/${computer.id}/filesystem/preview?accessToken=${accessBody.accessSession.token}&path=Budget.xlsx&format=pdf`,
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("application/pdf");
-    expect(response.headers.get("content-disposition")).toBe("inline; filename=\"Budget.pdf\"");
-    expect(await response.text()).toBe("%PDF preview");
-    expect(requestedPaths).toEqual(["/filesystem/preview?path=Budget.xlsx&format=pdf"]);
-  });
-
   it("proxies standalone preview assets through authenticated gateway access sessions", async () => {
     const requestedPaths: string[] = [];
     const requestedHeaders: Array<Record<string, string> | undefined> = [];
@@ -774,44 +738,6 @@ describe("cloud server computer access sessions", () => {
       { "x-heysnap-preview-public-base-path": `/gateway/computers/${computer.id}/preview` },
       { "x-heysnap-preview-public-base-path": `/gateway/computers/${computer.id}/preview` },
     ]);
-  });
-
-  it("proxies XLSX previews and exposes asset metadata through authenticated gateway access sessions", async () => {
-    const requestedPaths: string[] = [];
-    const tunnelRegistry: TunnelStatusRegistry = {
-      isConnected: () => true,
-      proxyHttpRequest: async (_computerId, input) => {
-        requestedPaths.push(input.path);
-        return {
-          statusCode: 200,
-          headers: {
-            "content-type": "application/json",
-            "x-heysnap-xlsx-asset-id": "asset-123",
-          },
-          body: Buffer.from("{\"workbook\":{\"sheets\":[]}}", "utf8"),
-        };
-      },
-    };
-    const { app } = createTestApp({ tunnelRegistry });
-    const auth = await registerUser(app, "xlsx-user@example.com");
-    const computer = await createComputer(app, auth.token, "XLSX VM");
-    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
-      method: "POST",
-      headers: authHeaders(auth.token),
-    });
-    const accessBody = await accessResponse.json() as AccessSessionResponse;
-
-    const response = await app.request(
-      `/gateway/computers/${computer.id}/filesystem/xlsx?accessToken=${accessBody.accessSession.token}&path=Budget.xlsx`,
-      { headers: { origin: "http://localhost:3000" } },
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("application/json");
-    expect(response.headers.get("x-heysnap-xlsx-asset-id")).toBe("asset-123");
-    expect(response.headers.get("access-control-expose-headers")).toContain("X-HeySnap-Xlsx-Asset-Id");
-    expect(await response.text()).toBe("{\"workbook\":{\"sheets\":[]}}");
-    expect(requestedPaths).toEqual(["/filesystem/xlsx?path=Budget.xlsx"]);
   });
 
   it("proxies agent REST and SSE through authenticated gateway access sessions", async () => {
