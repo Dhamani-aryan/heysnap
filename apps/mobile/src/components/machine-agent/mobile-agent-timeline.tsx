@@ -155,18 +155,21 @@ const StatusRow = memo(function StatusRow({
   palette: Palette;
 }) {
   const runtime = useAgentRuntime();
-  const isWorking = useStore(runtime.chatStore, (state) => {
+  const statusLabel = useStore(runtime.chatStore, (state) => {
     if (state.activeRun === null) {
-      return false;
+      return 'Worked';
     }
     const lastUserId = findLastUserMessageKey(state.messageOrder, state.messagesById);
-    return lastUserId === messageId;
+    if (lastUserId !== messageId) {
+      return 'Worked';
+    }
+    return state.activeTurn?.status === 'reconnecting' ? 'Reconnecting…' : 'Working…';
   });
 
   return (
     <View style={styles.statusRow}>
       <ThemedText style={[styles.statusText, { color: palette.textSecondary }]}>
-        {isWorking ? 'Working…' : 'Worked'}
+        {statusLabel}
       </ThemedText>
     </View>
   );
@@ -267,6 +270,10 @@ const AssistantBlock = memo(function AssistantBlock({
   const isStreaming = useStore(runtime.chatStore, (state) =>
     state.streamingMessageIds.includes(messageId),
   );
+  const showCompactionStatus = useStore(runtime.chatStore, (state) =>
+    state.activeCompactionItemIds.length > 0 &&
+    findLastAssistantMessageKey(state.messageOrder, state.messagesById) === messageId
+  );
 
   const markdownStyles = useMemo(() => buildMarkdownStyles(palette), [palette]);
   const handleLinkPress = useCallback((href: string): boolean => {
@@ -287,6 +294,11 @@ const AssistantBlock = memo(function AssistantBlock({
   return (
     <View style={styles.assistantRow}>
       <Markdown onLinkPress={handleLinkPress} style={markdownStyles}>{markdown}</Markdown>
+      {showCompactionStatus ? (
+        <ThemedText style={[styles.compactionStatus, { color: palette.textMuted }]}>
+          Compacting conversation and continuing
+        </ThemedText>
+      ) : null}
       {!isStreaming ? <CopyMessageButton text={markdown} palette={palette} /> : null}
     </View>
   );
@@ -329,6 +341,19 @@ const findLastUserMessageKey = (
   for (let index = messageOrder.length - 1; index >= 0; index -= 1) {
     const id = messageOrder[index];
     if (messagesById[id]?.role === 'user') {
+      return id;
+    }
+  }
+  return null;
+};
+
+const findLastAssistantMessageKey = (
+  messageOrder: readonly string[],
+  messagesById: Readonly<Record<string, { role?: string } | undefined>>,
+): string | null => {
+  for (let index = messageOrder.length - 1; index >= 0; index -= 1) {
+    const id = messageOrder[index];
+    if (messagesById[id]?.role === 'assistant') {
       return id;
     }
   }
@@ -454,6 +479,10 @@ const styles = StyleSheet.create({
   assistantRow: {
     alignSelf: 'stretch',
     gap: 6,
+  },
+  compactionStatus: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   copyButton: {
     flexDirection: 'row',

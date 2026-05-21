@@ -10,13 +10,17 @@ export type MachineWorkspacePanel = "chat" | "connectors";
 export interface MachineWorkspaceRouteProps {
   readonly cloudServerUrl: string;
   readonly computerId: string;
+  readonly browserControlExtensionId?: string;
   readonly panel?: MachineWorkspacePanel;
+  readonly sarvamApiKey?: string;
 }
 
 export function MachineWorkspaceRoute({
   cloudServerUrl,
   computerId,
+  browserControlExtensionId,
   panel = "chat",
+  sarvamApiKey,
 }: MachineWorkspaceRouteProps): React.ReactElement {
   const params = useParams();
   const pathname = usePathname();
@@ -33,6 +37,8 @@ export function MachineWorkspaceRoute({
   return (
     <WebCloudWorkspaceApp
       cloudServerUrl={cloudServerUrl}
+      browserControlExtensionId={browserControlExtensionId}
+      sarvamApiKey={sarvamApiKey}
       route={{ view: "workspace", computerId, panel: activePanel, threadId }}
     />
   );

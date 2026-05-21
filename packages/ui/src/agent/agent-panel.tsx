@@ -12,7 +12,7 @@ import {
   useOptionalAgentRuntime,
 } from "./agent-runtime";
 import { AgentEmptyThread } from "./empty-thread";
-import { RightPromptComposer } from "./prompt-composer";
+import { RightPromptComposer, type PromptAttachment, type PromptVoiceState } from "./prompt-composer";
 import { AgentTimeline } from "./timeline";
 import type { AgentThreadSummary, AgentUiContext } from "./types";
 
@@ -23,7 +23,14 @@ export interface AgentPanelProps {
   readonly currentDirectoryName: string;
   readonly uiContext?: AgentUiContext;
   readonly workspaceRoot?: string;
+  readonly promptDraft?: string;
+  readonly promptAttachments?: readonly PromptAttachment[];
+  readonly promptVoiceState?: PromptVoiceState;
+  readonly promptAutoFocusToken?: number;
   readonly onOpenFilePath?: (path: string) => void;
+  readonly onPromptDraftChange?: (draft: string) => void;
+  readonly onPromptAttachmentsChange?: (attachments: PromptAttachment[]) => void;
+  readonly onPromptVoiceToggle?: () => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
 }
@@ -48,7 +55,14 @@ const AgentPanelContent = ({
   currentDirectoryName,
   uiContext,
   workspaceRoot,
+  promptDraft,
+  promptAttachments,
+  promptVoiceState,
+  promptAutoFocusToken,
   onOpenFilePath,
+  onPromptDraftChange,
+  onPromptAttachmentsChange,
+  onPromptVoiceToggle,
   onSelectThread,
   onThreadResolved,
 }: AgentPanelProps): React.ReactElement => {
@@ -59,7 +73,6 @@ const AgentPanelContent = ({
   const hasMessages = useAgentChatStore((state) => state.messageOrder.length > 0);
   const loadStatus = useAgentChatStore((state) => state.loadStatus);
   const loadError = useAgentChatStore((state) => state.loadError);
-  const runError = useAgentChatStore((state) => state.runError ?? state.error);
   const isRunning = activeRun !== null;
   const { cancel, steer, submit } = useAgentRunMutation({
     currentPath,
@@ -77,12 +90,19 @@ const AgentPanelContent = ({
   });
   const composerProps = {
     activeFolderName: currentDirectoryName,
+    draft: promptDraft,
+    attachments: promptAttachments,
+    voiceState: promptVoiceState,
+    autoFocusToken: promptAutoFocusToken,
     isRunning,
+    onDraftChange: onPromptDraftChange,
+    onAttachmentsChange: onPromptAttachmentsChange,
+    onVoiceToggle: onPromptVoiceToggle,
     onCancel: cancel,
     onSubmit: isRunning ? steer : submit,
   };
 
-  if (selectedThreadId === null && !hasMessages && !isRunning && runError === null) {
+  if (selectedThreadId === null && !hasMessages && !isRunning) {
     return <AgentEmptyThread {...composerProps} currentDirectoryName={currentDirectoryName} />;
   }
 
@@ -100,9 +120,6 @@ const AgentPanelContent = ({
         ) : null}
       </div>
       <div className="right-prompt-composer-wrap">
-        {runError === null ? null : (
-          <div className="agent-run-error">{runError}</div>
-        )}
         <RightPromptComposer {...composerProps} />
       </div>
     </div>

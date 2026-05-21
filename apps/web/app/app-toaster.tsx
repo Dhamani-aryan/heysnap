@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Toaster } from "sonner";
+import { toast, Toaster } from "sonner";
 
 type ToastTheme = "light" | "dark";
 
@@ -18,6 +18,21 @@ export function AppToaster(): React.ReactElement {
 
     return () => {
       observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleAgentRunError = (event: Event): void => {
+      const detail = event instanceof CustomEvent ? event.detail as { readonly message?: unknown } : undefined;
+      const message = typeof detail?.message === "string" && detail.message.length > 0
+        ? detail.message
+        : "Agent run failed.";
+      toast.error(message);
+    };
+
+    window.addEventListener("heysnap:agent-run-error", handleAgentRunError);
+    return () => {
+      window.removeEventListener("heysnap:agent-run-error", handleAgentRunError);
     };
   }, []);
 

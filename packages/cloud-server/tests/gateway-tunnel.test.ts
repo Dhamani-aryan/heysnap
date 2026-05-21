@@ -35,7 +35,7 @@ afterEach(async () => {
 
 describe("gateway tunnel", () => {
   it("routes gateway websocket data through a connected machine tunnel", async () => {
-    const { server, baseUrl, computer, access, machine } = await startConnectedTunnel();
+    const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
     const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
     const gateway = await openWebSocket(
       `${baseUrl}/gateway/computers/${computer.id}/filesystem?accessToken=${access.token}&path=src`,
@@ -46,6 +46,11 @@ describe("gateway tunnel", () => {
       type: "open",
       route: "filesystem",
       path: "/filesystem?path=src",
+      metadata: {
+        userId: user.id,
+        accessSessionId: access.accessSession.id,
+        computerId: computer.id,
+      },
     });
 
     machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
@@ -193,6 +198,42 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
+  it("routes browser-control websocket data through a connected machine tunnel with user metadata", async () => {
+    const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
+    const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
+    const gateway = await openWebSocket(
+      `${baseUrl}/gateway/computers/${computer.id}/browser-control?accessToken=${access.token}`,
+    );
+    const openMessage = await machineOpen;
+
+    expect(openMessage).toMatchObject({
+      type: "open",
+      route: "browser-control",
+      path: "/browser-control",
+      metadata: {
+        userId: user.id,
+        accessSessionId: access.accessSession.id,
+        computerId: computer.id,
+      },
+    });
+
+    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
+    gateway.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+
+    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
+    expect(dataMessage.type).toBe("data");
+    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
+      type: "hello",
+      protocolVersion: 1,
+      clientId: "client-1",
+      capabilities: [],
+    });
+
+    gateway.close();
+    machine.close();
+    await closeServer(server);
+  });
+
   it("normalizes reserved websocket close codes before forwarding them", () => {
     expect(normalizeWebSocketCloseCode(1005)).toBe(1000);
     expect(normalizeWebSocketCloseCode(1006)).toBe(1000);
@@ -207,6 +248,11 @@ interface CloudOpenMessage {
   readonly connectionId: string;
   readonly route: string;
   readonly path: string;
+  readonly metadata?: {
+    readonly userId: string;
+    readonly accessSessionId: string;
+    readonly computerId: string;
+  };
 }
 
 interface CloudDataMessage {
@@ -257,8 +303,9 @@ const startConnectedTunnel = async (): Promise<{
   readonly server: Server;
   readonly baseUrl: string;
   readonly store: InMemoryCloudStore;
+  readonly user: { readonly id: string };
   readonly computer: { readonly id: string };
-  readonly access: { readonly token: string };
+  readonly access: { readonly token: string; readonly accessSession: { readonly id: string } };
   readonly machine: WebSocket;
   readonly registry: MachineTunnelRegistry;
 }> => {
@@ -289,7 +336,7 @@ const startConnectedTunnel = async (): Promise<{
     authorization: "Bearer machine-token",
   });
 
-  return { server, baseUrl, store, computer, access, machine, registry };
+  return { server, baseUrl, store, user, computer, access, machine, registry };
 };
 
 const openWebSocket = (

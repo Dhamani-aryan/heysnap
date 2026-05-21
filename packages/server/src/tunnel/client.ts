@@ -94,7 +94,7 @@ class MachineTunnelClient {
 
     switch (message.type) {
       case "open":
-        this.openLocalConnection(message.connectionId, message.path);
+        this.openLocalConnection(message.connectionId, message.path, message.metadata);
         break;
       case "httpRequest":
         void this.handleHttpRequest(message);
@@ -195,8 +195,14 @@ class MachineTunnelClient {
     this.sendToCloud({ type: "httpResponseEnd", connectionId });
   }
 
-  private openLocalConnection(connectionId: string, path: string): void {
-    const localWebSocket = new WebSocket(`ws://127.0.0.1:${String(this.options.localPort)}${path}`);
+  private openLocalConnection(
+    connectionId: string,
+    path: string,
+    metadata: CloudTunnelOpenMetadata | undefined,
+  ): void {
+    const localWebSocket = new WebSocket(`ws://127.0.0.1:${String(this.options.localPort)}${path}`, {
+      headers: buildLocalConnectionHeaders(metadata),
+    });
     const localConnection: LocalTunnelConnection = {
       webSocket: localWebSocket,
       opened: false,
@@ -264,7 +270,12 @@ interface LocalTunnelConnection {
 }
 
 type CloudTunnelMessage =
-  | { readonly type: "open"; readonly connectionId: string; readonly path: string }
+  | {
+      readonly type: "open";
+      readonly connectionId: string;
+      readonly path: string;
+      readonly metadata?: CloudTunnelOpenMetadata;
+    }
   | {
       readonly type: "httpRequest";
       readonly connectionId: string;
@@ -300,6 +311,32 @@ type MachineTunnelMessage =
 
 type TunnelPayloadType = "text" | "binary";
 
+interface CloudTunnelOpenMetadata {
+  readonly userId?: string;
+  readonly accessSessionId?: string;
+  readonly computerId?: string;
+}
+
+const buildLocalConnectionHeaders = (
+  metadata: CloudTunnelOpenMetadata | undefined,
+): Record<string, string> | undefined => {
+  const headers: Record<string, string> = {};
+
+  if (metadata?.userId !== undefined) {
+    headers["x-heysnap-user-id"] = metadata.userId;
+  }
+
+  if (metadata?.accessSessionId !== undefined) {
+    headers["x-heysnap-access-session-id"] = metadata.accessSessionId;
+  }
+
+  if (metadata?.computerId !== undefined) {
+    headers["x-heysnap-computer-id"] = metadata.computerId;
+  }
+
+  return Object.keys(headers).length === 0 ? undefined : headers;
+};
+
 const buildTunnelUrl = (cloudServerPublicUrl: string): string => {
   const url = new URL("/machines/tunnel", cloudServerPublicUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -328,7 +365,12 @@ const parseCloudMessage = (data: RawData): CloudTunnelMessage | null => {
   switch (message["type"]) {
     case "open":
       return typeof message["path"] === "string"
-        ? { type: "open", connectionId: message["connectionId"], path: message["path"] }
+        ? {
+            type: "open",
+            connectionId: message["connectionId"],
+            path: message["path"],
+            metadata: parseOpenMetadata(message["metadata"]),
+          }
         : null;
     case "httpRequest":
       return typeof message["path"] === "string"
@@ -420,6 +462,19 @@ const tunnelPayloadToRawData = (
 
 const parseTunnelPayloadType = (value: unknown): TunnelPayloadType | undefined =>
   value === "text" || value === "binary" ? value : undefined;
+
+const parseOpenMetadata = (value: unknown): CloudTunnelOpenMetadata | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    userId: typeof record["userId"] === "string" ? record["userId"] : undefined,
+    accessSessionId: typeof record["accessSessionId"] === "string" ? record["accessSessionId"] : undefined,
+    computerId: typeof record["computerId"] === "string" ? record["computerId"] : undefined,
+  };
+};
 
 export const normalizeWebSocketCloseCode = (code: number | undefined): number => {
   if (code === undefined) {

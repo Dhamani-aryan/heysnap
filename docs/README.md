@@ -7,6 +7,7 @@ Start here when you need to understand or operate the HeySnap repo.
 - `architecture.md`: high-level product architecture and machine model.
 - `packages-and-apps.md`: what each app and package owns.
 - `system-wiring.md`: request flows between UI, cloud server, gateway, and machine servers.
+- `browser-control-post-api.md`: machine-server POST API for browser-control CLI callers.
 
 ## Cloud Server And Machines
 

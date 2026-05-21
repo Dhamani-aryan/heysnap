@@ -59,8 +59,8 @@ export const createAiGatewayRoutes = (
 
     await store.touchMachineIdentity({ identityId: machine.id, lastUsedAt: startedAt });
 
-    const upstreamPath = buildUpstreamPath(requestUrl);
-    const upstreamUrl = buildUpstreamUrl(azureBaseUrl, requestUrl);
+    const upstreamPath = buildUpstreamPath(requestUrl, routeKind);
+    const upstreamUrl = buildUpstreamUrl(azureBaseUrl, requestUrl, routeKind);
     const captureBodies = config.aiGatewayCaptureBodies === true;
     const captureMaxBytes = config.aiGatewayCaptureBodyMaxBytes ?? DEFAULT_CAPTURE_BODY_MAX_BYTES;
     const requestBody = routeKind === "images"
@@ -135,37 +135,56 @@ export const createAiGatewayRoutes = (
   return app;
 };
 
-type GatewayRouteKind = "responses" | "images";
+type GatewayRouteKind = "responses" | "compact" | "images";
 
 const readGatewayRouteKind = (requestUrl: URL): GatewayRouteKind => {
   const suffix = buildUpstreamPath(new URL(`${requestUrl.origin}${requestUrl.pathname}`));
+
+  if (suffix === "/responses/compact") {
+    return "compact";
+  }
+
   return suffix.startsWith("/images/") ? "images" : "responses";
 };
 
-const buildUpstreamPath = (requestUrl: URL): string => {
+const buildUpstreamPath = (requestUrl: URL, routeKind?: GatewayRouteKind): string => {
   const suffix = requestUrl.pathname.startsWith(GATEWAY_PREFIX)
     ? requestUrl.pathname.slice(GATEWAY_PREFIX.length)
     : requestUrl.pathname;
   const normalizedSuffix = suffix.length === 0 ? "/" : suffix;
 
-  return `${normalizedSuffix}${requestUrl.search}`;
+  return `${normalizedSuffix}${routeKind === "compact" ? "" : requestUrl.search}`;
 };
 
-const buildUpstreamUrl = (configuredUrl: string, requestUrl: URL): string => {
+const buildUpstreamUrl = (configuredUrl: string, requestUrl: URL, routeKind: GatewayRouteKind): string => {
   const upstreamUrl = new URL(configuredUrl);
-  const suffixPath = buildUpstreamPath(new URL(`${requestUrl.origin}${requestUrl.pathname}`));
+  const suffixPath = buildUpstreamPath(new URL(`${requestUrl.origin}${requestUrl.pathname}`), routeKind);
   const normalizedSuffix = suffixPath.replace(/^\/+/, "");
   const configuredPath = upstreamUrl.pathname.replace(/\/+$/, "");
 
-  if (!configuredPath.endsWith(`/${normalizedSuffix}`)) {
+  if (routeKind === "compact" && configuredPath.endsWith("/responses")) {
+    upstreamUrl.pathname = buildCompactUpstreamPath(configuredPath);
+  } else if (!configuredPath.endsWith(`/${normalizedSuffix}`)) {
     upstreamUrl.pathname = `${configuredPath}/${normalizedSuffix}`.replace(/\/{2,}/g, "/");
   }
 
-  for (const [key, value] of requestUrl.searchParams.entries()) {
-    upstreamUrl.searchParams.set(key, value);
+  if (routeKind === "compact") {
+    upstreamUrl.search = "";
+  } else {
+    for (const [key, value] of requestUrl.searchParams.entries()) {
+      upstreamUrl.searchParams.set(key, value);
+    }
   }
 
   return upstreamUrl.toString();
+};
+
+const buildCompactUpstreamPath = (configuredPath: string): string => {
+  if (configuredPath.endsWith("/openai/responses")) {
+    return configuredPath.replace(/\/openai\/responses$/, "/openai/v1/responses/compact");
+  }
+
+  return `${configuredPath}/compact`.replace(/\/{2,}/g, "/");
 };
 
 const readProxyRequestBody = async (

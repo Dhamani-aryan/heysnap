@@ -110,19 +110,23 @@ const TurnStatusRow = memo(function TurnStatusRow({
   readonly messageId: string;
 }) {
   const runtime = useAgentRuntime();
-  const isWorking = useStore(runtime.chatStore, (state) => {
+  const statusLabel = useStore(runtime.chatStore, (state) => {
     if (state.activeRun === null) {
-      return false;
+      return "Worked";
     }
 
     const activeUserMessageId = findLastUserMessageKey(state.messageOrder, state.messagesById);
-    return activeUserMessageId === messageId;
+    if (activeUserMessageId !== messageId) {
+      return "Worked";
+    }
+
+    return state.activeTurn?.status === "reconnecting" ? "Reconnecting" : "Working";
   });
 
   return (
     <div className="agent-message-row status">
-      <div className={`agent-turn-status ${isWorking ? "working" : "worked"}`}>
-        {isWorking ? "Working" : "Worked"}
+      <div className={`agent-turn-status ${statusLabel === "Worked" ? "worked" : "working"}`}>
+        {statusLabel}
       </div>
     </div>
   );
@@ -367,6 +371,10 @@ const AssistantMessageBlock = memo(function AssistantMessageBlock({
     runtime.chatStore,
     (state) => !state.streamingMessageIds.includes(messageId),
   );
+  const showCompactionStatus = useStore(runtime.chatStore, (state) =>
+    state.activeCompactionItemIds.length > 0 &&
+    findLastAssistantMessageKey(state.messageOrder, state.messagesById) === messageId
+  );
 
   return (
     <div className="agent-message-row assistant group-assistant">
@@ -382,6 +390,9 @@ const AssistantMessageBlock = memo(function AssistantMessageBlock({
             />
           </Suspense>
         </div>
+      ) : null}
+      {showCompactionStatus ? (
+        <div className="agent-compaction-status">Compacting conversation and continuing</div>
       ) : null}
       {isTurnCompleted && markdown.length > 0 ? (
         <MessageActions
@@ -403,6 +414,27 @@ type MessageAction = {
   readonly icon: IconSvgElement;
   readonly disabled?: boolean;
   readonly onClick: () => void;
+};
+
+const findLastAssistantMessageKey = (
+  messageOrder: readonly string[],
+  messagesById: Readonly<Record<string, unknown>>,
+): string | null => {
+  for (let index = messageOrder.length - 1; index >= 0; index -= 1) {
+    const messageId = messageOrder[index];
+    const message = messageId === undefined ? undefined : messagesById[messageId];
+
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      "role" in message &&
+      message.role === "assistant"
+    ) {
+      return messageId;
+    }
+  }
+
+  return null;
 };
 
 const MessageActions = memo(function MessageActions({

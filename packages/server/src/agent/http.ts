@@ -312,6 +312,10 @@ const parseAgentUiContext = (value: unknown): AgentUiContext | undefined => {
 
   const context = value as Record<string, unknown>;
 
+  if (Object.keys(context).some((key) => key !== "openFiles")) {
+    throw new Error("Invalid UI context");
+  }
+
   if (!Array.isArray(context["openFiles"])) {
     throw new Error("Invalid UI context");
   }

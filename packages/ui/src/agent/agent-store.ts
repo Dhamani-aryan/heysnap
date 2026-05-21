@@ -24,7 +24,7 @@ export interface ActiveTurnState {
   readonly turnId: string;
   readonly startedAt: number;
   readonly completedAt: number | null;
-  readonly status: "running" | "completed" | "failed" | "interrupted" | "cancelled";
+  readonly status: "running" | "reconnecting" | "completed" | "failed" | "interrupted" | "cancelled";
 }
 
 export type AgentTimelineRow =
@@ -60,6 +60,7 @@ export interface AgentChatState {
   readonly proposedPlanOrder: string[];
   readonly activeRun: ActiveRunState | null;
   readonly activeTurn: ActiveTurnState | null;
+  readonly activeCompactionItemIds: readonly string[];
   readonly streamingMessageIds: readonly string[];
   readonly pendingDeltaBuffer: readonly AgentRunEvent[];
   readonly error: string | null;
@@ -108,6 +109,7 @@ export const createAgentChatStore = (): AgentChatStore =>
     ...emptyCollections(),
     activeRun: null,
     activeTurn: null,
+    activeCompactionItemIds: [],
     streamingMessageIds: [],
     pendingDeltaBuffer: [],
     error: null,
@@ -130,7 +132,7 @@ export const createAgentChatStore = (): AgentChatStore =>
     setRunError: (message) => {
       set({
         runError: message,
-        ...(message === null ? {} : { error: message }),
+        error: message,
       });
     },
     loadThread: (thread) => {
@@ -145,6 +147,7 @@ export const createAgentChatStore = (): AgentChatStore =>
           ...emptyCollections(),
           activeRun: null,
           activeTurn: null,
+          activeCompactionItemIds: [],
           streamingMessageIds: [],
           pendingDeltaBuffer: [],
           error: null,
@@ -173,6 +176,7 @@ export const createAgentChatStore = (): AgentChatStore =>
         proposedPlanOrder: (thread.proposedPlans ?? []).map((plan) => plan.id),
         activeRun: null,
         activeTurn: null,
+        activeCompactionItemIds: [],
         streamingMessageIds: [],
         pendingDeltaBuffer: [],
         error: null,
@@ -192,6 +196,7 @@ export const createAgentChatStore = (): AgentChatStore =>
           messageOrder,
           timelineRows: updateTimelineRows(state.timelineRows, messageOrder, messagesById),
           activeRun,
+          activeCompactionItemIds: [],
           runError: null,
           error: null,
         };
@@ -248,6 +253,7 @@ export const createAgentChatStore = (): AgentChatStore =>
           proposedPlanOrder: [],
           activeRun,
           activeTurn: null,
+          activeCompactionItemIds: [],
           streamingMessageIds: [],
           pendingDeltaBuffer: [],
           runError: null,
@@ -287,9 +293,11 @@ export const createAgentChatStore = (): AgentChatStore =>
     finishRun: () => {
       set((state) => ({
         activeRun: null,
+        activeCompactionItemIds: [],
         streamingMessageIds: [],
         pendingDeltaBuffer: [],
         runError: null,
+        error: null,
         activeTurn: state.activeTurn === null || state.activeTurn.completedAt !== null
           ? state.activeTurn
           : { ...state.activeTurn, status: "completed", completedAt: Date.now() },
@@ -298,6 +306,7 @@ export const createAgentChatStore = (): AgentChatStore =>
     failRun: (message) => {
       set({
         activeRun: null,
+        activeCompactionItemIds: [],
         streamingMessageIds: [],
         pendingDeltaBuffer: [],
         runError: message,
@@ -307,17 +316,19 @@ export const createAgentChatStore = (): AgentChatStore =>
   }));
 
 export const applyAgentRuntimeEvent = (state: AgentChatState, event: AgentRunEvent): AgentChatState => {
+  const baseState = resumeActiveTurnAfterReconnect(state, event);
+
   switch (event.type) {
     case "thread.created":
     case "thread.updated":
       return {
-        ...state,
+        ...baseState,
         threadSummary: event.thread,
       };
 
     case "turn.started":
       return {
-        ...state,
+        ...baseState,
         activeTurn: {
           turnId: event.turnId ?? event.runId,
           startedAt: event.createdAt,
@@ -328,10 +339,10 @@ export const applyAgentRuntimeEvent = (state: AgentChatState, event: AgentRunEve
 
     case "turn.completed":
       return {
-        ...state,
+        ...baseState,
         activeTurn: {
           turnId: event.turnId ?? event.runId,
-          startedAt: state.activeTurn?.startedAt ?? event.createdAt,
+          startedAt: baseState.activeTurn?.startedAt ?? event.createdAt,
           completedAt: event.createdAt,
           status: event.status,
         },
@@ -341,22 +352,32 @@ export const applyAgentRuntimeEvent = (state: AgentChatState, event: AgentRunEve
 
     case "message.started":
     case "message.completed":
-      return upsertMessageEvent(state, event);
+      return upsertMessageEvent(baseState, event);
 
     case "content.delta":
-      return appendContentDelta(state, event);
+      return appendContentDelta(baseState, event);
 
     case "item.started":
     case "item.updated":
     case "item.completed":
-      return upsertActivity(state, activityFromItemEvent(event));
+      return upsertActivity(updateCompactionState(baseState, event), activityFromItemEvent(event));
 
     case "request.opened":
     case "request.resolved":
-      return upsertActivity(state, activityFromRequestEvent(event));
+      return upsertActivity(baseState, activityFromRequestEvent(event));
 
-    case "runtime.warning":
-      return upsertActivity(state, {
+    case "runtime.warning": {
+      const warningState = event.warning.canRetry && baseState.activeTurn !== null
+        ? {
+            ...baseState,
+            activeTurn: {
+              ...baseState.activeTurn,
+              status: "reconnecting" as const,
+            },
+          }
+        : baseState;
+
+      return upsertActivity(warningState, {
         id: `runtime-warning:${event.sequence}`,
         runId: event.runId,
         turnId: event.turnId,
@@ -369,10 +390,11 @@ export const applyAgentRuntimeEvent = (state: AgentChatState, event: AgentRunEve
         sequence: event.sequence,
         payload: event.warning,
       });
+    }
 
     case "runtime.error":
       return upsertActivity({
-        ...state,
+        ...baseState,
         error: event.error.message,
       }, {
         id: `runtime-error:${event.sequence}`,
@@ -388,6 +410,54 @@ export const applyAgentRuntimeEvent = (state: AgentChatState, event: AgentRunEve
         payload: event.error,
       });
   }
+};
+
+const resumeActiveTurnAfterReconnect = (
+  state: AgentChatState,
+  event: AgentRunEvent,
+): AgentChatState => {
+  if (
+    state.activeTurn === null ||
+    state.activeTurn.status !== "reconnecting" ||
+    event.type === "runtime.warning" ||
+    event.type === "thread.created" ||
+    event.type === "thread.updated"
+  ) {
+    return state;
+  }
+
+  return {
+    ...state,
+    activeTurn: {
+      ...state.activeTurn,
+      status: "running",
+    },
+  };
+};
+
+const updateCompactionState = (
+  state: AgentChatState,
+  event: Extract<AgentRunEvent, { readonly type: "item.started" | "item.updated" | "item.completed" }>,
+): AgentChatState => {
+  if (event.item.itemType !== "context_compaction") {
+    return state;
+  }
+
+  if (event.type === "item.started") {
+    return {
+      ...state,
+      activeCompactionItemIds: appendUnique(state.activeCompactionItemIds, event.item.id),
+    };
+  }
+
+  if (event.type === "item.completed") {
+    return {
+      ...state,
+      activeCompactionItemIds: state.activeCompactionItemIds.filter((itemId) => itemId !== event.item.id),
+    };
+  }
+
+  return state;
 };
 
 const upsertMessageEvent = (
@@ -600,6 +670,25 @@ const activityFromItemEvent = (
   event: Extract<AgentRunEvent, { readonly type: "item.started" | "item.updated" | "item.completed" }>,
 ): AgentThreadActivity => {
   const isError = event.item.status === "failed" || event.item.isError === true;
+  if (event.item.itemType === "context_compaction") {
+    return {
+      id: `activity:${event.item.id}`,
+      runId: event.runId,
+      turnId: event.turnId,
+      itemId: event.item.id,
+      kind: "info",
+      tone: "info",
+      status: event.item.status === "completed" ? "completed" : "running",
+      title: event.item.title,
+      summary: event.item.summary,
+      detail: event.item.detail,
+      createdAt: event.createdAt,
+      updatedAt: event.createdAt,
+      sequence: event.sequence,
+      payload: event.item.raw ?? event.item.result ?? event.item.args,
+    };
+  }
+
   return {
     id: `activity:${event.item.id}`,
     runId: event.runId,

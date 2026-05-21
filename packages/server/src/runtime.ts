@@ -4,6 +4,10 @@ import { basename, resolve } from "node:path";
 import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
 import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
 import { createAgentHttpService } from "./agent/http.js";
+import {
+  attachBrowserControlWebSocketServer,
+  createBrowserControlService,
+} from "./browser-control/service.js";
 import { createCapabilitiesHttpService } from "./capabilities/http.js";
 import { AgentCapabilitiesService } from "./capabilities/service.js";
 import { attachFilesystemWebSocketServer } from "./filesystem/websocket.js";
@@ -58,6 +62,7 @@ export interface MachineServerStatus {
   readonly version: string;
   readonly activeSessions: {
     readonly filesystem: number;
+    readonly browserControl: number;
     readonly agent: number;
     readonly total: number;
   };
@@ -78,8 +83,16 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   });
   const agentHttpService = createAgentHttpService({ harness: agentHarness });
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
+  const browserControlService = createBrowserControlService({
+    filesystemRootPath: filesystemRoot.absolutePath,
+  });
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+    if (requestUrl.pathname.startsWith("/browser-control")) {
+      void browserControlService.handleRequest(request, response);
+      return;
+    }
 
     if (requestUrl.pathname.startsWith("/capabilities")) {
       void capabilitiesHttpService.handleRequest(request, response);
@@ -149,6 +162,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const filesystemSocketServer = attachFilesystemWebSocketServer(server, {
     root: filesystemRoot,
   });
+  attachBrowserControlWebSocketServer(server, browserControlService);
 
   await listen(server, requestedPort, host);
 
@@ -158,14 +172,16 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const localWebSocketBaseUrl = `ws://127.0.0.1:${String(port)}`;
   const getStatus = (): MachineServerStatus => {
     const filesystem = filesystemSocketServer.clients.size;
+    const browserControl = browserControlService.socketServer.clients.size;
     const agent = agentHttpService.runManager.getActiveRunCount();
-    const total = filesystem + agent;
+    const total = filesystem + browserControl + agent;
 
     return {
       ok: true,
       version,
       activeSessions: {
         filesystem,
+        browserControl,
         agent,
         total,
       },
@@ -188,6 +204,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     async stop() {
       await Promise.all([
         closeWebSocketServer(filesystemSocketServer),
+        closeWebSocketServer(browserControlService.socketServer),
       ]);
       await closeServer(server);
     },

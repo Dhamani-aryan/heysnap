@@ -36,7 +36,9 @@ const CLOUD_SCREEN_TRANSITION = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as co
 
 export interface CloudAppProps {
   readonly cloudServerUrl?: string;
+  readonly browserControlExtensionId?: string;
   readonly route?: CloudAppRoute;
+  readonly sarvamApiKey?: string;
   readonly onRouteChange?: (route: CloudAppRoute, options?: CloudRouteChangeOptions) => void;
   readonly onMachineCreateStarted?: () => void;
   readonly storageKey?: string;
@@ -49,9 +51,12 @@ export interface CloudAppCoreProps extends CloudAppProps {
 
 export interface CloudWorkspaceRendererProps {
   readonly agentBaseUrl: string;
+  readonly browserControlWebSocketUrl?: string;
+  readonly browserControlExtensionId?: string;
   readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
   readonly filesystemWebsocketUrl: string;
+  readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
@@ -104,7 +109,9 @@ export function CloudAppCore(props: CloudAppCoreProps): React.ReactElement {
 }
 
 function CloudAppContent({
+  browserControlExtensionId,
   route,
+  sarvamApiKey,
   onRouteChange,
   onMachineCreateStarted,
   renderWorkspace,
@@ -455,6 +462,12 @@ function CloudAppContent({
           path: workspaceSession.accessSession.routes.agentBaseUrl,
           token: workspaceSession.accessSession.accessSession.token,
         }),
+        browserControlWebSocketUrl: workspaceSession.accessSession.routes.browserControlWebSocketUrl === undefined ? undefined : buildGatewayWebsocketUrl({
+          baseUrl: client.baseUrl,
+          path: workspaceSession.accessSession.routes.browserControlWebSocketUrl,
+          token: workspaceSession.accessSession.accessSession.token,
+        }),
+        browserControlExtensionId,
         capabilitiesBaseUrl: workspaceSession.accessSession.routes.capabilitiesBaseUrl === undefined ? undefined : buildGatewayHttpUrl({
           baseUrl: client.baseUrl,
           path: workspaceSession.accessSession.routes.capabilitiesBaseUrl,
@@ -466,6 +479,7 @@ function CloudAppContent({
           path: workspaceSession.accessSession.routes.filesystemWebSocketUrl,
           token: workspaceSession.accessSession.accessSession.token,
         }),
+        sarvamApiKey,
         selectedThreadId,
         workspacePanel: selectedWorkspacePanel,
         onSelectThread: selectThread,

@@ -6,12 +6,16 @@ import { CloudApp, type CloudAppRoute, type CloudRouteChangeOptions } from "@ank
 
 export interface WebCloudWorkspaceAppProps {
   readonly cloudServerUrl: string;
+  readonly browserControlExtensionId?: string;
   readonly route: Extract<CloudAppRoute, { readonly view: "workspace" }>;
+  readonly sarvamApiKey?: string;
 }
 
 export function WebCloudWorkspaceApp({
   cloudServerUrl,
+  browserControlExtensionId,
   route,
+  sarvamApiKey,
 }: WebCloudWorkspaceAppProps): React.ReactElement {
   const router = useRouter();
 
@@ -31,7 +35,9 @@ export function WebCloudWorkspaceApp({
   return (
     <CloudApp
       cloudServerUrl={cloudServerUrl}
+      browserControlExtensionId={browserControlExtensionId}
       route={route}
+      sarvamApiKey={sarvamApiKey}
       onRouteChange={handleRouteChange}
       storageKey="ank1015:web-session-token"
     />

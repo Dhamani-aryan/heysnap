@@ -156,6 +156,181 @@ describe("AI gateway", () => {
     }
   });
 
+  it("proxies compact requests to the Azure compact endpoint without query parameters", async () => {
+    const { app, store, machineToken, user, computer, identity } = await createTestApp();
+    const compactUsage = {
+      input_tokens: 17,
+      output_tokens: 5,
+      total_tokens: 22,
+    };
+    const upstreamBody = {
+      output: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Remember that my preferred language is Rust." }],
+        },
+        {
+          type: "compaction",
+          encrypted_content: "encrypted-compact-content",
+        },
+      ],
+      usage: compactUsage,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(upstreamBody), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "content-length": "999",
+      },
+    }));
+    const requestBody = {
+      model: "gpt-5.5",
+      instructions: "Compact this conversation.",
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Remember that my preferred language is Rust." }],
+        },
+      ],
+      tools: [],
+      parallel_tool_calls: false,
+    };
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses/compact?api-version=2025-04-01-preview", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+          "x-codex-window-id": "window-1",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-length")).toBeNull();
+      expect(await response.json()).toEqual(upstreamBody);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://azure.example.com/openai/v1/responses/compact",
+      );
+
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      const headers = new Headers(init.headers);
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(await new Response(init.body).text())).toEqual(requestBody);
+      expect(headers.get("api-key")).toBe("azure-real-key");
+      expect(headers.get("x-codex-window-id")).toBe("window-1");
+      expect(headers.get("content-length")).toBeNull();
+
+      const usage = await waitForLatestUsage(store, (row) => row.status === "succeeded");
+      expect(usage).toMatchObject({
+        userId: user.id,
+        computerId: computer.id,
+        machineIdentityId: identity.id,
+        provider: "azure",
+        model: "gpt-5.5",
+        method: "POST",
+        upstreamPath: "/responses/compact",
+        status: "succeeded",
+        httpStatus: 200,
+        inputTokens: 17,
+        outputTokens: 5,
+        totalTokens: 22,
+        metadata: {
+          gatewayPath: "/llm/openai/v1/responses/compact",
+          gatewayRouteKind: "compact",
+          upstreamUsage: compactUsage,
+          usageParseError: null,
+        },
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("proxies compact requests from a configured full Azure responses endpoint and drops api-version", async () => {
+    const { app, machineToken } = await createTestApp({
+      aiGatewayAzureBaseUrl: "https://azure.example.com/openai/v1/responses?api-version=2025-04-01-preview",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: "compaction", encrypted_content: "encrypted-compact-content" }],
+    }), { status: 200 }));
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses/compact", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5.5", input: [], tools: [] }),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://azure.example.com/openai/v1/responses/compact",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("proxies compact requests from a legacy Azure responses endpoint to openai v1", async () => {
+    const { app, machineToken } = await createTestApp({
+      aiGatewayAzureBaseUrl: "https://azure.example.com/openai/responses?api-version=2025-04-01-preview",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses/compact", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5.5", input: [], tools: [] }),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://azure.example.com/openai/v1/responses/compact",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("honors a configured full Azure compact endpoint", async () => {
+    const { app, machineToken } = await createTestApp({
+      aiGatewayAzureBaseUrl: "https://azure.example.com/openai/v1/responses/compact?api-version=2025-04-01-preview",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses/compact", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5.5", input: [], tools: [] }),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://azure.example.com/openai/v1/responses/compact",
+      );
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("proxies image generation requests to the Azure images endpoint", async () => {
     const { app, store, machineToken, user, computer, identity } = await createTestApp();
     const imageUsage = {
