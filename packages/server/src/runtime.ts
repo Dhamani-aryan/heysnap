@@ -23,17 +23,6 @@ import {
   handleFilesystemDownloadRequest,
   sendFilesystemDownloadError,
 } from "./filesystem/download.js";
-import {
-  handleFilesystemPreviewRequest,
-  sendFilesystemPreviewError,
-  type FilesystemPreviewOptions,
-} from "./filesystem/preview.js";
-import {
-  filesystemXlsxCorsHeaders,
-  handleFilesystemXlsxRequest,
-  sendFilesystemXlsxError,
-  type FilesystemXlsxOptions,
-} from "./filesystem/xlsx.js";
 import { resolveFilesystemRoot } from "./filesystem/paths.js";
 import type { FilesystemRoot } from "./filesystem/types.js";
 import { attachWebSocketUpgradeRoute } from "./websocket/upgrade-router.js";
@@ -51,8 +40,6 @@ export interface StartServerOptions {
   readonly filesystemRoot?: string | FilesystemRoot;
   readonly codexBin?: string;
   readonly version?: string;
-  readonly filesystemPreview?: FilesystemPreviewOptions;
-  readonly filesystemXlsx?: FilesystemXlsxOptions;
   readonly filesystemPreviewer?: FilesystemPreviewerOptions;
 }
 
@@ -138,32 +125,6 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
 
       void handleFilesystemDownloadRequest(request, response, filesystemRoot).catch((error) => {
         sendFilesystemDownloadError(response, error);
-      });
-      return;
-    }
-
-    if (requestUrl.pathname === "/filesystem/preview") {
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, filesystemDownloadCorsHeaders);
-        response.end();
-        return;
-      }
-
-      void handleFilesystemPreviewRequest(request, response, filesystemRoot, options.filesystemPreview).catch((error) => {
-        sendFilesystemPreviewError(response, error);
-      });
-      return;
-    }
-
-    if (requestUrl.pathname === "/filesystem/xlsx" || requestUrl.pathname.startsWith("/filesystem/xlsx-assets/")) {
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, filesystemXlsxCorsHeaders);
-        response.end();
-        return;
-      }
-
-      void handleFilesystemXlsxRequest(request, response, filesystemRoot, options.filesystemXlsx).catch((error) => {
-        sendFilesystemXlsxError(response, error);
       });
       return;
     }
