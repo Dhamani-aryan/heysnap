@@ -17,6 +17,7 @@ import type { FilePalette } from './file-screen-styles';
 
 type FilePreviewPaneProps = {
   entry: FilesystemEntry;
+  filesystemPreviewBaseUrl: string | null;
   filesystemWebsocketUrl: string | null;
   palette: FilePalette;
   onBack: () => void;
@@ -27,6 +28,7 @@ const versionOf = (entry: FilesystemEntry): string =>
 
 export function FilePreviewPane({
   entry,
+  filesystemPreviewBaseUrl,
   filesystemWebsocketUrl,
   palette,
   onBack,
@@ -42,11 +44,14 @@ export function FilePreviewPane({
 
     const url = new URL('/preview', WEB_PREVIEW_URL);
     url.searchParams.set('websocketUrl', filesystemWebsocketUrl);
+    if (filesystemPreviewBaseUrl !== null) {
+      url.searchParams.set('previewBaseUrl', filesystemPreviewBaseUrl);
+    }
     url.searchParams.set('path', entry.path);
     url.searchParams.set('name', entry.name);
     url.searchParams.set('v', versionOf(entry));
     return url.toString();
-  }, [entry.path, filesystemWebsocketUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entry.path, filesystemPreviewBaseUrl, filesystemWebsocketUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentVersion = versionOf(entry);
   const lastSentVersionRef = useRef<string | null>(currentVersion);
@@ -65,19 +70,20 @@ export function FilePreviewPane({
     }
 
     lastSentVersionRef.current = currentVersion;
-    const payload = JSON.stringify({
-      type: 'update',
-      path: entry.path,
-      name: entry.name,
-      version: currentVersion,
-    });
+      const payload = JSON.stringify({
+        type: 'update',
+        path: entry.path,
+        name: entry.name,
+        previewBaseUrl: filesystemPreviewBaseUrl ?? undefined,
+        version: currentVersion,
+      });
 
     if (isReadyRef.current) {
       sendToWebView(webViewRef.current, payload);
     } else {
       pendingUpdateRef.current = payload;
     }
-  }, [currentVersion, entry.name, entry.path]);
+  }, [currentVersion, entry.name, entry.path, filesystemPreviewBaseUrl]);
 
   const handleMessage = (event: WebViewMessageEvent) => {
     let parsed: unknown;
