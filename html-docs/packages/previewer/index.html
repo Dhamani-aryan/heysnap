@@ -1,0 +1,3156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HeySnap Docs · Previewer</title>
+    <link rel="stylesheet" href="../../docs-shell.css" />
+    <style>
+      :root {
+        --prv-accent: #F54E00;
+        --prv-warm-muted: #787771;
+        --prv-warm-soft: #5b5a52;
+        --prv-warm-heading: #26251e;
+        --prv-warm-surface: #f2f1ed;
+        --prv-warm-border: rgba(38, 37, 30, 0.1);
+        --prv-warm-border-strong: rgba(38, 37, 30, 0.18);
+      }
+
+      .prv-section {
+        display: grid;
+        gap: 24px;
+        padding: 64px 0 32px;
+      }
+
+      .prv-section-head {
+        display: grid;
+        gap: 12px;
+        max-width: 820px;
+      }
+
+      .prv-section-head h2 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.12;
+      }
+
+      .prv-section-head p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+        font-size: 17px;
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 1.65;
+      }
+
+      .prv-section-head p + p {
+        margin-top: 2px;
+      }
+
+      .prv-section-head code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      .prv-subhead {
+        display: grid;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .prv-subhead h3 {
+        margin: 0;
+        color: #26251e;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1.3;
+      }
+
+      .prv-subhead p {
+        margin: 0;
+        color: #787771;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+
+      .prv-slot {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 280px;
+        border: 1px dashed var(--doc-border-strong);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.62);
+        padding: 22px;
+      }
+
+      .prv-slot[data-tall] {
+        min-height: 460px;
+      }
+
+      .prv-slot[data-short] {
+        min-height: 180px;
+      }
+
+      .prv-slot-label {
+        color: var(--prv-accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-slot-hint {
+        margin: 0;
+        color: var(--doc-muted);
+        font-size: 14px;
+        line-height: 1.55;
+        max-width: 620px;
+      }
+
+      .prv-grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .prv-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .prv-file-card {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 220px;
+        border: 1px solid rgba(38, 37, 30, 0.06);
+        border-radius: 8px;
+        background: #f2f1ed;
+        padding: 20px;
+      }
+
+      .prv-file-path {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1;
+      }
+
+      .prv-file-card h3 {
+        margin: 0;
+        color: #26251e;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1.25;
+      }
+
+      .prv-file-card p {
+        margin: 0;
+        color: #787771;
+        font-size: 15px;
+        font-weight: 400;
+        line-height: 1.5;
+      }
+
+      .prv-file-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: auto;
+      }
+
+      .prv-tag {
+        border: 1px solid rgba(38, 37, 30, 0.1);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.6);
+        color: #5b5a52;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0;
+        line-height: 1;
+        padding: 6px 10px;
+      }
+
+      .prv-callout {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--prv-warm-border);
+        border-left: 3px solid var(--prv-accent);
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: var(--doc-shadow);
+        padding: 18px 20px;
+      }
+
+      .prv-callout-label {
+        color: var(--prv-accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-callout p {
+        margin: 0;
+        color: var(--prv-warm-soft);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      /* Section 01 ---------------------------------------------------- */
+
+      .prv-prose {
+        display: grid;
+        gap: 18px;
+        max-width: 780px;
+      }
+
+      .prv-prose p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 17px;
+        font-weight: 400;
+        line-height: 1.7;
+      }
+
+      .prv-prose strong {
+        color: var(--prv-warm-heading);
+        font-weight: 600;
+      }
+
+      .prv-prose code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      .prv-props {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .prv-prop {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 8px;
+        background: var(--prv-warm-surface);
+        padding: 18px 18px 20px;
+      }
+
+      .prv-prop-key {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        line-height: 1;
+        text-transform: lowercase;
+      }
+
+      .prv-prop h4 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1.3;
+      }
+
+      .prv-prop p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 14.5px;
+        font-weight: 400;
+        line-height: 1.55;
+      }
+
+      .prv-diagram {
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 12px;
+        background: #ffffff;
+        padding: 28px 28px 24px;
+      }
+
+      .prv-diagram-caption {
+        margin: 14px 0 0;
+        color: var(--prv-warm-muted);
+        font-size: 13.5px;
+        line-height: 1.6;
+        text-align: center;
+      }
+
+      .prv-diagram svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      /* Section 07 ---------------------------------------------------- */
+
+      .prv-host-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .prv-host-card {
+        display: grid;
+        gap: 12px;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 22px 24px;
+      }
+
+      .prv-host-card h4 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.3;
+      }
+
+      .prv-host-card p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 14.5px;
+        line-height: 1.6;
+      }
+
+      .prv-host-card p + p {
+        margin-top: 6px;
+      }
+
+      .prv-host-card code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      .prv-host-best {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-table-wrap {
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+      }
+
+      .prv-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+
+      .prv-table thead th {
+        background: #faf9f5;
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-align: left;
+        text-transform: uppercase;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--prv-warm-border);
+      }
+
+      .prv-table tbody td {
+        padding: 14px 18px;
+        border-top: 1px solid var(--prv-warm-border);
+        color: var(--prv-warm-muted);
+        vertical-align: top;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .prv-table tbody tr:first-child td {
+        border-top: none;
+      }
+
+      .prv-table-key {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--prv-warm-heading);
+        white-space: nowrap;
+      }
+
+      .prv-table-default {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12.5px;
+        color: var(--prv-accent);
+        white-space: nowrap;
+      }
+
+      .prv-table-default-muted {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12.5px;
+        color: var(--prv-warm-soft);
+        white-space: nowrap;
+      }
+
+      @media (max-width: 860px) {
+        .prv-host-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .prv-table thead th,
+        .prv-table tbody td {
+          padding: 10px 12px;
+          font-size: 13px;
+        }
+      }
+
+      /* Section 08 ---------------------------------------------------- */
+
+      .prv-gotcha-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .prv-gotcha {
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--prv-warm-border);
+        border-left: 3px solid var(--prv-accent);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 18px 22px;
+      }
+
+      .prv-gotcha-label {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-gotcha h4 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+
+      .prv-gotcha p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 14.5px;
+        line-height: 1.6;
+      }
+
+      .prv-gotcha code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      @media (max-width: 720px) {
+        .prv-gotcha-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      /* Section 05 ---------------------------------------------------- */
+
+      .prv-srv-list {
+        display: grid;
+        gap: 14px;
+      }
+
+      .prv-srv-card {
+        display: grid;
+        gap: 16px;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 22px 24px;
+      }
+
+      .prv-srv-head {
+        display: grid;
+        gap: 6px;
+      }
+
+      .prv-srv-path {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1;
+      }
+
+      .prv-srv-head h4 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 19px;
+        font-weight: 600;
+        line-height: 1.3;
+      }
+
+      .prv-srv-body p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 15px;
+        line-height: 1.65;
+      }
+
+      .prv-srv-body p + p {
+        margin-top: 10px;
+      }
+
+      .prv-srv-body code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      .prv-srv-meta {
+        display: grid;
+        gap: 10px;
+        padding-top: 14px;
+        border-top: 1px solid var(--prv-warm-border);
+      }
+
+      .prv-srv-row {
+        display: grid;
+        grid-template-columns: 130px 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .prv-srv-rowlabel {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        line-height: 1.8;
+        text-transform: uppercase;
+      }
+
+      .prv-srv-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .prv-srv-chip {
+        border: 1px solid rgba(38, 37, 30, 0.12);
+        border-radius: 999px;
+        background: #faf9f5;
+        color: var(--prv-warm-heading);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0;
+        line-height: 1;
+        padding: 6px 10px;
+      }
+
+      @media (max-width: 720px) {
+        .prv-srv-row {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 6px;
+        }
+      }
+
+      /* Section 04 ---------------------------------------------------- */
+
+      .prv-msg-group {
+        display: grid;
+        gap: 12px;
+      }
+
+      .prv-msg-grouptag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-msg-grouptag::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--prv-accent);
+      }
+
+      .prv-msg-card {
+        display: grid;
+        gap: 16px;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 22px 24px;
+      }
+
+      .prv-msg-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .prv-msg-type {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--prv-accent);
+        color: #ffffff;
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        line-height: 1;
+        padding: 7px 12px;
+        border-radius: 999px;
+      }
+
+      .prv-msg-dir {
+        color: var(--prv-warm-soft);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0;
+      }
+
+      .prv-msg-when {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      .prv-msg-when code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      .prv-codes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .prv-code-block {
+        display: grid;
+        gap: 6px;
+      }
+
+      .prv-code-label {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-code {
+        margin: 0;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 8px;
+        background: #fbfaf7;
+        padding: 14px 16px;
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12.5px;
+        line-height: 1.65;
+        color: #26251e;
+        overflow-x: auto;
+        white-space: pre;
+      }
+
+      @media (max-width: 720px) {
+        .prv-codes {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      /* Section 03 ---------------------------------------------------- */
+
+      .prv-steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      .prv-step {
+        display: grid;
+        grid-template-columns: 44px 1fr;
+        gap: 18px;
+        align-items: start;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 18px 22px;
+      }
+
+      .prv-step-num {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        background: var(--prv-accent);
+        color: #ffffff;
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1;
+      }
+
+      .prv-step-body {
+        display: grid;
+        gap: 8px;
+      }
+
+      .prv-step-title {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .prv-step-title h4 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1.3;
+      }
+
+      .prv-step-arrow {
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-step-body p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 15px;
+        font-weight: 400;
+        line-height: 1.6;
+      }
+
+      .prv-step-body code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      .prv-step-files {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--prv-warm-soft);
+        letter-spacing: 0;
+      }
+
+      /* Section 02 ---------------------------------------------------- */
+
+      .prv-layer-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .prv-layer {
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--prv-warm-border);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 18px 18px 20px;
+      }
+
+      .prv-layer-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--prv-accent);
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .prv-layer-tag::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--prv-accent);
+      }
+
+      .prv-layer h4 {
+        margin: 0;
+        color: var(--prv-warm-heading);
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1.3;
+      }
+
+      .prv-layer p {
+        margin: 0;
+        color: var(--prv-warm-muted);
+        font-size: 14.5px;
+        line-height: 1.55;
+      }
+
+      .prv-layer code {
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+        color: var(--prv-warm-soft);
+      }
+
+      @media (max-width: 860px) {
+        .prv-props,
+        .prv-layer-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .prv-diagram {
+          padding: 18px;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .prv-grid-2,
+        .prv-grid-3 {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .prv-section-head h2 {
+          font-size: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body data-docs-path="/packages/previewer">
+    <div class="docs-shell" data-docs-shell>
+      <main class="docs-main">
+        <section class="docs-hero">
+          <h1>Previewer</h1>
+          <div class="previewer-card-grid" aria-label="Previewer highlights">
+            <article class="previewer-card">
+              <h2>Overview</h2>
+              <p class="previewer-card-copy">
+                A standalone preview surface for HeySnap files, bundling the
+                viewer UI and mountable server pieces that let workspaces render
+                documents, code, sheets, HTML, and media through one consistent
+                file-preview experience.
+              </p>
+            </article>
+            <article class="previewer-card">
+              <h2>Scripts / Commands</h2>
+              <p class="previewer-card-copy">
+                These are the package scripts available from pnpm.
+              </p>
+              <div class="previewer-card-points">
+                <p>- dev</p>
+                <p>- build</p>
+                <p>- typecheck</p>
+                <p>- lint</p>
+              </div>
+            </article>
+            <article class="previewer-card">
+              <h2>Public Interfaces</h2>
+              <p class="previewer-card-copy">
+                The package exposes the server APIs and preview protocol used by
+                machine-server and UI integrations.
+              </p>
+              <div class="previewer-card-points">
+                <p>- @ank1015-app/previewer</p>
+                <p>- @ank1015-app/previewer/protocol</p>
+                <p>- startPreviewServer</p>
+                <p>- createPreviewService</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 1. WHAT & WHY                                                -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s1">
+          <header class="prv-section-head">
+            <h2 id="prv-s1">What it is, and why it exists</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              The previewer is the <strong>single place HeySnap renders files</strong>.
+              PDFs, DOCX, PPTX, XLSX, Markdown, source code, images, video,
+              audio, and live HTML all flow through the same surface, with one
+              consistent dark theme and one live-reload model. The user never
+              sees a different viewer chrome depending on what they opened.
+            </p>
+            <p>
+              It is intentionally <strong>decoupled from <code>packages/server</code></strong>.
+              Mounting the previewer requires only an HTTP host and a path
+              resolver, which is why the dev playground, the machine-server,
+              and the mobile shell can all embed the same viewer code without
+              owning any of its internals. The package exports two entry
+              points &mdash; <code>startPreviewServer</code> for a turnkey
+              listener, or <code>createPreviewService</code> when the caller
+              already has its own HTTP and WebSocket plumbing.
+            </p>
+            <p>
+              On the wire the model is small: the browser asks the server to
+              <em>watch a path</em>, and the server pushes a typed message
+              every time that path changes on disk. The client picks a viewer
+              based on the message, and that&rsquo;s the whole loop.
+            </p>
+          </div>
+
+          <div class="prv-props" aria-label="Key properties">
+            <div class="prv-prop">
+              <span class="prv-prop-key">live</span>
+              <h4>File changes stream in</h4>
+              <p>
+                A <code>chokidar</code> watcher on the server pushes updates
+                over WebSocket with a 20&thinsp;ms debounce. No polling, no
+                manual refresh.
+              </p>
+            </div>
+            <div class="prv-prop">
+              <span class="prv-prop-key">sandboxed</span>
+              <h4>Every path resolved against a root</h4>
+              <p>
+                Requests are normalized and checked with
+                <code>ensurePathInside</code> before any file is touched.
+                Absolute paths are rejected unless explicitly allowed.
+              </p>
+            </div>
+            <div class="prv-prop">
+              <span class="prv-prop-key">pluggable</span>
+              <h4>Bring your own resolver or converter</h4>
+              <p>
+                Swap the path resolver, the XLSX converter, or the entire HTTP
+                host. The viewer code and protocol stay the same.
+              </p>
+            </div>
+          </div>
+
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 920 540" role="img" aria-label="Previewer architecture: three hosts mount one previewer package, which contains a client and a server connected through a typed protocol, and the server watches the filesystem.">
+              <defs>
+                <marker id="prv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+                <marker id="prv-arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#787771" />
+                </marker>
+              </defs>
+
+              <!-- Host badges -->
+              <g font-family="Geist, sans-serif">
+                <g>
+                  <rect x="60" y="24" width="220" height="60" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                  <text x="170" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="#26251e">Dev playground</text>
+                  <text x="170" y="70" text-anchor="middle" font-size="12" fill="#787771">pnpm dev</text>
+                </g>
+                <g>
+                  <rect x="350" y="24" width="220" height="60" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                  <text x="460" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="#26251e">Machine server</text>
+                  <text x="460" y="70" text-anchor="middle" font-size="12" fill="#787771">packages/server</text>
+                </g>
+                <g>
+                  <rect x="640" y="24" width="220" height="60" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                  <text x="750" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="#26251e">Mobile shell</text>
+                  <text x="750" y="70" text-anchor="middle" font-size="12" fill="#787771">iframe embed</text>
+                </g>
+              </g>
+
+              <!-- Three parallel mount arrows: host bottoms → container top -->
+              <g fill="none" stroke="#F54E00" stroke-width="1.6">
+                <path d="M170 86 L170 154" marker-end="url(#prv-arrow)" />
+                <path d="M460 86 L460 154" marker-end="url(#prv-arrow)" />
+                <path d="M750 86 L750 154" marker-end="url(#prv-arrow)" />
+              </g>
+              <text x="486" y="124" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">mount</text>
+
+              <!-- Previewer container -->
+              <rect x="60" y="158" width="800" height="280" rx="14" fill="#f2f1ed" stroke="rgba(38,37,30,0.12)" />
+              <text x="84" y="188" font-family="Geist Mono, monospace" font-size="12" font-weight="600" fill="#F54E00">@ank1015-app/previewer</text>
+
+              <!-- Client box -->
+              <g font-family="Geist, sans-serif">
+                <rect x="100" y="212" width="300" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="118" y="240" font-size="16" font-weight="600" fill="#26251e">Client</text>
+                <text x="118" y="262" font-size="13" fill="#787771">React SPA &middot; viewer routing</text>
+                <text x="118" y="284" font-family="Geist Mono, monospace" font-size="11.5" fill="#5b5a52">src/client/</text>
+              </g>
+
+              <!-- Server box -->
+              <g font-family="Geist, sans-serif">
+                <rect x="100" y="332" width="300" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="118" y="360" font-size="16" font-weight="600" fill="#26251e">Server</text>
+                <text x="118" y="382" font-size="13" fill="#787771">HTTP + WebSocket &middot; sandbox</text>
+                <text x="118" y="404" font-family="Geist Mono, monospace" font-size="11.5" fill="#5b5a52">src/server/</text>
+              </g>
+
+              <!-- Protocol arrows between client & server -->
+              <g fill="none" stroke="#F54E00" stroke-width="1.6">
+                <path d="M210 304 L210 330" marker-end="url(#prv-arrow)" />
+                <path d="M290 332 L290 306" marker-end="url(#prv-arrow)" />
+              </g>
+              <g>
+                <text x="320" y="312" font-family="Geist Mono, monospace" font-size="12" font-weight="600" fill="#F54E00">protocol.ts</text>
+                <text x="320" y="326" font-family="Geist, sans-serif" font-size="11.5" fill="#787771">typed messages</text>
+              </g>
+
+              <!-- Filesystem box -->
+              <g font-family="Geist, sans-serif">
+                <rect x="540" y="332" width="280" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" stroke-dasharray="4 4" />
+                <text x="558" y="360" font-size="16" font-weight="600" fill="#26251e">Filesystem</text>
+                <text x="558" y="382" font-size="13" fill="#787771">watched by chokidar</text>
+                <text x="558" y="404" font-family="Geist Mono, monospace" font-size="11.5" fill="#5b5a52">rootPath sandbox</text>
+              </g>
+
+              <!-- Arrow Server → Filesystem -->
+              <g fill="none" stroke="#787771" stroke-width="1.4">
+                <path d="M400 378 L540 378" marker-end="url(#prv-arrow-soft)" />
+              </g>
+              <text x="420" y="370" font-family="Geist Mono, monospace" font-size="11" fill="#5b5a52">watch + read</text>
+
+              <!-- Browser callout outside container, pointing at Client -->
+              <g font-family="Geist, sans-serif">
+                <rect x="540" y="212" width="280" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="558" y="240" font-size="16" font-weight="600" fill="#26251e">Browser</text>
+                <text x="558" y="262" font-size="13" fill="#787771">renders the chosen viewer</text>
+                <text x="558" y="284" font-family="Geist Mono, monospace" font-size="11.5" fill="#5b5a52">?path=&hellip;</text>
+              </g>
+              <g fill="none" stroke="#787771" stroke-width="1.4">
+                <path d="M540 258 L400 258" marker-end="url(#prv-arrow-soft)" />
+              </g>
+              <text x="430" y="250" font-family="Geist Mono, monospace" font-size="11" fill="#5b5a52">serves SPA</text>
+
+              <!-- Bottom caption strip -->
+              <g font-family="Geist Mono, monospace">
+                <text x="460" y="500" text-anchor="middle" font-size="12" fill="#787771">one watcher per socket &middot; 20ms debounce &middot; cleaned up on close</text>
+              </g>
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Hosts mount the previewer; inside the package the client and
+              server talk through one typed protocol while the server watches
+              the filesystem under a sandboxed root.
+            </figcaption>
+          </figure>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 2. ARCHITECTURE MAP                                          -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s2">
+          <header class="prv-section-head">
+            <h2 id="prv-s2">The big picture</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              The package splits into <strong>three layers</strong>. At the top
+              is the <strong>client</strong> &mdash; a React SPA bundled into a
+              <code>dist</code> directory that any HTTP host can serve. At the
+              bottom is the <strong>server</strong> &mdash; a small Node module
+              that answers HTTP requests, runs a WebSocket endpoint, and
+              watches files. In the middle, a single TypeScript file defines
+              every message that crosses the wire. Two halves, one contract.
+            </p>
+            <p>
+              The map below names every source file in the package. Each later
+              section zooms into one box; for now, treat the diagram as a
+              table of contents for the source tree.
+            </p>
+          </div>
+
+          <div class="prv-layer-grid" aria-label="What each layer owns">
+            <div class="prv-layer">
+              <span class="prv-layer-tag">Client owns</span>
+              <h4>The viewer choice &amp; the UI lifecycle</h4>
+              <p>
+                URL parsing, WebSocket lifecycle (<code>idle &middot; connecting
+                &middot; open &middot; closed</code>), and the
+                viewer&hyphen;router that turns a <code>PreviewItem</code> into
+                a concrete component.
+              </p>
+            </div>
+            <div class="prv-layer">
+              <span class="prv-layer-tag">Protocol owns</span>
+              <h4>The message shapes</h4>
+              <p>
+                Discriminated unions for both directions. Adding a new file
+                kind is a change to <code>protocol.ts</code> first; both halves
+                follow.
+              </p>
+            </div>
+            <div class="prv-layer">
+              <span class="prv-layer-tag">Server owns</span>
+              <h4>The filesystem and the watch loop</h4>
+              <p>
+                Sandboxed path resolution, the chokidar watcher, MIME, XLSX
+                conversion bridge, and the HTTP routes that stream HTML and
+                workbook assets back to the iframe.
+              </p>
+            </div>
+          </div>
+
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 940 640" role="img" aria-label="Layered architecture map of the previewer source tree: client files at the top, protocol.ts in the middle, server files at the bottom.">
+              <defs>
+                <marker id="prv-s2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+              </defs>
+
+              <!-- ===================== CLIENT BAND ===================== -->
+              <rect x="20" y="20" width="900" height="160" rx="12" fill="#f8f7f3" stroke="rgba(38,37,30,0.08)" />
+              <g font-family="Geist, sans-serif">
+                <circle cx="46" cy="46" r="4" fill="#F54E00" />
+                <text x="58" y="50" font-family="Geist Mono, monospace" font-size="12" font-weight="600" fill="#F54E00" letter-spacing="0.06em">CLIENT &middot; src/client &middot; runs in browser</text>
+              </g>
+
+              <!-- Client file cards -->
+              <g font-family="Geist, sans-serif">
+                <!-- main.tsx -->
+                <rect x="44" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="60" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">main.tsx</text>
+                <text x="60" y="120" font-size="12.5" fill="#787771">React bootstrap</text>
+                <text x="60" y="138" font-size="12.5" fill="#787771">mounts &lt;App /&gt;</text>
+
+                <!-- App.tsx -->
+                <rect x="264" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="280" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">App.tsx</text>
+                <text x="280" y="120" font-size="12.5" fill="#787771">WebSocket lifecycle</text>
+                <text x="280" y="138" font-size="12.5" fill="#787771">URL &rarr; watch message</text>
+
+                <!-- Previewer.tsx -->
+                <rect x="484" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="500" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">Previewer.tsx</text>
+                <text x="500" y="120" font-size="12.5" fill="#787771">Viewer router</text>
+                <text x="500" y="138" font-size="12.5" fill="#787771">PDF / DOCX / XLSX / &hellip;</text>
+
+                <!-- styles.css -->
+                <rect x="704" y="72" width="200" height="92" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="720" y="98" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">styles.css</text>
+                <text x="720" y="120" font-size="12.5" fill="#787771">Shell + iframe + status</text>
+                <text x="720" y="138" font-size="12.5" fill="#787771">dark theme tokens</text>
+              </g>
+
+              <!-- Down arrow CLIENT → PROTOCOL -->
+              <g fill="none" stroke="#F54E00" stroke-width="1.6">
+                <path d="M470 188 L470 226" marker-end="url(#prv-s2-arrow)" />
+                <path d="M460 226 L460 188" marker-end="url(#prv-s2-arrow)" />
+              </g>
+              <text x="490" y="212" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">WebSocket</text>
+
+              <!-- ===================== PROTOCOL BAND ===================== -->
+              <rect x="20" y="240" width="900" height="110" rx="12" fill="#fdf0e8" stroke="rgba(245,78,0,0.22)" />
+              <g>
+                <circle cx="46" cy="266" r="4" fill="#F54E00" />
+                <text x="58" y="270" font-family="Geist Mono, monospace" font-size="12" font-weight="600" fill="#F54E00" letter-spacing="0.06em">PROTOCOL &middot; the contract</text>
+              </g>
+
+              <!-- protocol.ts card centered -->
+              <g font-family="Geist, sans-serif">
+                <rect x="320" y="284" width="300" height="50" rx="10" fill="#ffffff" stroke="rgba(245,78,0,0.35)" />
+                <text x="336" y="306" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">protocol.ts</text>
+                <text x="336" y="324" font-size="12.5" fill="#787771">PreviewClientMessage &middot; PreviewServerMessage &middot; PreviewItem</text>
+              </g>
+
+              <!-- Down arrow PROTOCOL → SERVER -->
+              <g fill="none" stroke="#F54E00" stroke-width="1.6">
+                <path d="M470 358 L470 396" marker-end="url(#prv-s2-arrow)" />
+                <path d="M460 396 L460 358" marker-end="url(#prv-s2-arrow)" />
+              </g>
+              <text x="490" y="382" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">WebSocket</text>
+
+              <!-- ===================== SERVER BAND ===================== -->
+              <rect x="20" y="410" width="900" height="220" rx="12" fill="#f8f7f3" stroke="rgba(38,37,30,0.08)" />
+              <g>
+                <circle cx="46" cy="436" r="4" fill="#F54E00" />
+                <text x="58" y="440" font-family="Geist Mono, monospace" font-size="12" font-weight="600" fill="#F54E00" letter-spacing="0.06em">SERVER &middot; src/server &middot; Node.js</text>
+              </g>
+
+              <!-- Row 1 -->
+              <g font-family="Geist, sans-serif">
+                <!-- index.ts -->
+                <rect x="44" y="462" width="200" height="68" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="60" y="486" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">index.ts</text>
+                <text x="60" y="506" font-size="12.5" fill="#787771">HTTP + WS host</text>
+                <text x="60" y="522" font-size="12.5" fill="#787771">startPreviewServer</text>
+
+                <!-- service.ts -->
+                <rect x="264" y="462" width="200" height="68" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="280" y="486" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">service.ts</text>
+                <text x="280" y="506" font-size="12.5" fill="#787771">PreviewService + Session</text>
+                <text x="280" y="522" font-size="12.5" fill="#787771">routing, watcher, debounce</text>
+
+                <!-- paths.ts -->
+                <rect x="484" y="462" width="200" height="68" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="500" y="486" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">paths.ts</text>
+                <text x="500" y="506" font-size="12.5" fill="#787771">Sandbox &amp; resolver</text>
+                <text x="500" y="522" font-size="12.5" fill="#787771">ensurePathInside</text>
+
+                <!-- mime.ts -->
+                <rect x="704" y="462" width="200" height="68" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="720" y="486" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">mime.ts</text>
+                <text x="720" y="506" font-size="12.5" fill="#787771">Extension &rarr; MIME</text>
+                <text x="720" y="522" font-size="12.5" fill="#787771">lookup table</text>
+              </g>
+
+              <!-- Row 2 -->
+              <g font-family="Geist, sans-serif">
+                <!-- xlsx.ts -->
+                <rect x="264" y="548" width="200" height="68" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="280" y="572" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">xlsx.ts</text>
+                <text x="280" y="592" font-size="12.5" fill="#787771">Workbook conversion</text>
+                <text x="280" y="608" font-size="12.5" fill="#787771">spawns heysnap-xlsxl</text>
+
+                <!-- dev-server.ts (alt entry point, dashed) -->
+                <rect x="484" y="548" width="200" height="68" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.28)" stroke-dasharray="5 4" />
+                <text x="500" y="572" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">../dev-server.ts</text>
+                <text x="500" y="592" font-size="12.5" fill="#787771">Vite playground</text>
+                <text x="500" y="608" font-size="12.5" fill="#787771">alt entry &middot; pnpm dev</text>
+              </g>
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Each later section zooms into one of these boxes. Dashed border
+              marks an alternative entry point that wraps the same service.
+            </figcaption>
+          </figure>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 3. ANATOMY OF ONE PREVIEW                                    -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s3">
+          <header class="prv-section-head">
+            <h2 id="prv-s3">Anatomy of one preview</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              A single preview is six stages long. The browser parses its
+              query string, opens a WebSocket, sends one
+              <code>watch</code> message, and waits. The server resolves the
+              path inside a sandbox, branches by file type, and pushes a typed
+              message back. The client picks a viewer, renders, and then the
+              loop runs forever &mdash; every time the file mutates on disk a
+              new message arrives and the viewer re-keys.
+            </p>
+            <p>
+              The swim-lane below shows what crosses the wire at each stage.
+              The cards beneath expand each stage with the file that owns it.
+            </p>
+          </div>
+
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 940 580" role="img" aria-label="Swim-lane sequence diagram of one preview lifecycle across client and server.">
+              <defs>
+                <marker id="prv-s3-arrow-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+                <marker id="prv-s3-arrow-l" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+              </defs>
+
+              <!-- Lane headers -->
+              <g font-family="Geist, sans-serif">
+                <text x="235" y="34" text-anchor="middle" font-size="15" font-weight="600" fill="#26251e">Client</text>
+                <text x="235" y="54" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">src/client/App.tsx</text>
+
+                <text x="705" y="34" text-anchor="middle" font-size="15" font-weight="600" fill="#26251e">Server</text>
+                <text x="705" y="54" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">src/server/service.ts</text>
+              </g>
+
+              <!-- Lane lines -->
+              <g stroke="rgba(38,37,30,0.18)" stroke-width="1" stroke-dasharray="3 4">
+                <line x1="235" y1="70" x2="235" y2="540" />
+                <line x1="705" y1="70" x2="705" y2="540" />
+              </g>
+
+              <!-- Helper: stage row generator pattern -->
+              <!-- Stage 1: Connect (both lanes; rightward arrow "socket open") -->
+              <g font-family="Geist, sans-serif">
+                <circle cx="50" cy="108" r="14" fill="#F54E00" />
+                <text x="50" y="113" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">1</text>
+
+                <rect x="120" y="86" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="136" y="106" font-size="13.5" font-weight="600" fill="#26251e">Open WebSocket</text>
+                <text x="136" y="124" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">new WebSocket(&lt;basePath&gt;/ws)</text>
+
+                <rect x="590" y="86" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="606" y="106" font-size="13.5" font-weight="600" fill="#26251e">Accept upgrade</text>
+                <text x="606" y="124" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">new PreviewSocketSession</text>
+
+                <path d="M350 108 L590 108" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s3-arrow-r)" />
+                <text x="470" y="100" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">socket open</text>
+              </g>
+
+              <!-- Stage 2: Watch (client → server arrow with watch message) -->
+              <g font-family="Geist, sans-serif">
+                <circle cx="50" cy="188" r="14" fill="#F54E00" />
+                <text x="50" y="193" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">2</text>
+
+                <rect x="120" y="166" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="136" y="186" font-size="13.5" font-weight="600" fill="#26251e">Send watch message</text>
+                <text x="136" y="204" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">socket.send({type:"watch",&hellip;})</text>
+
+                <rect x="590" y="166" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="606" y="186" font-size="13.5" font-weight="600" fill="#26251e">Parse + validate</text>
+                <text x="606" y="204" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">parseClientMessage()</text>
+
+                <path d="M350 188 L590 188" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s3-arrow-r)" />
+                <text x="470" y="180" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">watch &middot; { path, root?, publicBasePath }</text>
+              </g>
+
+              <!-- Stage 3: Resolve (server-only) -->
+              <g font-family="Geist, sans-serif">
+                <circle cx="50" cy="268" r="14" fill="#F54E00" />
+                <text x="50" y="273" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">3</text>
+
+                <rect x="590" y="246" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="606" y="266" font-size="13.5" font-weight="600" fill="#26251e">Resolve + sandbox</text>
+                <text x="606" y="284" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">paths.ts &middot; ensurePathInside</text>
+
+                <text x="350" y="272" text-anchor="end" font-family="Geist Mono, monospace" font-size="11" fill="#787771">(client waits)</text>
+              </g>
+
+              <!-- Stage 4: Branch + read/convert (server-only, taller) -->
+              <g font-family="Geist, sans-serif">
+                <circle cx="50" cy="350" r="14" fill="#F54E00" />
+                <text x="50" y="355" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">4</text>
+
+                <rect x="590" y="320" width="230" height="62" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="606" y="340" font-size="13.5" font-weight="600" fill="#26251e">Branch by extension</text>
+                <text x="606" y="358" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">xlsx &rarr; xlsx.ts</text>
+                <text x="606" y="374" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">html &rarr; register root</text>
+
+                <text x="350" y="354" text-anchor="end" font-family="Geist Mono, monospace" font-size="11" fill="#787771">(client waits)</text>
+              </g>
+
+              <!-- Stage 5: Emit + render (server → client arrow) -->
+              <g font-family="Geist, sans-serif">
+                <circle cx="50" cy="430" r="14" fill="#F54E00" />
+                <text x="50" y="435" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">5</text>
+
+                <rect x="120" y="408" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="136" y="428" font-size="13.5" font-weight="600" fill="#26251e">Render with viewer</text>
+                <text x="136" y="446" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">Previewer.tsx routes by kind</text>
+
+                <rect x="590" y="408" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="606" y="428" font-size="13.5" font-weight="600" fill="#26251e">Emit typed message</text>
+                <text x="606" y="446" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">sendUpdate()</text>
+
+                <path d="M590 430 L350 430" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s3-arrow-l)" />
+                <text x="470" y="422" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">file &middot; workbook &middot; htmlPreview</text>
+              </g>
+
+              <!-- Stage 6: Live (chokidar → debounce → re-emit) -->
+              <g font-family="Geist, sans-serif">
+                <circle cx="50" cy="510" r="14" fill="#F54E00" />
+                <text x="50" y="515" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">6</text>
+
+                <rect x="120" y="488" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="136" y="508" font-size="13.5" font-weight="600" fill="#26251e">Re-render</text>
+                <text x="136" y="526" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">keyed on path:mtime</text>
+
+                <rect x="590" y="488" width="230" height="46" rx="9" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="606" y="508" font-size="13.5" font-weight="600" fill="#26251e">chokidar &rarr; debounce</text>
+                <text x="606" y="526" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">20ms &middot; coalesce &middot; re-emit</text>
+
+                <path d="M590 510 L350 510" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s3-arrow-l)" />
+                <text x="470" y="502" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">repeat on every change</text>
+              </g>
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Stages 1&ndash;2 set up the connection. Stages 3&ndash;4 are
+              server-only work. Stage 5 is the first paint. Stage 6 is the
+              loop that runs until the socket closes.
+            </figcaption>
+          </figure>
+
+          <ol class="prv-steps" aria-label="Detailed stage breakdown">
+            <li class="prv-step">
+              <span class="prv-step-num">1</span>
+              <div class="prv-step-body">
+                <div class="prv-step-title">
+                  <h4>Connect</h4>
+                  <span class="prv-step-arrow">socket open</span>
+                </div>
+                <p>
+                  <code>App.tsx</code> reads <code>?path</code>, <code>?root</code>,
+                  and <code>?chrome</code> from the URL and calls
+                  <code>new WebSocket(&lt;basePath&gt;/ws)</code>. The server&rsquo;s
+                  HTTP upgrade handler routes that path to
+                  <code>WebSocketServer.handleUpgrade</code>, which fires
+                  <code>connection</code> and triggers
+                  <code>service.handleWebSocketConnection</code> &mdash; a
+                  fresh <code>PreviewSocketSession</code> is created with its
+                  own <code>connectionId</code>.
+                </p>
+                <span class="prv-step-files">src/client/App.tsx &middot; src/server/index.ts &middot; src/server/service.ts</span>
+              </div>
+            </li>
+
+            <li class="prv-step">
+              <span class="prv-step-num">2</span>
+              <div class="prv-step-body">
+                <div class="prv-step-title">
+                  <h4>Watch</h4>
+                  <span class="prv-step-arrow">client &rarr; server</span>
+                </div>
+                <p>
+                  On <code>open</code>, the client sends a single
+                  <code>{type:"watch", path, root?, publicBasePath}</code>
+                  message. <code>parseClientMessage</code> validates JSON and
+                  required fields, rejects on a missing path, and normalizes
+                  the optional <code>publicBasePath</code> so subsequent
+                  asset URLs use the right prefix.
+                </p>
+                <span class="prv-step-files">src/client/App.tsx &middot; src/server/service.ts</span>
+              </div>
+            </li>
+
+            <li class="prv-step">
+              <span class="prv-step-num">3</span>
+              <div class="prv-step-body">
+                <div class="prv-step-title">
+                  <h4>Resolve &amp; sandbox</h4>
+                  <span class="prv-step-arrow">server only</span>
+                </div>
+                <p>
+                  <code>createDefaultPreviewPathResolver</code> trims the path,
+                  rejects null bytes, resolves it against the configured
+                  <code>rootPath</code>, and runs
+                  <code>ensurePathInside</code> &mdash; the single check that
+                  blocks <code>..</code> escapes. Absolute paths are rejected
+                  here unless <code>allowAbsolutePaths</code> is on. The same
+                  check runs again for an optional HTML root.
+                </p>
+                <span class="prv-step-files">src/server/paths.ts</span>
+              </div>
+            </li>
+
+            <li class="prv-step">
+              <span class="prv-step-num">4</span>
+              <div class="prv-step-body">
+                <div class="prv-step-title">
+                  <h4>Branch by extension</h4>
+                  <span class="prv-step-arrow">server only</span>
+                </div>
+                <p>
+                  <code>sendUpdate</code> inspects the extension and picks one
+                  of three paths.
+                  <code>.xlsx</code> spawns the <code>heysnap-xlsxl</code> CLI,
+                  reads <code>workbook.json</code>, and rewrites every
+                  image&rsquo;s <code>assetPath</code> into a URL that lands
+                  on <code>/api/xlsx-assets/&lt;connId&gt;/&hellip;</code>.
+                  <code>.html</code>/<code>.htm</code> registers an HTML root
+                  and builds an iframe URL into
+                  <code>/api/html-preview/&lt;connId&gt;/&hellip;</code>.
+                  Everything else is read once and base64-encoded inline.
+                </p>
+                <span class="prv-step-files">src/server/service.ts &middot; src/server/xlsx.ts &middot; src/server/mime.ts</span>
+              </div>
+            </li>
+
+            <li class="prv-step">
+              <span class="prv-step-num">5</span>
+              <div class="prv-step-body">
+                <div class="prv-step-title">
+                  <h4>First emit &amp; render</h4>
+                  <span class="prv-step-arrow">server &rarr; client</span>
+                </div>
+                <p>
+                  The server sends one of <code>file</code>,
+                  <code>workbook</code>, or <code>htmlPreview</code>. The
+                  client receives, drops the <code>type</code> tag, and stores
+                  the rest as a <code>PreviewItem</code>.
+                  <code>Previewer.tsx</code> then dispatches by
+                  <code>kind</code> &mdash; PDF, DOCX, PPTX, XLSX, Markdown,
+                  code, image/video/audio, or download fallback.
+                </p>
+                <span class="prv-step-files">src/server/service.ts &middot; src/client/App.tsx &middot; src/client/Previewer.tsx</span>
+              </div>
+            </li>
+
+            <li class="prv-step">
+              <span class="prv-step-num">6</span>
+              <div class="prv-step-body">
+                <div class="prv-step-title">
+                  <h4>Live updates</h4>
+                  <span class="prv-step-arrow">repeat until close</span>
+                </div>
+                <p>
+                  A <code>chokidar</code> watcher attaches to the file (or to
+                  the HTML root for HTML previews), ignoring
+                  <code>node_modules</code>, <code>.git</code>,
+                  <code>dist</code>, and other noisy directories. Each change
+                  schedules a 20&thinsp;ms-debounced timer; on fire,
+                  <code>sendUpdate</code> runs again and the client re-keys
+                  on <code>path:mtime</code> to remount the viewer. On socket
+                  close the watcher is destroyed and the connection&rsquo;s
+                  asset directory is removed.
+                </p>
+                <span class="prv-step-files">src/server/service.ts &middot; src/client/Previewer.tsx</span>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 4. THE PROTOCOL                                              -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s4">
+          <header class="prv-section-head">
+            <h2 id="prv-s4">The protocol</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              Two messages flow from client to server. Five flow back. Every
+              message carries a literal <code>type</code> field, so dispatch on
+              either side is a single switch. Adding a new file kind starts
+              here &mdash; change <code>protocol.ts</code> and let the type
+              errors lead you to every callsite.
+            </p>
+            <p>
+              The catalog below is the entire wire vocabulary. The client
+              never sees an untyped payload, and the server never accepts one.
+            </p>
+          </div>
+
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 940 320" role="img" aria-label="Catalog of protocol messages: two from client to server, five from server to client.">
+              <defs>
+                <marker id="prv-s4-arrow-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+                <marker id="prv-s4-arrow-l" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+              </defs>
+
+              <!-- Endpoints -->
+              <g font-family="Geist, sans-serif">
+                <rect x="30" y="60" width="170" height="200" rx="12" fill="#f2f1ed" stroke="rgba(38,37,30,0.12)" />
+                <text x="115" y="100" text-anchor="middle" font-size="16" font-weight="600" fill="#26251e">Client</text>
+                <text x="115" y="122" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">src/client/App.tsx</text>
+                <text x="115" y="156" text-anchor="middle" font-size="12.5" fill="#787771">sends watch</text>
+                <text x="115" y="174" text-anchor="middle" font-size="12.5" fill="#787771">consumes 5 types</text>
+
+                <rect x="740" y="60" width="170" height="200" rx="12" fill="#f2f1ed" stroke="rgba(38,37,30,0.12)" />
+                <text x="825" y="100" text-anchor="middle" font-size="16" font-weight="600" fill="#26251e">Server</text>
+                <text x="825" y="122" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">src/server/service.ts</text>
+                <text x="825" y="156" text-anchor="middle" font-size="12.5" fill="#787771">accepts watch</text>
+                <text x="825" y="174" text-anchor="middle" font-size="12.5" fill="#787771">emits 5 types</text>
+              </g>
+
+              <!-- Top track: Client → Server -->
+              <path d="M210 110 L730 110" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s4-arrow-r)" />
+              <text x="220" y="98" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00" letter-spacing="0.06em">CLIENT &rarr; SERVER</text>
+
+              <!-- Top chips -->
+              <g font-family="Geist Mono, monospace">
+                <rect x="370" y="90" width="92" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="416" y="115" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">watch</text>
+
+                <rect x="490" y="90" width="92" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="536" y="115" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">ping</text>
+              </g>
+
+              <!-- Bottom track: Server → Client -->
+              <path d="M730 220 L210 220" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s4-arrow-l)" />
+              <text x="720" y="208" text-anchor="end" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00" letter-spacing="0.06em">SERVER &rarr; CLIENT</text>
+
+              <!-- Bottom chips: 5 evenly spaced -->
+              <g font-family="Geist Mono, monospace">
+                <rect x="240" y="200" width="80" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="280" y="225" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">file</text>
+
+                <rect x="338" y="200" width="100" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="388" y="225" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">workbook</text>
+
+                <rect x="456" y="200" width="120" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="516" y="225" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">htmlPreview</text>
+
+                <rect x="594" y="200" width="84" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="636" y="225" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">error</text>
+
+                <rect x="696" y="200" width="80" height="40" rx="999" fill="#ffffff" stroke="#F54E00" />
+                <text x="736" y="225" text-anchor="middle" font-size="13" font-weight="600" fill="#F54E00">pong</text>
+              </g>
+
+              <!-- Footer note -->
+              <text x="470" y="295" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">every payload carries a literal type field &middot; the discriminator</text>
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Seven message types across two directions. Each chip is detailed
+              below with its schema and an example payload.
+            </figcaption>
+          </figure>
+
+          <!-- ============== Client → Server ============== -->
+          <div class="prv-msg-group">
+            <span class="prv-msg-grouptag">Client &rarr; Server &middot; 2 messages</span>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">watch</span>
+                <span class="prv-msg-dir">App.tsx &rarr; PreviewSocketSession</span>
+              </div>
+              <p class="prv-msg-when">
+                Sent once on socket open after the client reads
+                <code>?path</code> from the URL. Re-sent if
+                <code>?path</code> or <code>?root</code> change &mdash; the
+                socket is torn down and a new one opens. Missing
+                <code>path</code> is rejected with an <code>error</code>.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "watch";
+  path: string;
+  root?: string;
+  publicBasePath?: string;
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "watch",
+  "path": "docs/report.pdf",
+  "root": "/Users/me/work",
+  "publicBasePath": "/preview"
+}</pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">ping</span>
+                <span class="prv-msg-dir">liveness probe</span>
+              </div>
+              <p class="prv-msg-when">
+                Optional. A host or test harness can send this to confirm the
+                socket is alive; the server replies with a matching
+                <code>pong</code> carrying the same <code>requestId</code> and
+                an ISO server timestamp.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "ping";
+  requestId?: string;
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "ping",
+  "requestId": "8c3e-1"
+}</pre>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <!-- ============== Server → Client ============== -->
+          <div class="prv-msg-group">
+            <span class="prv-msg-grouptag">Server &rarr; Client &middot; 5 messages</span>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">file</span>
+                <span class="prv-msg-dir">inline bytes &middot; non-xlsx, non-html</span>
+              </div>
+              <p class="prv-msg-when">
+                Emitted for every file kind that isn&rsquo;t a workbook or live
+                HTML. Bytes are read once and base64-encoded into
+                <code>data</code>. The MIME is computed by
+                <code>mimeForPath</code>.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "file";
+  path: string;
+  name: string;
+  mime: string;
+  size: number;
+  mtime: number;
+  data: string;   // base64
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "file",
+  "path": "docs/report.pdf",
+  "name": "report.pdf",
+  "mime": "application/pdf",
+  "size": 184523,
+  "mtime": 1716302400000,
+  "data": "JVBERi0xLjQK..."
+}</pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">workbook</span>
+                <span class="prv-msg-dir">.xlsx after CLI conversion</span>
+              </div>
+              <p class="prv-msg-when">
+                Emitted for <code>.xlsx</code> paths.
+                <code>createWorkbookPreview</code> spawns the
+                <code>heysnap-xlsxl</code> CLI, reads its
+                <code>workbook.json</code>, strips chart asset fields, and
+                rewrites every image <code>assetPath</code> into an
+                <code>assetUrl</code> that lands on
+                <code>/api/xlsx-assets/&lt;connId&gt;/&hellip;</code>.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "workbook";
+  path: string;
+  name: string;
+  mtime: number;
+  workbook: unknown;  // shape from CLI
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "workbook",
+  "path": "sheets/q3.xlsx",
+  "name": "q3.xlsx",
+  "mtime": 1716302400000,
+  "workbook": {
+    "workbook": {
+      "sheets": [ { "name": "Sheet1", ... } ]
+    }
+  }
+}</pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">htmlPreview</span>
+                <span class="prv-msg-dir">.html / .htm &middot; iframe URL</span>
+              </div>
+              <p class="prv-msg-when">
+                Emitted for <code>.html</code> and <code>.htm</code>. The
+                server registers the HTML root for this connection and returns
+                a URL into <code>/api/html-preview/&lt;connId&gt;/&hellip;</code>;
+                the client mounts it in an <code>&lt;iframe&gt;</code> keyed
+                on <code>path:mtime</code>.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "htmlPreview";
+  path: string;
+  name: string;
+  mtime: number;
+  url: string;
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "htmlPreview",
+  "path": "site/index.html",
+  "name": "index.html",
+  "mtime": 1716302400000,
+  "url": "/preview/api/html-preview/8c3e/index.html"
+}</pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">error</span>
+                <span class="prv-msg-dir">terminal for the current watch</span>
+              </div>
+              <p class="prv-msg-when">
+                Anything that goes wrong becomes a string. Common triggers:
+                bad JSON, missing <code>path</code>, path outside the sandbox,
+                <code>stat</code> says it&rsquo;s a directory, the watcher
+                errors, or the file gets <code>unlink</code>ed mid-watch.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "error";
+  message: string;
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "error",
+  "message": "File removed: docs/report.pdf"
+}</pre>
+                </div>
+              </div>
+            </article>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">pong</span>
+                <span class="prv-msg-dir">response to ping</span>
+              </div>
+              <p class="prv-msg-when">
+                Echoes the <code>requestId</code> from the original
+                <code>ping</code> and stamps the server&rsquo;s current ISO
+                time so a host can compute round-trip latency.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Schema</span>
+<pre class="prv-code">{
+  type: "pong";
+  requestId?: string;
+  serverTime: string;  // ISO 8601
+}</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Example</span>
+<pre class="prv-code">{
+  "type": "pong",
+  "requestId": "8c3e-1",
+  "serverTime": "2026-05-21T16:42:18.221Z"
+}</pre>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <!-- Client-side derivation -->
+          <div class="prv-msg-group">
+            <span class="prv-msg-grouptag">Client-side derivation</span>
+
+            <article class="prv-msg-card">
+              <div class="prv-msg-head">
+                <span class="prv-msg-type">PreviewItem</span>
+                <span class="prv-msg-dir">App.tsx state shape</span>
+              </div>
+              <p class="prv-msg-when">
+                The client drops the <code>type</code> tag and reshapes the
+                successful messages into a single discriminated union keyed by
+                <code>kind</code>. <code>Previewer.tsx</code> switches on
+                <code>kind</code> first, then on MIME and extension for the
+                generic file branch.
+              </p>
+              <div class="prv-codes">
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Type</span>
+<pre class="prv-code">type PreviewItem =
+  | { kind: "file";     file: PreviewFile }
+  | { kind: "workbook"; data: PreviewWorkbook }
+  | { kind: "html";     data: PreviewHtml };</pre>
+                </div>
+                <div class="prv-code-block">
+                  <span class="prv-code-label">Mapping</span>
+<pre class="prv-code">file        &rarr; { kind: "file", file }
+workbook    &rarr; { kind: "workbook", data }
+htmlPreview &rarr; { kind: "html", data }
+error       &rarr; setError(message)
+pong        &rarr; (ignored by viewer)</pre>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 5. THE SERVER, FILE BY FILE                                  -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s5">
+          <header class="prv-section-head">
+            <h2 id="prv-s5">The server, file by file</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              Six files do all the server work. <code>service.ts</code> is the
+              hub: it owns routing and the per-connection state machine, and
+              it pulls in the three leaves (<code>paths.ts</code>,
+              <code>mime.ts</code>, <code>xlsx.ts</code>) plus the shared
+              <code>protocol.ts</code> types. <code>index.ts</code> wraps the
+              service in a real HTTP + WebSocket listener.
+              <code>dev-server.ts</code> is an alternative entry that swaps the
+              real listener for Vite middleware.
+            </p>
+            <p>
+              The graph below names every import that matters. Cards beneath
+              expand each file with its exports, dependencies, and the part of
+              the trace it owns.
+            </p>
+          </div>
+
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 940 420" role="img" aria-label="Dependency graph of src/server: dev-server.ts and index.ts are entries that wrap service.ts, which depends on paths.ts, mime.ts, xlsx.ts, and protocol.ts.">
+              <defs>
+                <marker id="prv-s5-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+              </defs>
+
+              <!-- Lane labels -->
+              <g font-family="Geist Mono, monospace" font-size="11" font-weight="600" letter-spacing="0.08em" fill="#F54E00">
+                <text x="50" y="40">ENTRIES</text>
+                <text x="50" y="170">HUB</text>
+                <text x="50" y="320">LEAVES</text>
+              </g>
+
+              <!-- Row 1: entries -->
+              <g font-family="Geist, sans-serif">
+                <!-- dev-server.ts (alt entry) -->
+                <rect x="180" y="20" width="200" height="70" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.28)" stroke-dasharray="5 4" />
+                <text x="196" y="46" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">../dev-server.ts</text>
+                <text x="196" y="66" font-size="12.5" fill="#787771">Vite playground</text>
+                <text x="196" y="82" font-size="12.5" fill="#787771">alt entry &middot; pnpm dev</text>
+
+                <!-- index.ts (main entry) -->
+                <rect x="560" y="20" width="200" height="70" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="576" y="46" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">index.ts</text>
+                <text x="576" y="66" font-size="12.5" fill="#787771">HTTP + WS host</text>
+                <text x="576" y="82" font-size="12.5" fill="#787771">startPreviewServer</text>
+              </g>
+              <!-- Arrow: dev-server.ts → index.ts -->
+              <path d="M380 55 L560 55" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s5-arrow)" />
+              <text x="470" y="48" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">wraps</text>
+
+              <!-- Row 2: hub + protocol -->
+              <g font-family="Geist, sans-serif">
+                <rect x="370" y="150" width="200" height="70" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="386" y="176" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">service.ts</text>
+                <text x="386" y="196" font-size="12.5" fill="#787771">PreviewService + Session</text>
+                <text x="386" y="212" font-size="12.5" fill="#787771">routing, watcher, debounce</text>
+
+                <rect x="720" y="150" width="190" height="70" rx="10" fill="#fdf0e8" stroke="rgba(245,78,0,0.35)" />
+                <text x="736" y="176" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">../protocol.ts</text>
+                <text x="736" y="196" font-size="12.5" fill="#787771">shared types</text>
+                <text x="736" y="212" font-size="12.5" fill="#787771">PreviewClientMessage&hellip;</text>
+              </g>
+              <!-- Arrow: index.ts → service.ts -->
+              <path d="M660 90 L470 150" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s5-arrow)" />
+              <!-- Arrow: service.ts → protocol.ts -->
+              <path d="M570 185 L720 185" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s5-arrow)" />
+              <text x="645" y="178" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" fill="#787771">types</text>
+
+              <!-- Row 3: leaves -->
+              <g font-family="Geist, sans-serif">
+                <rect x="60" y="300" width="200" height="70" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="76" y="326" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">paths.ts</text>
+                <text x="76" y="346" font-size="12.5" fill="#787771">Sandbox &amp; resolver</text>
+                <text x="76" y="362" font-size="12.5" fill="#787771">ensurePathInside</text>
+
+                <rect x="370" y="300" width="200" height="70" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="386" y="326" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">mime.ts</text>
+                <text x="386" y="346" font-size="12.5" fill="#787771">Extension &rarr; MIME</text>
+                <text x="386" y="362" font-size="12.5" fill="#787771">lookup table</text>
+
+                <rect x="680" y="300" width="200" height="70" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="696" y="326" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#26251e">xlsx.ts</text>
+                <text x="696" y="346" font-size="12.5" fill="#787771">Workbook conversion</text>
+                <text x="696" y="362" font-size="12.5" fill="#787771">spawns heysnap-xlsxl</text>
+              </g>
+              <!-- Arrows: service.ts → leaves -->
+              <path d="M420 220 L200 300" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s5-arrow)" />
+              <path d="M470 220 L470 300" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s5-arrow)" />
+              <path d="M540 220 L740 300" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s5-arrow)" />
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Arrows point from importer to imported. Dashed border marks an
+              alternative entry; the orange-tinted box is the shared types
+              file imported from outside <code>src/server</code>.
+            </figcaption>
+          </figure>
+
+          <div class="prv-srv-list">
+            <!-- index.ts -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/server/index.ts</span>
+                <h4>HTTP + WebSocket host &middot; the turnkey entry</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Wraps <code>service.ts</code> in a real Node listener.
+                  Creates an <code>http.Server</code> that forwards every
+                  request to <code>service.handleRequest</code>, and a
+                  <code>WebSocketServer({ noServer: true })</code> that takes
+                  the <code>upgrade</code> event and binds the socket to a new
+                  <code>PreviewSocketSession</code> via
+                  <code>bindPreviewWebSocketServer</code>.
+                </p>
+                <p>
+                  Returns a <code>RunningPreviewServer</code> handle with the
+                  bound URL, the base path, the websocket path, and a
+                  <code>stop()</code> that closes both servers cleanly. Also
+                  re-exports the path utilities and the protocol types so
+                  hosts only need to import this one module.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">startPreviewServer</span>
+                    <span class="prv-srv-chip">RunningPreviewServer</span>
+                    <span class="prv-srv-chip">StartPreviewServerOptions</span>
+                    <span class="prv-srv-chip">re-exports service.ts</span>
+                    <span class="prv-srv-chip">re-exports paths.ts</span>
+                    <span class="prv-srv-chip">re-exports protocol.ts</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">node:http</span>
+                    <span class="prv-srv-chip">ws</span>
+                    <span class="prv-srv-chip">./service</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns in trace</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Stage 1 &middot; upgrade routing</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- service.ts -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/server/service.ts</span>
+                <h4><code>PreviewService</code> + <code>PreviewSocketSession</code> &middot; the core</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Two classes do everything. <code>PreviewService</code> is
+                  stateless across requests: it routes
+                  <code>/api/health</code>, <code>/api/html-preview/*</code>,
+                  <code>/api/xlsx-assets/*</code>, and the SPA shell;
+                  injects the <code>publicBasePath</code> into
+                  <code>index.html</code>; and builds asset URLs that consumers
+                  can fetch later. It also keeps two connection-keyed maps:
+                  <code>htmlRoots</code> and <code>xlsxAssetDirs</code>.
+                </p>
+                <p>
+                  <code>PreviewSocketSession</code> is per-connection.
+                  It parses every incoming message, calls
+                  <code>resolveWatchPath</code>, tears down any prior watcher
+                  via <code>replaceWatch</code>, fires
+                  <code>sendUpdate</code> immediately, and starts a chokidar
+                  watcher with a 20&thinsp;ms debounce. Each subsequent
+                  change re-enters <code>sendUpdate</code>, which branches by
+                  extension into <code>sendBytes</code>,
+                  <code>sendHtmlPreview</code>, or
+                  <code>sendWorkbook</code>.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">PreviewService</span>
+                    <span class="prv-srv-chip">createPreviewService</span>
+                    <span class="prv-srv-chip">bindPreviewWebSocketServer</span>
+                    <span class="prv-srv-chip">PreviewServiceOptions</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">ws</span>
+                    <span class="prv-srv-chip">chokidar</span>
+                    <span class="prv-srv-chip">./paths</span>
+                    <span class="prv-srv-chip">./mime</span>
+                    <span class="prv-srv-chip">./xlsx</span>
+                    <span class="prv-srv-chip">../protocol</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns in trace</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Stages 2 &middot; 4 &middot; 5 &middot; 6</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- paths.ts -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/server/paths.ts</span>
+                <h4>The security boundary</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Small file, load-bearing.
+                  <code>createDefaultPreviewPathResolver</code> normalizes the
+                  incoming path, rejects empty strings and null bytes, and
+                  &mdash; unless <code>allowAbsolutePaths</code> is set
+                  &mdash; resolves it against the configured
+                  <code>rootPath</code>. The actual sandbox check is
+                  <code>ensurePathInside</code>: a one-liner that compares the
+                  resolved absolute path against the root and throws a
+                  <code>PreviewPathError</code> if it escapes.
+                </p>
+                <p>
+                  Also owns the URL-side helpers <code>normalizeBasePath</code>
+                  (ensures leading slash, no trailing slash) and
+                  <code>stripBasePath</code> (subtracts the base from an
+                  incoming request URL).
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">createDefaultPreviewPathResolver</span>
+                    <span class="prv-srv-chip">ensurePathInside</span>
+                    <span class="prv-srv-chip">normalizeBasePath</span>
+                    <span class="prv-srv-chip">stripBasePath</span>
+                    <span class="prv-srv-chip">PreviewPathError</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">node:path</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns in trace</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Stage 3 &middot; resolve + sandbox</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- mime.ts -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/server/mime.ts</span>
+                <h4>Extension &rarr; MIME lookup</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  A static lookup table behind one function,
+                  <code>mimeForPath</code>. Used in two places: to set the
+                  <code>Content-Type</code> on HTTP asset responses
+                  (<code>/api/html-preview/*</code>,
+                  <code>/api/xlsx-assets/*</code>, and the SPA client assets)
+                  and to populate the <code>mime</code> field on the
+                  <code>file</code> message. Unknown extensions fall back to
+                  <code>application/octet-stream</code>.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">mimeForPath</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">node:path</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns in trace</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Stage 4 &middot; mime tag</span>
+                    <span class="prv-srv-chip">Stage 5 &middot; asset Content-Type</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- xlsx.ts -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/server/xlsx.ts</span>
+                <h4>Workbook conversion bridge &middot; pluggable</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Bridges <code>.xlsx</code> bytes to the JSON shape the XLSX
+                  viewer expects. <code>createWorkbookPreview</code> makes a
+                  per-connection asset directory under
+                  <code>os.tmpdir()/heysnap-previewer-xlsx</code>, runs
+                  conversion, and returns
+                  <code>{ assetId, assetDirectory, workbook }</code>. The
+                  default conversion spawns the <code>heysnap-xlsxl</code> CLI
+                  with a 60&thinsp;s timeout and reads its
+                  <code>workbook.json</code>; consumers can swap that with the
+                  <code>convertXlsxToWorkbook</code> option.
+                </p>
+                <p>
+                  After conversion, <code>attachWorkbookAssetUrls</code> walks
+                  every sheet&rsquo;s drawings and images and rewrites each
+                  <code>assetPath</code> into a URL that lands on
+                  <code>/api/xlsx-assets/&lt;connId&gt;/&hellip;</code>.
+                  <code>stripWorkbookChartAssets</code> removes chart asset
+                  fields from the JSON &mdash; charts are not previewed.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">createWorkbookPreview</span>
+                    <span class="prv-srv-chip">attachWorkbookAssetUrls</span>
+                    <span class="prv-srv-chip">readWorkbookJson</span>
+                    <span class="prv-srv-chip">PreviewXlsxOptions</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">node:child_process</span>
+                    <span class="prv-srv-chip">node:fs/promises</span>
+                    <span class="prv-srv-chip">node:os</span>
+                    <span class="prv-srv-chip">heysnap-xlsxl (CLI)</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns in trace</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Stage 4 &middot; xlsx branch</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- dev-server.ts -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/dev-server.ts</span>
+                <h4>Vite playground &middot; alternative entry</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  The reference example of embedding the service. Instead of
+                  the production <code>http.Server</code> from
+                  <code>index.ts</code>, it pairs the same
+                  <code>PreviewService</code> with Vite&rsquo;s dev middleware
+                  behind one Node listener. <code>/preview/api/*</code> routes
+                  go to the service; everything else falls through to Vite,
+                  which serves <code>index.html</code> through its
+                  <code>transformIndexHtml</code> and injects the base-path
+                  placeholders.
+                </p>
+                <p>
+                  Reads every knob from environment variables (see Section 07)
+                  so you can point it at any project root and (optionally)
+                  pre-open a specific file via <code>PREVIEW_PATH</code>.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Entry</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">pnpm --filter @ank1015-app/previewer dev</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">vite</span>
+                    <span class="prv-srv-chip">ws</span>
+                    <span class="prv-srv-chip">./server/index</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Why it exists</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">HMR for the client</span>
+                    <span class="prv-srv-chip">embed reference</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 6. THE CLIENT, FILE BY FILE                                  -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s6">
+          <header class="prv-section-head">
+            <h2 id="prv-s6">The client, file by file</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              Four files cover the entire browser side. <code>main.tsx</code>
+              is a one-screen React bootstrap. <code>App.tsx</code> owns the
+              WebSocket lifecycle and the URL contract. <code>Previewer.tsx</code>
+              is a pure router: given a <code>PreviewItem</code>, it picks one
+              of nine concrete components and hands it the file data.
+              <code>styles.css</code> carries the dark-theme tokens and shell
+              layout.
+            </p>
+            <p>
+              Cards below detail each file. After them, a two-stage decision
+              tree shows exactly how <code>Previewer.tsx</code> turns a
+              message into a viewer.
+            </p>
+          </div>
+
+          <div class="prv-srv-list">
+            <!-- main.tsx -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/client/main.tsx</span>
+                <h4>React bootstrap</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Imports the three Geist font weights, the
+                  <code>heysnap-web-viewers</code> stylesheet, and
+                  <code>./styles.css</code> in that order so global tokens are
+                  available before any viewer mounts. Looks up
+                  <code>#root</code>, throws if missing, and mounts
+                  <code>&lt;App /&gt;</code> inside <code>&lt;StrictMode&gt;</code>
+                  with React 18&rsquo;s <code>createRoot</code>.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Side effects</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">@fontsource/geist-sans 400/500/600</span>
+                    <span class="prv-srv-chip">heysnap-web-viewers/style.css</span>
+                    <span class="prv-srv-chip">./styles.css</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">react</span>
+                    <span class="prv-srv-chip">react-dom/client</span>
+                    <span class="prv-srv-chip">./App</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- App.tsx -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/client/App.tsx</span>
+                <h4>URL &rarr; WebSocket &rarr; state</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  <code>usePreviewQuery</code> reads <code>?path</code>,
+                  <code>?root</code>, and <code>?chrome</code> from
+                  <code>window.location.search</code>. With no path, the
+                  component renders <code>PreviewPlayground</code> &mdash; a
+                  tiny form that just updates the URL.
+                </p>
+                <p>
+                  The main <code>useEffect</code> opens
+                  <code>new WebSocket(buildPreviewWebSocketUrl())</code>,
+                  drives a four-state machine (<code>idle &middot; connecting
+                  &middot; open &middot; closed</code>), and on
+                  <code>open</code> sends one <code>watch</code> message
+                  carrying the path, optional root, and the
+                  <code>publicBasePath</code> read from the injected
+                  <code>window.__HEYSNAP_PREVIEWER_BASE_PATH__</code>. Incoming
+                  messages flow through <code>handlePreviewMessage</code>,
+                  which maps the five server message types to
+                  <code>setItem</code> / <code>setError</code>. A
+                  <code>cancelled</code> flag and the cleanup function close
+                  the socket on unmount so React Strict Mode&rsquo;s
+                  double-invoke is safe.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">App</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Reads</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">?path</span>
+                    <span class="prv-srv-chip">?root</span>
+                    <span class="prv-srv-chip">?chrome</span>
+                    <span class="prv-srv-chip">window.__HEYSNAP_PREVIEWER_BASE_PATH__</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Depends on</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">react</span>
+                    <span class="prv-srv-chip">../protocol</span>
+                    <span class="prv-srv-chip">./Previewer</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns in trace</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Stages 1 &middot; 2 &middot; 5 &middot; 6</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- Previewer.tsx -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/client/Previewer.tsx</span>
+                <h4>The viewer router</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Pure dispatch. The top-level switch is on
+                  <code>item.kind</code>: <code>workbook</code> renders an
+                  <code>HeySnapXlsxViewer</code> with the parsed workbook
+                  JSON; <code>html</code> renders an <code>&lt;iframe&gt;</code>
+                  whose <code>src</code> is the server-built URL with
+                  <code>v=&lt;mtime&gt;</code> appended to bust the cache;
+                  <code>file</code> falls into <code>renderFile()</code>.
+                </p>
+                <p>
+                  <code>renderFile()</code> checks MIME and extension in this
+                  order: PDF, DOCX, PPTX, Markdown, code. Each branch
+                  decodes the base64 via <code>base64ToBytes</code> &mdash;
+                  <code>useMemo</code>&rsquo;d so re-renders don&rsquo;t
+                  re-decode &mdash; and feeds the corresponding
+                  <code>heysnap-web-viewers</code> component with dark-theme
+                  props. The fallback path handles
+                  <code>image/</code>, <code>video/</code>,
+                  <code>audio/</code>, <code>text/</code> &middot;
+                  <code>json</code> &middot; <code>xml</code>, and finally a
+                  download link for everything else.
+                </p>
+                <p>
+                  Every viewer is keyed on
+                  <code>${file.path}:${file.mtime}</code> so a change on disk
+                  remounts the component cleanly, throwing away any internal
+                  viewer state from the previous version.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Exports</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">Previewer</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Viewer deps</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">HeySnapPdfViewer</span>
+                    <span class="prv-srv-chip">HeySnapDocxViewer</span>
+                    <span class="prv-srv-chip">HeySnapPPTViewer</span>
+                    <span class="prv-srv-chip">HeySnapXlsxViewer</span>
+                    <span class="prv-srv-chip">HeySnapMarkdownViewer</span>
+                    <span class="prv-srv-chip">HeySnapCodeViewer</span>
+                  </div>
+                </div>
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Env</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">VITE_PPT_SERVER_URL</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- styles.css -->
+            <article class="prv-srv-card">
+              <header class="prv-srv-head">
+                <span class="prv-srv-path">src/client/styles.css</span>
+                <h4>Dark-theme shell &amp; iframe layout</h4>
+              </header>
+              <div class="prv-srv-body">
+                <p>
+                  Owns the preview shell layout (<code>.preview-shell</code>,
+                  <code>.preview-shell-embedded</code>) used when
+                  <code>?chrome=0</code> is set, the connection status pill
+                  driven by <code>data-state</code>, the
+                  <code>&lt;iframe&gt;</code> sizing rules for HTML previews,
+                  and the dark backgrounds passed into the viewer components.
+                </p>
+              </div>
+              <div class="prv-srv-meta">
+                <div class="prv-srv-row">
+                  <span class="prv-srv-rowlabel">Owns</span>
+                  <div class="prv-srv-chips">
+                    <span class="prv-srv-chip">.preview-shell</span>
+                    <span class="prv-srv-chip">.preview-status[data-state]</span>
+                    <span class="prv-srv-chip">.preview-html-frame</span>
+                    <span class="prv-srv-chip">.preview-xlsx-shell</span>
+                    <span class="prv-srv-chip">.preview-playground</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <!-- Viewer decision tree (two-stage) -->
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 940 660" role="img" aria-label="Two-stage viewer routing decision tree used by Previewer.tsx.">
+              <defs>
+                <marker id="prv-s6-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+              </defs>
+
+              <!-- Stage label -->
+              <text x="470" y="28" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" font-weight="600" fill="#F54E00" letter-spacing="0.08em">STAGE 1 &middot; switch(item.kind)</text>
+
+              <!-- Root -->
+              <g font-family="Geist, sans-serif">
+                <rect x="380" y="46" width="180" height="46" rx="10" fill="#fdf0e8" stroke="rgba(245,78,0,0.35)" />
+                <text x="470" y="68" text-anchor="middle" font-size="14" font-weight="600" fill="#26251e">PreviewItem</text>
+                <text x="470" y="84" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" fill="#787771">discriminator: kind</text>
+              </g>
+
+              <!-- Branches to kind labels -->
+              <g fill="none" stroke="#F54E00" stroke-width="1.6">
+                <path d="M470 92 L180 130" marker-end="url(#prv-s6-arrow)" />
+                <path d="M470 92 L470 130" marker-end="url(#prv-s6-arrow)" />
+                <path d="M470 92 L760 130" marker-end="url(#prv-s6-arrow)" />
+              </g>
+
+              <!-- Kind boxes -->
+              <g font-family="Geist, sans-serif">
+                <rect x="90" y="140" width="180" height="64" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="180" y="164" text-anchor="middle" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#F54E00">kind === "workbook"</text>
+                <text x="180" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#26251e">&lt;HeySnapXlsxViewer&gt;</text>
+
+                <rect x="380" y="140" width="180" height="64" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="470" y="164" text-anchor="middle" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#F54E00">kind === "html"</text>
+                <text x="470" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#26251e">&lt;iframe src={url}&gt;</text>
+
+                <rect x="670" y="140" width="180" height="64" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="760" y="164" text-anchor="middle" font-family="Geist Mono, monospace" font-size="13" font-weight="600" fill="#F54E00">kind === "file"</text>
+                <text x="760" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#26251e">renderFile(file)</text>
+              </g>
+
+              <!-- Arrow down from "file" branch into stage 2 -->
+              <path d="M760 204 L760 230 L470 230 L470 264" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s6-arrow)" />
+
+              <!-- Stage 2 label -->
+              <text x="470" y="290" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" font-weight="600" fill="#F54E00" letter-spacing="0.08em">STAGE 2 &middot; renderFile() &middot; mime + extension ladder</text>
+
+              <!-- Ladder rows -->
+              <!-- Row helper: at x=40 condition, x=540 arrow, x=580 result -->
+              <g font-family="Geist, sans-serif">
+                <!-- Row 1: PDF -->
+                <rect x="40" y="306" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="330" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">mime === "application/pdf" || ext .pdf</text>
+                <path d="M530 324 L575 324" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="306" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="330" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapPdfViewer&gt;</text>
+
+                <!-- Row 2: DOCX -->
+                <rect x="40" y="350" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="374" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">mime === DOCX_MIME || ext .docx</text>
+                <path d="M530 368 L575 368" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="350" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="374" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapDocxViewer&gt;</text>
+
+                <!-- Row 3: PPTX -->
+                <rect x="40" y="394" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="418" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">mime === PPTX_MIME || ext .pptx</text>
+                <path d="M530 412 L575 412" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="394" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="418" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapPPTViewer serverUrl=&hellip;&gt;</text>
+
+                <!-- Row 4: Markdown -->
+                <rect x="40" y="438" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="462" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">isMarkdown(file) &middot; .md .markdown .mdx</text>
+                <path d="M530 456 L575 456" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="438" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="462" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapMarkdownViewer&gt;</text>
+
+                <!-- Row 5: Code -->
+                <rect x="40" y="482" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="506" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">isCode(file) &middot; CODE_EXTENSIONS or text/*</text>
+                <path d="M530 500 L575 500" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="482" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="506" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">&lt;HeySnapCodeViewer theme="vs-dark"&gt;</text>
+
+                <!-- Row 6: Fallback -->
+                <rect x="40" y="526" width="480" height="36" rx="8" fill="#faf9f5" stroke="rgba(38,37,30,0.08)" />
+                <text x="56" y="550" font-family="Geist Mono, monospace" font-size="12.5" fill="#26251e">else &rarr; FallbackPreview(file)</text>
+                <path d="M530 544 L575 544" fill="none" stroke="#F54E00" stroke-width="1.4" marker-end="url(#prv-s6-arrow)" />
+                <rect x="585" y="526" width="315" height="36" rx="8" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="600" y="550" font-family="Geist Mono, monospace" font-size="12.5" font-weight="600" fill="#26251e">see fallback sub-routing below</text>
+              </g>
+
+              <!-- Fallback sub-routing strip -->
+              <g font-family="Geist, sans-serif">
+                <rect x="40" y="586" width="860" height="56" rx="10" fill="#fdf0e8" stroke="rgba(245,78,0,0.25)" />
+                <text x="56" y="608" font-family="Geist Mono, monospace" font-size="11.5" font-weight="600" fill="#F54E00" letter-spacing="0.06em">FALLBACK &middot; by mime prefix</text>
+                <g font-family="Geist Mono, monospace" font-size="12" fill="#26251e">
+                  <text x="56" y="630">image/* &rarr; &lt;img&gt;</text>
+                  <text x="220" y="630">video/* &rarr; &lt;video controls&gt;</text>
+                  <text x="430" y="630">audio/* &rarr; &lt;audio controls&gt;</text>
+                  <text x="640" y="630">text|json|xml &rarr; &lt;pre&gt;</text>
+                  <text x="820" y="630">else &rarr; &lt;a download&gt;</text>
+                </g>
+              </g>
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Stage 1 picks one of three top-level viewers. Stage 2 walks the
+              MIME-then-extension ladder; whatever falls past the last rule
+              lands in <code>FallbackPreview</code>, whose own sub-routing is
+              shown along the bottom strip.
+            </figcaption>
+          </figure>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 7. INTEGRATION & OPERATION                                   -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s7">
+          <header class="prv-section-head">
+            <h2 id="prv-s7">Integration &amp; operation</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              Two entry points cover almost every host. Pick
+              <code>startPreviewServer</code> for a turnkey HTTP + WebSocket
+              listener you can bind a port to. Pick
+              <code>createPreviewService</code> when you already own the HTTP
+              host &mdash; mount its request handler under any base path and
+              bind its WebSocket server to your existing upgrade event.
+            </p>
+            <p>
+              The same <code>PreviewServiceOptions</code> drive both. The
+              tables below name every knob, and the proxy notes at the bottom
+              cover the one piece of configuration that&rsquo;s easy to miss.
+            </p>
+          </div>
+
+          <!-- Two ways to host -->
+          <div class="prv-subhead">
+            <h3>Two ways to host</h3>
+            <p>Pick the turnkey listener, or embed the service in your own server.</p>
+          </div>
+          <div class="prv-host-grid">
+            <article class="prv-host-card">
+              <span class="prv-host-best">Turnkey</span>
+              <h4>startPreviewServer</h4>
+              <p>
+                One call. Binds an <code>http.Server</code> + a
+                <code>WebSocketServer</code>, hooks them together, and returns
+                a handle with <code>url</code>, <code>basePath</code>,
+                <code>websocketPath</code>, and <code>stop()</code>.
+              </p>
+<pre class="prv-code">import { startPreviewServer } from "@ank1015-app/previewer";
+
+const preview = await startPreviewServer({
+  rootPath: "/workspaces/project",
+  port: 4719,
+});
+
+console.log(preview.url);
+// =&gt; http://127.0.0.1:4719/preview
+
+// later
+await preview.stop();</pre>
+            </article>
+
+            <article class="prv-host-card">
+              <span class="prv-host-best">Embedded</span>
+              <h4>createPreviewService</h4>
+              <p>
+                Bring your own <code>http.Server</code> and
+                <code>WebSocketServer</code>. Forward HTTP traffic under
+                <code>service.basePath</code> to
+                <code>service.handleRequest</code>; route the
+                <code>upgrade</code> event for
+                <code>service.websocketPath</code> to your WS server.
+              </p>
+<pre class="prv-code">import { createServer } from "node:http";
+import { WebSocketServer } from "ws";
+import {
+  createPreviewService,
+  bindPreviewWebSocketServer,
+} from "@ank1015-app/previewer";
+
+const service = createPreviewService({
+  rootPath: process.cwd(),
+  basePath: "/preview",
+});
+
+const wss = new WebSocketServer({ noServer: true });
+bindPreviewWebSocketServer(wss, service);
+
+const server = createServer((req, res) =&gt; {
+  void service.handleRequest(req, res);
+});
+
+server.on("upgrade", (req, socket, head) =&gt; {
+  const url = new URL(req.url ?? "/", "http://x");
+  if (url.pathname !== service.websocketPath) {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) =&gt;
+    wss.emit("connection", ws, req)
+  );
+});
+
+server.listen(4719);</pre>
+            </article>
+          </div>
+
+          <!-- Configuration table -->
+          <div class="prv-subhead">
+            <h3>Configuration surface</h3>
+            <p>Every option <code>createPreviewService</code> &middot; <code>startPreviewServer</code> accepts.</p>
+          </div>
+          <div class="prv-table-wrap">
+            <table class="prv-table">
+              <thead>
+                <tr>
+                  <th style="width: 26%;">Option</th>
+                  <th style="width: 22%;">Default</th>
+                  <th>Purpose</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="prv-table-key">basePath</td>
+                  <td class="prv-table-default">"/preview"</td>
+                  <td>URL prefix the service answers under. The WebSocket lives at <code>&lt;basePath&gt;/ws</code>.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">clientRoot</td>
+                  <td class="prv-table-default-muted">dist/client</td>
+                  <td>Directory of the built SPA. Falls back to the bundled <code>dist/client</code> relative to the package.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">rootPath</td>
+                  <td class="prv-table-default-muted">&mdash;</td>
+                  <td>Filesystem sandbox root. Required unless you pass a custom <code>resolvePath</code> or allow absolute paths.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">allowAbsolutePaths</td>
+                  <td class="prv-table-default">false</td>
+                  <td>Permits absolute paths to bypass the <code>rootPath</code> check. Off by default.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">resolvePath</td>
+                  <td class="prv-table-default-muted">default resolver</td>
+                  <td>Custom <code>PreviewPathResolver</code>. Replace this if your host has its own filesystem abstraction.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">debounceMs</td>
+                  <td class="prv-table-default">20</td>
+                  <td>Coalesce window for chokidar change events. Bump it for editors that write in many passes.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">convertXlsxToWorkbook</td>
+                  <td class="prv-table-default-muted">heysnap-xlsxl CLI</td>
+                  <td>Swap the default CLI spawn for any <code>(input) =&gt; Promise&lt;workbook&gt;</code>.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">xlsxCliBin</td>
+                  <td class="prv-table-default">"heysnap-xlsxl"</td>
+                  <td>Override the CLI binary name or path when the default isn&rsquo;t on <code>PATH</code>.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">xlsxCliTimeoutMs</td>
+                  <td class="prv-table-default">60000</td>
+                  <td>Hard kill the CLI if it takes longer than this. Errors surface as an <code>error</code> message.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">xlsxAssetRoot</td>
+                  <td class="prv-table-default-muted">os.tmpdir() + /heysnap-previewer-xlsx</td>
+                  <td>Where the per-connection workbook asset directories live. Cleaned up on socket close.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">port</td>
+                  <td class="prv-table-default">4719</td>
+                  <td><code>startPreviewServer</code> only. Pass <code>0</code> to bind a random free port.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">host</td>
+                  <td class="prv-table-default">"127.0.0.1"</td>
+                  <td><code>startPreviewServer</code> only. Use <code>0.0.0.0</code> to expose on every interface.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Env vars table -->
+          <div class="prv-subhead">
+            <h3>Dev playground env vars</h3>
+            <p>All read by <code>src/dev-server.ts</code> when you run <code>pnpm dev</code>.</p>
+          </div>
+          <div class="prv-table-wrap">
+            <table class="prv-table">
+              <thead>
+                <tr>
+                  <th style="width: 30%;">Variable</th>
+                  <th style="width: 22%;">Default</th>
+                  <th>What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="prv-table-key">HOST</td>
+                  <td class="prv-table-default">127.0.0.1</td>
+                  <td>Interface the dev server binds to.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PORT</td>
+                  <td class="prv-table-default">4719</td>
+                  <td>Port to listen on.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PREVIEW_BASE_PATH</td>
+                  <td class="prv-table-default">/preview</td>
+                  <td>Base path for the SPA and the service routes.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PREVIEW_ROOT</td>
+                  <td class="prv-table-default">process.cwd()</td>
+                  <td>Sandbox root. All <code>?path</code> values resolve against this.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PREVIEW_ALLOW_ABSOLUTE</td>
+                  <td class="prv-table-default">true</td>
+                  <td>Set to <code>false</code> to require all paths to live inside <code>PREVIEW_ROOT</code>.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PREVIEW_PATH</td>
+                  <td class="prv-table-default-muted">&mdash;</td>
+                  <td>If set, the dev URL is opened with <code>?path</code> pre-filled.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PREVIEW_HTML_ROOT</td>
+                  <td class="prv-table-default-muted">&mdash;</td>
+                  <td>If set, also pre-fills <code>?root</code> for HTML previews.</td>
+                </tr>
+                <tr>
+                  <td class="prv-table-key">PREVIEWER_OPEN</td>
+                  <td class="prv-table-default">true</td>
+                  <td>On macOS, auto-opens the dev URL. Set to <code>false</code> to skip.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Proxy diagram -->
+          <div class="prv-subhead">
+            <h3>Mounting behind a proxy</h3>
+            <p>How the previewer learns its public URL when something else owns the front door.</p>
+          </div>
+          <figure class="prv-diagram">
+            <svg viewBox="0 0 940 260" role="img" aria-label="Proxy flow: browser to public proxy to internal previewer service, with publicBasePath traveling through both directions.">
+              <defs>
+                <marker id="prv-s7-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
+                </marker>
+                <marker id="prv-s7-arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#787771" />
+                </marker>
+              </defs>
+
+              <!-- Browser -->
+              <g font-family="Geist, sans-serif">
+                <rect x="40" y="80" width="180" height="80" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="130" y="106" text-anchor="middle" font-size="14" font-weight="600" fill="#26251e">Browser</text>
+                <text x="130" y="126" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">public URL</text>
+                <text x="130" y="144" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">/docs/preview/?path=&hellip;</text>
+              </g>
+
+              <!-- Proxy -->
+              <g font-family="Geist, sans-serif">
+                <rect x="360" y="80" width="220" height="80" rx="10" fill="#fdf0e8" stroke="rgba(245,78,0,0.35)" />
+                <text x="470" y="106" text-anchor="middle" font-size="14" font-weight="600" fill="#26251e">Reverse proxy</text>
+                <text x="470" y="126" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">strips /docs prefix</text>
+                <text x="470" y="144" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">adds x-heysnap-preview-&hellip;</text>
+              </g>
+
+              <!-- Previewer -->
+              <g font-family="Geist, sans-serif">
+                <rect x="720" y="80" width="180" height="80" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
+                <text x="810" y="106" text-anchor="middle" font-size="14" font-weight="600" fill="#26251e">Previewer</text>
+                <text x="810" y="126" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">basePath: /preview</text>
+                <text x="810" y="144" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11.5" fill="#787771">listens on 4719</text>
+              </g>
+
+              <!-- Arrows -->
+              <path d="M220 110 L360 110" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s7-arrow)" />
+              <text x="290" y="100" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">request</text>
+
+              <path d="M580 110 L720 110" fill="none" stroke="#F54E00" stroke-width="1.6" marker-end="url(#prv-s7-arrow)" />
+              <text x="650" y="100" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" font-weight="600" fill="#F54E00">forward</text>
+
+              <path d="M720 140 L580 140" fill="none" stroke="#787771" stroke-width="1.4" marker-end="url(#prv-s7-arrow-soft)" />
+              <text x="650" y="158" text-anchor="middle" font-family="Geist Mono, monospace" font-size="11" fill="#787771">assetUrl uses /docs/preview/&hellip;</text>
+
+              <path d="M360 140 L220 140" fill="none" stroke="#787771" stroke-width="1.4" marker-end="url(#prv-s7-arrow-soft)" />
+
+              <!-- Footer caption with the two equivalent signals -->
+              <g font-family="Geist Mono, monospace">
+                <text x="470" y="208" text-anchor="middle" font-size="12" font-weight="600" fill="#F54E00" letter-spacing="0.06em">TWO EQUIVALENT SIGNALS</text>
+                <text x="470" y="228" text-anchor="middle" font-size="12" fill="#26251e">watch message: { publicBasePath: "/docs/preview" }</text>
+                <text x="470" y="246" text-anchor="middle" font-size="12" fill="#26251e">HTTP header: x-heysnap-preview-public-base-path: /docs/preview</text>
+              </g>
+            </svg>
+            <figcaption class="prv-diagram-caption">
+              Either signal makes the server build asset URLs (HTML iframe
+              <code>url</code>, workbook image <code>assetUrl</code>) against
+              the public prefix instead of the internal <code>basePath</code>.
+            </figcaption>
+          </figure>
+
+          <div class="prv-callout">
+            <span class="prv-callout-label">Two equivalent signals</span>
+            <p>
+              The client sends <code>publicBasePath</code> in the
+              <code>watch</code> message; the proxy can additionally forward
+              the <code>x-heysnap-preview-public-base-path</code> HTTP header.
+              Whichever the server sees first wins. If neither is set the
+              server falls back to its internal <code>basePath</code>, which
+              is fine when the previewer is exposed directly.
+            </p>
+          </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- 8. EDGE CASES & GOTCHAS                                      -->
+        <!-- ============================================================ -->
+        <section class="prv-section" aria-labelledby="prv-s8">
+          <header class="prv-section-head">
+            <h2 id="prv-s8">Edge cases &amp; gotchas</h2>
+          </header>
+
+          <div class="prv-prose">
+            <p>
+              Small details that change behavior in ways that aren&rsquo;t
+              obvious from the type signatures. Each card names the file and
+              the rule, in case you ever need to re-find it in source.
+            </p>
+          </div>
+
+          <div class="prv-gotcha-grid">
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Routing</span>
+              <h4>HTML wins over &ldquo;HTML as code&rdquo;</h4>
+              <p>
+                A <code>.html</code> or <code>.htm</code> file becomes an
+                <code>htmlPreview</code> message and renders in an iframe.
+                The server&rsquo;s extension check
+                (<code>isHtmlPath</code> in <code>service.ts</code>) runs
+                before the generic file branch, so the code viewer never sees
+                it &mdash; even though <code>.html</code> is in the client&rsquo;s
+                <code>CODE_EXTENSIONS</code> set.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Workbooks</span>
+              <h4>Charts are stripped from workbooks</h4>
+              <p>
+                <code>stripWorkbookChartAssets</code> in
+                <code>xlsx.ts</code> walks every sheet and deletes
+                <code>assetPath</code>, <code>assetUrl</code>,
+                <code>renderedAssetPath</code>, and
+                <code>renderedAssetUrl</code> from chart objects before
+                sending. Images survive with rewritten
+                <code>assetUrl</code>s; charts will not render.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Lifecycle</span>
+              <h4>File removed is not a new state</h4>
+              <p>
+                When chokidar fires <code>unlink</code>, the session sends an
+                <code>error</code> message
+                (<code>"File removed: &lt;publicPath&gt;"</code>) rather than a
+                new item kind. The viewer stays mounted; only the error
+                banner appears.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Watcher</span>
+              <h4>Noisy directories are always ignored</h4>
+              <p>
+                The chokidar <code>ignored</code> regex in
+                <code>replaceWatch</code> skips
+                <code>node_modules</code>, <code>.git</code>,
+                <code>dist</code>, <code>build</code>, <code>.next</code>,
+                <code>.cache</code>, <code>.turbo</code>, and
+                <code>.parcel-cache</code>. Even inside an HTML root, changes
+                under those paths will not trigger an update.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Cleanup</span>
+              <h4>Asset URLs die with the socket</h4>
+              <p>
+                <code>cleanupConnection</code> deletes the connection&rsquo;s
+                xlsx asset directory and forgets the HTML root when the
+                socket closes. Bookmarking an
+                <code>/api/html-preview/&lt;connId&gt;/&hellip;</code> or
+                <code>/api/xlsx-assets/&lt;connId&gt;/&hellip;</code> URL is
+                safe only for the lifetime of the current WebSocket.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Debounce</span>
+              <h4>20&thinsp;ms is the default coalesce window</h4>
+              <p>
+                Editors that save in two passes (write temp + rename) usually
+                settle inside that window. For chattier writers or
+                slow disks, bump <code>debounceMs</code>. Chokidar already
+                applies <code>awaitWriteFinish</code> with a 30&thinsp;ms
+                stability threshold on top of this.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Sandbox</span>
+              <h4>Absolute paths are rejected by default</h4>
+              <p>
+                <code>createDefaultPreviewPathResolver</code> requires
+                <code>rootPath</code> to be set when paths are relative, and
+                rejects absolute paths unless
+                <code>allowAbsolutePaths</code> is on. Symbolic links
+                aren&rsquo;t followed across the sandbox boundary &mdash;
+                <code>ensurePathInside</code> compares resolved absolute
+                paths, not lexical ones.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Reconnect</span>
+              <h4>Path changes tear down the socket</h4>
+              <p>
+                On the client, changing <code>?path</code> or
+                <code>?root</code> doesn&rsquo;t reuse the current socket
+                &mdash; the effect closes the existing connection and opens a
+                new one. Connection-id-scoped asset URLs from the old socket
+                are immediately stale.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Re-render</span>
+              <h4>Viewers remount on every change</h4>
+              <p>
+                <code>Previewer.tsx</code> keys every viewer component on
+                <code>${path}:${mtime}</code>. Any update with a newer
+                <code>mtime</code> remounts the component, discarding scroll
+                position and any internal viewer state. Stateful viewers
+                must persist externally if they need to survive a reload.
+              </p>
+            </article>
+
+            <article class="prv-gotcha">
+              <span class="prv-gotcha-label">Bytes</span>
+              <h4>Plain files are inlined as base64</h4>
+              <p>
+                Anything that&rsquo;s not a workbook or HTML is read fully
+                into memory and base64-encoded into the <code>file</code>
+                message. Very large binaries make for very large messages;
+                if that becomes a problem, swap in a custom
+                <code>resolvePath</code> + handler pair that streams instead.
+              </p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="../../docs-shell.js" data-root-path="../.."></script>
+  </body>
+</html>
