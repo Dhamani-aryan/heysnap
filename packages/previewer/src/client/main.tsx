@@ -1,7 +1,6 @@
 import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
-import "heysnap-web-viewers/style.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
