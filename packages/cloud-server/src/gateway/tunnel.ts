@@ -10,7 +10,9 @@ import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerAccessSessionRecord, MachineIdentityRecord } from "../db/types.js";
 import type { GatewayAccessService } from "./access-sessions.js";
 
-export type GatewayRoute = "filesystem" | "browser-control";
+export type GatewayRoute = "filesystem" | "browser-control" | "preview";
+
+const PREVIEW_ACCESS_COOKIE_NAME = "heysnap_preview_access";
 
 export interface GatewayRouteMetadata {
   readonly userId: string;
@@ -146,7 +148,13 @@ export const attachGatewayTunnelServer = (
       return;
     }
 
-    void authenticateGatewayRoute(options, requestUrl, request.headers.authorization, routeMatch.computerId)
+    void authenticateGatewayRoute(
+      options,
+      requestUrl,
+      request.headers.authorization,
+      typeof request.headers.cookie === "string" ? request.headers.cookie : undefined,
+      routeMatch,
+    )
       .then((accessSession) => {
         if (accessSession === null) {
           rejectUpgrade(socket, 401, "Invalid gateway access token");
@@ -163,7 +171,7 @@ export const attachGatewayTunnelServer = (
         gatewaySocketServer.handleUpgrade(request, socket, head, (webSocket) => {
           tunnel.openGatewayConnection(webSocket, {
             route: routeMatch.route,
-            targetPath: buildMachineTargetPath(routeMatch.route, requestUrl),
+            targetPath: buildMachineTargetPath(routeMatch, requestUrl),
             metadata: {
               userId: accessSession.userId,
               accessSessionId: accessSession.id,
@@ -571,22 +579,26 @@ const authenticateGatewayRoute = async (
   options: GatewayTunnelServerOptions,
   requestUrl: URL,
   authorization: string | undefined,
-  computerId: string,
+  cookieHeader: string | undefined,
+  routeMatch: { readonly computerId: string; readonly route: GatewayRoute },
 ): Promise<ComputerAccessSessionRecord | null> => {
   const token = readBearerToken(authorization)
     ?? requestUrl.searchParams.get("accessToken")
     ?? requestUrl.searchParams.get("token")
+    ?? (routeMatch.route === "preview" ? readCookie(cookieHeader, PREVIEW_ACCESS_COOKIE_NAME) : undefined)
     ?? undefined;
 
   if (token === undefined || token.length === 0) {
     return null;
   }
 
-  return await options.gatewayAccessService.authenticateAccessToken({ token, computerId });
+  return await options.gatewayAccessService.authenticateAccessToken({ token, computerId: routeMatch.computerId });
 };
 
-const matchGatewayRoute = (pathname: string): { readonly computerId: string; readonly route: GatewayRoute } | null => {
-  const match = /^\/gateway\/computers\/([^/]+)\/([^/]+)$/.exec(pathname);
+const matchGatewayRoute = (
+  pathname: string,
+): { readonly computerId: string; readonly route: GatewayRoute; readonly suffix: string } | null => {
+  const match = /^\/gateway\/computers\/([^/]+)\/([^/]+)(?:\/(.*))?$/.exec(pathname);
 
   if (match === null) {
     return null;
@@ -594,20 +606,28 @@ const matchGatewayRoute = (pathname: string): { readonly computerId: string; rea
 
   const route = match[2];
 
-  if (route !== "filesystem" && route !== "browser-control") {
+  if (route !== "filesystem" && route !== "browser-control" && route !== "preview") {
     return null;
   }
 
-  return { computerId: decodeURIComponent(match[1] ?? ""), route };
+  return {
+    computerId: decodeURIComponent(match[1] ?? ""),
+    route,
+    suffix: match[3] ?? "",
+  };
 };
 
-const buildMachineTargetPath = (route: GatewayRoute, requestUrl: URL): string => {
+const buildMachineTargetPath = (
+  routeMatch: { readonly route: GatewayRoute; readonly suffix: string },
+  requestUrl: URL,
+): string => {
   const query = new URLSearchParams(requestUrl.searchParams);
   query.delete("accessToken");
   query.delete("token");
   const queryString = query.toString();
+  const suffix = routeMatch.suffix.length > 0 ? `/${routeMatch.suffix}` : "";
 
-  return `/${route}${queryString.length > 0 ? `?${queryString}` : ""}`;
+  return `/${routeMatch.route}${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
 
 const parseMachineMessage = (data: RawData): MachineTunnelMessage | null => {
@@ -689,6 +709,28 @@ const parseMachineMessage = (data: RawData): MachineTunnelMessage | null => {
     default:
       return null;
   }
+};
+
+const readCookie = (cookieHeader: string | undefined, name: string): string | undefined => {
+  if (cookieHeader === undefined) {
+    return undefined;
+  }
+
+  for (const part of cookieHeader.split(";")) {
+    const [rawName, ...rawValueParts] = part.trim().split("=");
+    if (rawName !== name || rawValueParts.length === 0) {
+      continue;
+    }
+
+    const rawValue = rawValueParts.join("=");
+    try {
+      return decodeURIComponent(rawValue);
+    } catch {
+      return rawValue;
+    }
+  }
+
+  return undefined;
 };
 
 const isHttpResponseMessage = (message: Record<string, unknown>): message is {
