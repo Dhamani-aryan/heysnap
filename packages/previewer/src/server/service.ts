@@ -440,7 +440,7 @@ class PreviewSocketSession {
     }
 
     if (isXlsxPath(filePath)) {
-      await this.sendWorkbook(filePath, publicPath, fileStats.mtimeMs, publicBasePath);
+      await this.sendWorkbook(filePath, publicPath, fileStats.size, fileStats.mtimeMs, publicBasePath);
       return;
     }
 
@@ -493,9 +493,11 @@ class PreviewSocketSession {
   private async sendWorkbook(
     filePath: string,
     publicPath: string,
+    size: number,
     mtime: number,
     publicBasePath: string | undefined,
   ): Promise<void> {
+    const buffer = await readFile(filePath);
     const result = await createWorkbookPreview(filePath, this.service.getXlsxOptions());
     this.service.registerXlsxAssetDirectory(this.connectionId, result.assetDirectory);
     attachWorkbookAssetUrls(
@@ -506,7 +508,9 @@ class PreviewSocketSession {
       type: "workbook",
       path: publicPath,
       name: basename(filePath),
+      size,
       mtime,
+      data: buffer.toString("base64"),
       workbook: result.workbook,
     });
   }

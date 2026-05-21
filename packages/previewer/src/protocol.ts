@@ -22,7 +22,9 @@ export type PreviewFile = {
 export type PreviewWorkbook = {
   readonly path: string;
   readonly name: string;
+  readonly size: number;
   readonly mtime: number;
+  readonly data: string;
   readonly workbook: unknown;
 };
 
