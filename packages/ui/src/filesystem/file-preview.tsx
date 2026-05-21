@@ -1,229 +1,115 @@
 "use client";
 
-import { Suspense, lazy, useEffect, useState, type ReactElement } from "react";
-
-const HeySnapAudioPlayer = lazy(() =>
-  import("heysnap-web-viewers/audio").then((module) => ({ default: module.HeySnapAudioPlayer })),
-);
-const HeySnapCodeViewer = lazy(() =>
-  import("heysnap-web-viewers/code").then((module) => ({ default: module.HeySnapCodeViewer })),
-);
-const HeySnapDocxViewer = lazy(() =>
-  import("heysnap-web-viewers/docx").then((module) => ({ default: module.HeySnapDocxViewer })),
-);
-const HeySnapHtmlViewer = lazy(() =>
-  import("heysnap-web-viewers/html").then((module) => ({ default: module.HeySnapHtmlViewer })),
-);
-const HeySnapImageViewer = lazy(() =>
-  import("heysnap-web-viewers/image").then((module) => ({ default: module.HeySnapImageViewer })),
-);
-const HeySnapMarkdownViewer = lazy(() =>
-  import("heysnap-web-viewers/markdown").then((module) => ({ default: module.HeySnapMarkdownViewer })),
-);
-const HeySnapPdfViewer = lazy(() =>
-  import("heysnap-web-viewers/pdf").then((module) => ({ default: module.HeySnapPdfViewer })),
-);
-const HeySnapPPTViewer = lazy(() =>
-  import("heysnap-web-viewers/ppt").then((module) => ({ default: module.HeySnapPPTViewer })),
-);
-const HeySnapVideoViewer = lazy(() =>
-  import("heysnap-web-viewers/video").then((module) => ({ default: module.HeySnapVideoViewer })),
-);
-const HeySnapXlsxViewer = lazy(() =>
-  import("heysnap-web-viewers/xlsx").then((module) => ({ default: module.HeySnapXlsxViewer })),
-);
-
-const PPT_VIEWER_SERVER_URL = "http://13.126.207.124/Kd5QihM3zhwV2WztLXAnBc6n07Goa6O3mByrs-rqWjU/ppt";
+import type { ReactElement } from "react";
 
 export type FilePreviewProps = {
   readonly name: string;
   readonly path: string;
   readonly websocketUrl: string;
+  readonly previewBaseUrl?: string;
   /** Cache-buster used to refetch the file when it changes (e.g. updatedAt or version). */
   readonly version?: string;
 };
 
-const fallback = (
-  <div
-    style={{
-      display: "flex",
-      flex: 1,
-      alignItems: "center",
-      justifyContent: "center",
-      width: "100%",
-      height: "100%",
-      background: "#0b0d11",
-      color: "rgba(244,246,251,0.55)",
-      fontSize: 14,
-    }}
-  >
-    Loading…
-  </div>
-);
+export function FilePreview({
+  name,
+  path,
+  previewBaseUrl,
+  websocketUrl,
+  version,
+}: FilePreviewProps): ReactElement {
+  const resolvedPreviewBaseUrl = resolveFilesystemPreviewBaseUrl(websocketUrl, previewBaseUrl);
 
-const DARK_VIEWER_PROPS = {
-  bodyBackground: "var(--heysnap-document-viewer-body-background)",
-  headerBackground: "var(--heysnap-document-viewer-header-background)",
-  headerForeground: "var(--heysnap-document-viewer-header-foreground)",
-} as const;
+  if (resolvedPreviewBaseUrl === null) {
+    return (
+      <section className="heysnap-document-viewer" aria-label={name} style={{ width: "100%", height: "100%" }}>
+        <div className="document-viewer-state error">
+          <p>File preview is not available on this server yet. Restart or update the cloud server and machine server.</p>
+        </div>
+      </section>
+    );
+  }
 
-const PDF_DARK_PROPS = {
-  ...DARK_VIEWER_PROPS,
-  sidebarBackground: "var(--heysnap-document-viewer-sidebar-background)",
-} as const;
-
-const PPT_DARK_PROPS = {
-  ...DARK_VIEWER_PROPS,
-  sidebarBackground: "var(--heysnap-document-viewer-sidebar-background)",
-} as const;
-
-export function FilePreview({ name, path, websocketUrl, version }: FilePreviewProps): ReactElement {
   return (
-    <section className="heysnap-document-viewer" style={{ width: "100%", height: "100%" }}>
-      <Suspense fallback={fallback}>{renderViewer({ name, path, websocketUrl, version })}</Suspense>
+    <section className="heysnap-document-viewer" aria-label={name} style={{ width: "100%", height: "100%" }}>
+      <iframe
+        className="heysnap-file-preview-frame"
+        src={buildFilesystemPreviewerUrl(resolvedPreviewBaseUrl, path, version)}
+        title={name}
+      />
     </section>
   );
 }
 
-const renderViewer = ({ name, path, websocketUrl, version }: FilePreviewProps): ReactElement => {
-  const downloadUrl = buildFilesystemDownloadUrl(websocketUrl, [path], version);
-  const pdfPreviewUrl = buildFilesystemPreviewUrl(websocketUrl, path, "pdf", version);
-  const xlsxUrl = buildFilesystemXlsxUrl(websocketUrl, path, version);
-
-  if (isPdfFile(name)) {
-    return <HeySnapPdfViewer src={pdfPreviewUrl} {...PDF_DARK_PROPS} />;
+export const resolveFilesystemPreviewBaseUrl = (
+  filesystemWebsocketUrl: string,
+  previewBaseUrl?: string,
+): string | null => {
+  if (previewBaseUrl !== undefined && previewBaseUrl.trim().length > 0) {
+    return previewBaseUrl;
   }
 
-  if (isDocxFile(name)) {
-    return <HeySnapDocxViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} />;
-  }
-
-  if (isPptxFile(name)) {
-    return (
-      <HeySnapPPTViewer
-        src={downloadUrl}
-        documentName={name}
-        serverUrl={PPT_VIEWER_SERVER_URL}
-        {...PPT_DARK_PROPS}
-      />
-    );
-  }
-
-  if (isXlsxFile(name)) {
-    return <XlsxPreview url={xlsxUrl} name={name} />;
-  }
-
-  if (isOfficePdfPreviewFile(name)) {
-    return <HeySnapPdfViewer src={pdfPreviewUrl} {...PDF_DARK_PROPS} />;
-  }
-
-  if (isImageFile(name)) {
-    return <HeySnapImageViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} />;
-  }
-
-  if (isMarkdownFile(name)) {
-    return <HeySnapMarkdownViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="heysnap-dark" />;
-  }
-
-  if (isHtmlFile(name)) {
-    return <HeySnapHtmlViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} codeTheme="heysnap-dark" />;
-  }
-
-  if (isCodeFile(name) || isPlainTextFile(name)) {
-    return <HeySnapCodeViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} theme="heysnap-dark" />;
-  }
-
-  if (isAudioFile(name)) {
-    return <HeySnapAudioPlayer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} />;
-  }
-
-  if (isVideoFile(name)) {
-    return <HeySnapVideoViewer src={downloadUrl} documentName={name} {...DARK_VIEWER_PROPS} />;
-  }
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        width: "100%",
-        height: "100%",
-        background: "#0b0d11",
-        color: "rgba(244,246,251,0.55)",
-        fontSize: 14,
-        padding: 24,
-        textAlign: "center",
-      }}
-    >
-      No preview available for {name}.
-    </div>
-  );
+  return isGatewayFilesystemWebsocketUrl(filesystemWebsocketUrl)
+    ? null
+    : deriveFilesystemPreviewBaseUrl(filesystemWebsocketUrl);
 };
 
-function XlsxPreview({ url, name }: { url: string; name: string }): ReactElement {
-  const [workbook, setWorkbook] = useState<unknown | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export const deriveFilesystemPreviewBaseUrl = (filesystemWebsocketUrl: string): string => {
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+    ? window.location.href
+    : "http://localhost";
+  const url = new URL(filesystemWebsocketUrl, baseUrl);
 
-  useEffect(() => {
-    let cancelled = false;
-    setWorkbook(null);
-    setError(null);
-
-    fetch(url)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to load workbook (${String(response.status)}).`);
-        }
-        return (await response.json()) as unknown;
-      })
-      .then((data) => {
-        if (!cancelled) {
-          setWorkbook(data);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : "Failed to load workbook.");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  if (error !== null) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          width: "100%",
-          height: "100%",
-          background: "#0b0d11",
-          color: "rgba(244,246,251,0.55)",
-          fontSize: 14,
-        }}
-      >
-        {error}
-      </div>
-    );
+  if (url.protocol === "ws:") {
+    url.protocol = "http:";
+  } else if (url.protocol === "wss:") {
+    url.protocol = "https:";
   }
 
-  if (workbook === null) {
-    return fallback;
+  const previewPathname = url.pathname.replace(/\/filesystem\/?$/u, "/preview");
+  url.pathname = previewPathname === url.pathname ? "/preview" : previewPathname;
+  url.searchParams.delete("path");
+  url.searchParams.delete("showHidden");
+  url.searchParams.delete("v");
+
+  return url.toString();
+};
+
+export const buildFilesystemPreviewerUrl = (
+  previewBaseUrl: string,
+  path: string,
+  version?: string,
+): string => {
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+    ? window.location.href
+    : "http://localhost";
+  const url = new URL(previewBaseUrl, baseUrl);
+
+  url.searchParams.delete("path");
+  url.searchParams.delete("root");
+  url.searchParams.delete("chrome");
+  url.searchParams.delete("v");
+  url.searchParams.set("path", path);
+  url.searchParams.set("chrome", "0");
+
+  if (version !== undefined && version.length > 0) {
+    url.searchParams.set("v", version);
   }
 
-  return (
-    <div className="theme-dark" style={{ width: "100%", height: "100%" }}>
-      <HeySnapXlsxViewer workbook={workbook} title={name} darkBgColor="#0b0d11" />
-    </div>
-  );
-}
+  return url.toString();
+};
+
+export const isGatewayFilesystemWebsocketUrl = (filesystemWebsocketUrl: string): boolean => {
+  try {
+    const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+      ? window.location.href
+      : "http://localhost";
+    const url = new URL(filesystemWebsocketUrl, baseUrl);
+    return /^\/gateway\/computers\/[^/]+\/filesystem\/?$/u.test(url.pathname);
+  } catch {
+    return false;
+  }
+};
 
 export const isPdfFile = (fileName: string): boolean =>
   fileName.toLowerCase().endsWith(".pdf");
@@ -268,7 +154,9 @@ export const buildFilesystemDownloadUrl = (
   paths: readonly string[],
   version?: string,
 ): string => {
-  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+    ? window.location.href
+    : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
@@ -297,7 +185,9 @@ export const buildFilesystemPreviewUrl = (
   format: "pdf",
   version?: string,
 ): string => {
-  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+    ? window.location.href
+    : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
@@ -324,7 +214,9 @@ export const buildFilesystemXlsxUrl = (
   path: string,
   version?: string,
 ): string => {
-  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+    ? window.location.href
+    : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
 
   if (url.protocol === "ws:") {
