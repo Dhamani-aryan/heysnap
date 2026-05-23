@@ -7,8 +7,6 @@ export type FilePreviewProps = {
   readonly path: string;
   readonly websocketUrl: string;
   readonly previewBaseUrl?: string;
-  /** Cache-buster used to refetch the file when it changes (e.g. updatedAt or version). */
-  readonly version?: string;
 };
 
 export function FilePreview({
@@ -16,7 +14,6 @@ export function FilePreview({
   path,
   previewBaseUrl,
   websocketUrl,
-  version,
 }: FilePreviewProps): ReactElement {
   const resolvedPreviewBaseUrl = resolveFilesystemPreviewBaseUrl(websocketUrl, previewBaseUrl);
 
@@ -34,7 +31,7 @@ export function FilePreview({
     <section className="heysnap-document-viewer" aria-label={name} style={{ width: "100%", height: "100%" }}>
       <iframe
         className="heysnap-file-preview-frame"
-        src={buildFilesystemPreviewerUrl(resolvedPreviewBaseUrl, path, version)}
+        src={buildFilesystemPreviewerUrl(resolvedPreviewBaseUrl, path)}
         title={name}
       />
     </section>
@@ -78,7 +75,6 @@ export const deriveFilesystemPreviewBaseUrl = (filesystemWebsocketUrl: string): 
 export const buildFilesystemPreviewerUrl = (
   previewBaseUrl: string,
   path: string,
-  version?: string,
 ): string => {
   const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
     ? window.location.href
@@ -91,10 +87,6 @@ export const buildFilesystemPreviewerUrl = (
   url.searchParams.delete("v");
   url.searchParams.set("path", path);
   url.searchParams.set("chrome", "0");
-
-  if (version !== undefined && version.length > 0) {
-    url.searchParams.set("v", version);
-  }
 
   return url.toString();
 };
