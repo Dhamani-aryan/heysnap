@@ -130,6 +130,139 @@ describe("AI gateway", () => {
     }
   });
 
+  it("removes the request_user_input tool when Codex turn metadata asks for it", async () => {
+    const { app, store, machineToken } = await createTestApp({
+      aiGatewayCaptureBodies: true,
+      aiGatewayCaptureBodyMaxBytes: 1024,
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      model: "gpt-5.5",
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+        total_tokens: 2,
+      },
+    }), { status: 200 }));
+    const requestBody = {
+      model: "gpt-5.5",
+      input: "hi",
+      tools: [
+        { type: "function", name: "shell" },
+        { type: "function", name: "request_user_input", description: "Ask the user" },
+        { type: "function", name: "apply_patch" },
+      ],
+    };
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ remove_request_user_input: true }),
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(JSON.parse(await new Response(init.body).text())).toEqual({
+        model: "gpt-5.5",
+        input: "hi",
+        tools: [
+          { type: "function", name: "shell" },
+          { type: "function", name: "apply_patch" },
+        ],
+      });
+
+      const usage = await waitForLatestUsage(store, (row) => row.status === "succeeded");
+      const payload = await store.getAiUsagePayloadByRequestId(usage.id);
+      expect(payload?.requestBody).toBe(JSON.stringify({
+        model: "gpt-5.5",
+        input: "hi",
+        tools: [
+          { type: "function", name: "shell" },
+          { type: "function", name: "apply_patch" },
+        ],
+      }));
+      expect(payload?.requestHeaders).toMatchObject({
+        "api-key": "[redacted]",
+        "x-codex-turn-metadata": JSON.stringify({ remove_request_user_input: true }),
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("leaves tools unchanged when the Codex turn metadata flag is absent", async () => {
+    const { app, machineToken } = await createTestApp();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const requestBody = {
+      model: "gpt-5.5",
+      input: "hi",
+      tools: [{ type: "function", name: "request_user_input" }],
+    };
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(JSON.parse(await new Response(init.body).text())).toEqual(requestBody);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("removes the request_user_input tool when Codex turn metadata sends true as a string", async () => {
+    const { app, machineToken } = await createTestApp();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const requestBody = {
+      model: "gpt-5.5",
+      input: "hi",
+      tools: [
+        { type: "function", name: "request_user_input" },
+        { type: "function", name: "shell" },
+      ],
+    };
+
+    try {
+      const response = await app.request("/llm/openai/v1/responses", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+        headers: {
+          "api-key": machineToken,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({ remove_request_user_input: "true" }),
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(JSON.parse(await new Response(init.body).text())).toEqual({
+        model: "gpt-5.5",
+        input: "hi",
+        tools: [{ type: "function", name: "shell" }],
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("honors a configured full Azure responses endpoint without appending responses twice", async () => {
     const { app, machineToken } = await createTestApp({
       aiGatewayAzureBaseUrl: "https://azure.example.com/openai/responses?api-version=2025-04-01-preview",
