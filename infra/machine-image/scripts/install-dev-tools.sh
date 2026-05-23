@@ -57,7 +57,10 @@ apt-get install -y --no-install-recommends gh ngrok
 
 corepack enable
 corepack prepare pnpm@9.15.2 --activate
-npm install -g vercel@latest @openai/codex@latest @heysnap-ai/web @heysnap-ai/chrome-controller-cli@0.1.1 heysnap-image-gen@0.1.1 docx pptxgenjs react-icons react react-dom sharp
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g vercel@latest @openai/codex@latest @heysnap-ai/web @heysnap-ai/chrome-controller-cli@0.1.1 heysnap-image-gen@0.1.1 playwright@latest @playwright/test@latest docx pptxgenjs react-icons react react-dom sharp
+install -d -m 0755 /opt/ank1015/ms-playwright
+PLAYWRIGHT_BROWSERS_PATH=/opt/ank1015/ms-playwright playwright install --with-deps --no-shell chromium
+chmod -R a+rX /opt/ank1015/ms-playwright
 
 download https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 chmod +x /usr/local/bin/uv /usr/local/bin/uvx
@@ -169,6 +172,7 @@ cat >/etc/profile.d/ank1015-dev-env.sh <<'SCRIPT'
 export PATH="/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export NODE_PATH="$(npm root -g):${NODE_PATH:-}"
 export ANK1015_FILESYSTEM_ROOT="${ANK1015_FILESYSTEM_ROOT:-/workspace}"
+export PLAYWRIGHT_BROWSERS_PATH="/opt/ank1015/ms-playwright"
 SCRIPT
 chmod 0644 /etc/profile.d/ank1015-dev-env.sh
 

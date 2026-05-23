@@ -3,12 +3,31 @@ set -euo pipefail
 
 export PATH="/opt/ank1015/venvs/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export NODE_PATH="$(npm root -g):${NODE_PATH:-}"
+export PLAYWRIGHT_BROWSERS_PATH="/opt/ank1015/ms-playwright"
 
 node --version
 npm --version
 npx --version
 pnpm --version
-node -e "require('docx'); require('pptxgenjs'); require('react'); require('react-dom/server'); require('react-icons/fa'); require('sharp')"
+playwright --version
+node -e "require('playwright'); require('@playwright/test'); require('docx'); require('pptxgenjs'); require('react'); require('react-dom/server'); require('react-icons/fa'); require('sharp')"
+node <<'JS'
+const { chromium } = require('playwright');
+
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  await page.setContent('<main><h1>ok</h1></main>');
+  const text = await page.textContent('h1');
+  await browser.close();
+  if (text !== 'ok') {
+    throw new Error(`Unexpected Playwright page text: ${text}`);
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+JS
 
 python --version
 uv --version
