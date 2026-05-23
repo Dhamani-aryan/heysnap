@@ -1453,7 +1453,7 @@
               <p>
                 <strong>Client → server:</strong>
                 <code>subscribe</code>, <code>refresh</code>,
-                <code>watchFiles</code>, <code>createFolder</code>,
+                <code>setOpenFiles</code>, <code>createFolder</code>,
                 <code>upload</code>, <code>rename</code>, <code>trash</code>,
                 <code>ping</code>. Every message carries a
                 <code>requestId</code> so responses can be correlated.
@@ -1462,7 +1462,6 @@
                 <strong>Server → client:</strong>
                 <code>hello</code> (root info + viewState),
                 <code>snapshot</code> (full listing with a reason tag),
-                <code>fileUpdates</code> (changed open-file entries),
                 <code>ack</code> (mutation result), <code>error</code>,
                 <code>pong</code>.
               </p>
@@ -1558,20 +1557,22 @@
                 exists on disk.
               </p>
               <p>
-                Each session keeps <strong>two independent watchers</strong>:
-                one on the active directory (depth 0) that re-lists and
-                pushes a <code>snapshot</code>, and one on the parent
-                directories of open files that pushes
-                <code>fileUpdates</code> only when mtime or size changes
-                (tracked as a <code>"${mtime}\0${size}"</code> version
-                string). Both debounce at <code>100&thinsp;ms</code>.
-                Watchers are replaced on every <code>subscribe</code>
-                and closed cleanly on disconnect.
+                Each session keeps <strong>one chokidar watcher</strong> on
+                the active directory (<code>depth: 0</code>,
+                <code>ignoreInitial: true</code>) that re-lists and pushes a
+                fresh <code>snapshot</code> on change, debounced at
+                <code>100&thinsp;ms</code>. Open-file paths are tracked too,
+                but only as a list stored on <code>viewState</code> via
+                <code>setOpenFiles</code> &mdash; the server doesn't watch
+                them itself; the client picks up content changes from the
+                same directory snapshot stream. The watcher is replaced on
+                every <code>subscribe</code> and closed cleanly on
+                disconnect.
               </p>
               <div class="srv-file-tags">
                 <span class="srv-tag">FilesystemSocketSession</span>
                 <span class="srv-tag">viewState</span>
-                <span class="srv-tag">two watchers</span>
+                <span class="srv-tag">one watcher</span>
                 <span class="srv-tag">100ms debounce</span>
               </div>
             </article>
@@ -1660,8 +1661,8 @@
                 </tr>
                 <tr>
                   <td><span class="srv-table-dir">client → server</span></td>
-                  <td><span class="srv-table-key">watchFiles</span></td>
-                  <td>Register a list of open file paths. Triggers an immediate <code>fileUpdates</code> and replaces the file watcher.</td>
+                  <td><span class="srv-table-key">setOpenFiles</span></td>
+                  <td>Record which files the UI currently has open. Normalised, deduped, sorted, and stored on shared <code>viewState</code>; acked with the resolved paths.</td>
                 </tr>
                 <tr>
                   <td><span class="srv-table-dir">client → server</span></td>
@@ -1697,11 +1698,6 @@
                   <td><span class="srv-table-dir">server → client</span></td>
                   <td><span class="srv-table-key">snapshot</span></td>
                   <td>Full directory listing. <code>reason</code> is one of: <code>subscribe</code>, <code>refresh</code>, <code>watch</code>, <code>mutation</code>.</td>
-                </tr>
-                <tr>
-                  <td><span class="srv-table-dir">server → client</span></td>
-                  <td><span class="srv-table-key">fileUpdates</span></td>
-                  <td>Changed open-file entries + <code>missingPaths</code>. Only sent when mtime/size actually changed.</td>
                 </tr>
                 <tr>
                   <td><span class="srv-table-dir">server → client</span></td>
@@ -3609,8 +3605,8 @@
               <h3>filesystemSocketServer.clients.size</h3>
               <p>
                 The raw <code>ws.WebSocketServer</code> client set. Each open
-                <code>/filesystem</code> WebSocket counts as 1, regardless of how many subscriptions
-                or open-file watchers it owns. Drops to 0 the instant the last UI tab closes its
+                <code>/filesystem</code> WebSocket counts as 1, regardless of how many open files
+                or subscriptions it tracks. Drops to 0 the instant the last UI tab closes its
                 tunnel.
               </p>
               <div class="srv-file-tags">
@@ -3882,11 +3878,11 @@
             </article>
             <article class="srv-file-card">
               <div class="srv-file-path">100ms debounce</div>
-              <h3>Two watchers, one debounce timer per session</h3>
+              <h3>One watcher, one debounce timer per session</h3>
               <p>
                 Chokidar fires per inode change; an editor saving a file can produce 3&ndash;5
                 events in quick succession. The 100ms debounce collapses these into one
-                <code>listing</code> push. Side effect: the UI sees changes 100ms after the disk
+                <code>snapshot</code> push. Side effect: the UI sees changes 100ms after the disk
                 does, which is invisible to a human but matters when chaining a watcher fire to
                 another watcher in tests.
               </p>
@@ -3896,17 +3892,19 @@
               </div>
             </article>
             <article class="srv-file-card">
-              <div class="srv-file-path">version = mtime\0size</div>
-              <h3>File version is a string, not a hash</h3>
+              <div class="srv-file-path">setOpenFiles</div>
+              <h3>Open files are tracked, not watched</h3>
               <p>
-                Open-file watchers detect change by comparing
-                <code>"${mtime}\0${size}"</code> against the previous value. Cheap and stable, but
-                a same-size in-place write at the same mtime resolution would slip through. In
-                practice editors always bump mtime; the failure mode is mostly theoretical.
+                <code>setOpenFiles</code> stores the UI's open-file list on shared
+                <code>viewState</code> (deduped, normalised, sorted) and acks. The server does not
+                attach a separate watcher for those paths &mdash; clients learn about content
+                changes through the directory snapshot stream that the active-directory watcher
+                already drives. The list is purely metadata: it survives across reconnects within
+                the process via <code>viewState</code> restore.
               </p>
               <div class="srv-file-tags">
-                <span class="srv-tag">no-hash</span>
-                <span class="srv-tag">mtime-based</span>
+                <span class="srv-tag">viewState</span>
+                <span class="srv-tag">no-extra-watcher</span>
               </div>
             </article>
             <article class="srv-file-card">

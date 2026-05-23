@@ -9,13 +9,11 @@ type PreviewState = {
   readonly previewBaseUrl?: string;
   readonly path: string;
   readonly name: string;
-  readonly version: string;
 };
 
 type PreviewMessage =
   | {
       type: "update";
-      version?: string;
       path?: string;
       name?: string;
       websocketUrl?: string;
@@ -44,13 +42,12 @@ function PreviewPageContent(): React.ReactElement {
     const path = searchParams.get("path");
     const name = searchParams.get("name");
     const previewBaseUrl = searchParams.get("previewBaseUrl") ?? undefined;
-    const version = searchParams.get("v") ?? "";
 
     if (websocketUrl === null || path === null || name === null) {
       return null;
     }
 
-    return { websocketUrl, previewBaseUrl, path, name, version };
+    return { websocketUrl, previewBaseUrl, path, name };
   }, [searchParams]);
 
   const [state, setState] = useState<PreviewState | null>(initial);
@@ -82,7 +79,6 @@ function PreviewPageContent(): React.ReactElement {
           previewBaseUrl: message.previewBaseUrl ?? current.previewBaseUrl,
           path: message.path ?? current.path,
           name: message.name ?? current.name,
-          version: message.version ?? current.version,
         };
       });
     };
@@ -111,7 +107,6 @@ function PreviewPageContent(): React.ReactElement {
         path={state.path}
         previewBaseUrl={state.previewBaseUrl}
         websocketUrl={state.websocketUrl}
-        version={state.version}
       />
     </main>
   );
