@@ -12,15 +12,12 @@ export const resolveCapabilityPaths = (env: NodeJS.ProcessEnv = process.env): Ca
     (isCloudMachine ? "/opt/ank1015/agent-tools" : userPaths.toolsRoot);
   const skillsCatalogDir = env.ANK1015_AGENT_SKILLS_CATALOG_DIR?.trim() ||
     (isCloudMachine ? "/opt/ank1015/agent-skills/catalog" : userPaths.skillsCatalogDir);
-  const activeSkillsDir = env.ANK1015_ACTIVE_SKILLS_DIR?.trim() ||
-    (isCloudMachine ? "/home/agent/.codex/skills" : userPaths.activeSkillsDir);
 
   return {
     stateFile: env.ANK1015_CAPABILITIES_STATE_FILE?.trim() || join(capabilitiesRoot, "state.json"),
     toolsRoot,
     toolsBinDir: env.ANK1015_AGENT_TOOLS_BIN_DIR?.trim() || join(toolsRoot, "bin"),
     skillsCatalogDir,
-    activeSkillsDir,
   };
 };
 
@@ -35,6 +32,5 @@ export const resolveUserCapabilityPaths = (env: NodeJS.ProcessEnv = process.env)
     toolsRoot,
     toolsBinDir: join(toolsRoot, "bin"),
     skillsCatalogDir: join(localRoot, "agent-skills", "catalog"),
-    activeSkillsDir: join(home, ".codex", "skills"),
   };
 };

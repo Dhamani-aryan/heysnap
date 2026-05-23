@@ -79,7 +79,6 @@ export interface CapabilityPaths {
   readonly toolsRoot: string;
   readonly toolsBinDir: string;
   readonly skillsCatalogDir: string;
-  readonly activeSkillsDir: string;
 }
 
 export interface CapabilitiesSnapshot {
