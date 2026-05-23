@@ -478,9 +478,6 @@ export function FilesystemExplorer({
         }
         onPathChangeRef.current?.(nextListing.path);
       },
-      onFileUpdates: ({ entries }) => {
-        setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
-      },
       onViewState: (viewState) => {
         setOpenFileTabs(viewState.openFiles.map(toOpenFileTab));
         setActiveFilePath(null);
@@ -539,8 +536,8 @@ export function FilesystemExplorer({
   useEffect(() => {
     const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
 
-    void clientRef.current?.watchFiles(paths).catch((error) => {
-      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to watch open files."));
+    void clientRef.current?.setOpenFiles(paths).catch((error) => {
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to remember open files."));
     });
   }, [openFileWatchKey]);
 
@@ -2079,7 +2076,6 @@ const FileViewer = ({
   readonly filesystemPreviewBaseUrl?: string;
   readonly websocketUrl: string;
 }): React.ReactElement => {
-  const fileVersion = getOpenFileTabVersion(file);
   const previewBaseUrl = resolveFilesystemPreviewBaseUrl(websocketUrl, filesystemPreviewBaseUrl);
 
   if (previewBaseUrl === null) {
@@ -2097,7 +2093,7 @@ const FileViewer = ({
     <section className="heysnap-document-viewer" aria-label={file.name}>
       <iframe
         className="heysnap-file-preview-frame"
-        src={buildFilesystemPreviewerUrl(previewBaseUrl, file.path, fileVersion)}
+        src={buildFilesystemPreviewerUrl(previewBaseUrl, file.path)}
         title={file.name}
       />
     </section>
@@ -4597,47 +4593,6 @@ const getParentPath = (path: string): string => {
   return parts.slice(0, -1).join("/");
 };
 
-const syncOpenFileTabsFromEntries = (
-  currentTabs: OpenFileTab[],
-  entries: readonly FilesystemEntry[],
-): OpenFileTab[] => {
-  if (currentTabs.length === 0) {
-    return currentTabs;
-  }
-
-  const fileEntriesByPath = new Map(
-    entries
-      .filter((entry) => entry.type === "file")
-      .map((entry) => [entry.path, entry]),
-  );
-  let didChange = false;
-  const nextTabs = currentTabs.map((tab) => {
-    const entry = fileEntriesByPath.get(tab.path);
-
-    if (entry === undefined) {
-      return tab;
-    }
-
-    const nextTab = toOpenFileTab(entry);
-
-    if (
-      tab.name === nextTab.name &&
-      tab.path === nextTab.path &&
-      tab.size === nextTab.size &&
-      tab.updatedAt === nextTab.updatedAt
-    ) {
-      return tab;
-    }
-
-    didChange = true;
-    return nextTab;
-  });
-
-  return didChange ? nextTabs : currentTabs;
-};
-
-const getOpenFileTabVersion = (file: OpenFileTab): string => `${file.updatedAt}:${String(file.size ?? "")}`;
-
 const toFilesystemUploadFile = async (source: Extract<BrowserUploadSource, { readonly type: "file" }>): Promise<FilesystemUploadFile> => ({
   type: "file",
   relativePath: source.relativePath,
@@ -4740,7 +4695,6 @@ const formatBytes = (bytes: number): string => {
 const buildFilesystemDownloadUrl = (
   filesystemWebsocketUrl: string,
   paths: readonly string[],
-  version?: string,
 ): string => {
   const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
@@ -4758,9 +4712,6 @@ const buildFilesystemDownloadUrl = (
   paths.forEach((path) => {
     url.searchParams.append("path", path);
   });
-  if (version !== undefined) {
-    url.searchParams.set("v", version);
-  }
 
   return url.toString();
 };
