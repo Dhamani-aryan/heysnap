@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -8,7 +8,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import { WebView } from 'react-native-webview';
 import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
 import { ThemedText } from '@/components/themed-text';
@@ -23,9 +23,6 @@ type FilePreviewPaneProps = {
   onBack: () => void;
 };
 
-const versionOf = (entry: FilesystemEntry): string =>
-  `${entry.updatedAt}:${String(entry.size ?? '')}`;
-
 export function FilePreviewPane({
   entry,
   filesystemPreviewBaseUrl,
@@ -33,10 +30,6 @@ export function FilePreviewPane({
   palette,
   onBack,
 }: FilePreviewPaneProps) {
-  const webViewRef = useRef<WebView>(null);
-  const isReadyRef = useRef(false);
-  const pendingUpdateRef = useRef<string | null>(null);
-
   const previewUri = useMemo(() => {
     if (filesystemWebsocketUrl === null) {
       return null;
@@ -49,64 +42,8 @@ export function FilePreviewPane({
     }
     url.searchParams.set('path', entry.path);
     url.searchParams.set('name', entry.name);
-    url.searchParams.set('v', versionOf(entry));
     return url.toString();
-  }, [entry.path, filesystemPreviewBaseUrl, filesystemWebsocketUrl]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const currentVersion = versionOf(entry);
-  const lastSentVersionRef = useRef<string | null>(currentVersion);
-
-  // Reset the bridge state whenever a new file path is opened.
-  useEffect(() => {
-    isReadyRef.current = false;
-    pendingUpdateRef.current = null;
-    lastSentVersionRef.current = currentVersion;
-  }, [entry.path]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Push version updates into the WebView when the file changes server-side.
-  useEffect(() => {
-    if (lastSentVersionRef.current === currentVersion) {
-      return;
-    }
-
-    lastSentVersionRef.current = currentVersion;
-      const payload = JSON.stringify({
-        type: 'update',
-        path: entry.path,
-        name: entry.name,
-        previewBaseUrl: filesystemPreviewBaseUrl ?? undefined,
-        version: currentVersion,
-      });
-
-    if (isReadyRef.current) {
-      sendToWebView(webViewRef.current, payload);
-    } else {
-      pendingUpdateRef.current = payload;
-    }
-  }, [currentVersion, entry.name, entry.path, filesystemPreviewBaseUrl]);
-
-  const handleMessage = (event: WebViewMessageEvent) => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(event.nativeEvent.data);
-    } catch {
-      return;
-    }
-
-    if (typeof parsed !== 'object' || parsed === null) {
-      return;
-    }
-
-    const type = (parsed as { type?: unknown }).type;
-
-    if (type === 'ready') {
-      isReadyRef.current = true;
-      if (pendingUpdateRef.current !== null) {
-        sendToWebView(webViewRef.current, pendingUpdateRef.current);
-        pendingUpdateRef.current = null;
-      }
-    }
-  };
+  }, [entry.name, entry.path, filesystemPreviewBaseUrl, filesystemWebsocketUrl]);
 
   return (
     <View style={[styles.shell, { backgroundColor: palette.background }]}>
@@ -143,7 +80,6 @@ export function FilePreviewPane({
           </View>
         ) : (
           <WebView
-            ref={webViewRef}
             source={{ uri: previewUri }}
             originWhitelist={['*']}
             javaScriptEnabled
@@ -151,7 +87,6 @@ export function FilePreviewPane({
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
             setSupportMultipleWindows={false}
-            onMessage={handleMessage}
             startInLoadingState
             renderLoading={() => (
               <View style={[styles.center, { backgroundColor: palette.background }]}>
@@ -165,15 +100,6 @@ export function FilePreviewPane({
     </View>
   );
 }
-
-const sendToWebView = (webView: WebView | null, payload: string): void => {
-  if (webView === null) {
-    return;
-  }
-
-  const script = `(() => { try { window.postMessage(${JSON.stringify(payload)}, '*'); } catch (e) {} return true; })();`;
-  webView.injectJavaScript(script);
-};
 
 const styles = StyleSheet.create({
   shell: {
