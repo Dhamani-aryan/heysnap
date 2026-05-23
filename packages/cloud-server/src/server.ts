@@ -13,6 +13,8 @@ import { createAuthRoutes } from "./auth/routes.js";
 import type { CloudServerConfig } from "./config.js";
 import { createComputerRoutes } from "./control-plane/computers.js";
 import type { CloudStore } from "./db/types.js";
+import { handleGatewayFeedbackRequest } from "./feedback/gateway.js";
+import { createFeedbackArchiveStorage } from "./feedback/storage.js";
 import { createFirecrawlGatewayRoutes } from "./firecrawl-gateway/routes.js";
 import { GatewayAccessService } from "./gateway/access-sessions.js";
 import { createMachineRoutes } from "./machines/routes.js";
@@ -45,6 +47,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   const gatewayAccessService = new GatewayAccessService(options.store, options.config);
   const provisioner = options.provisioner ?? new AwsEc2Provisioner();
   const tunnelRegistry = options.tunnelRegistry ?? noopTunnelRegistry;
+  const feedbackArchiveStorage = createFeedbackArchiveStorage(options.config);
 
   app.use("*", cors({
     origin: (origin) => {
@@ -62,7 +65,14 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
 
   app.get("/health", (context) => context.json({ ok: true }));
   mountAdminDashboard(app);
-  app.route("/admin", createAdminRoutes(options.store, authService, options.config, provisioner, tunnelRegistry));
+  app.route("/admin", createAdminRoutes(
+    options.store,
+    authService,
+    options.config,
+    provisioner,
+    tunnelRegistry,
+    feedbackArchiveStorage,
+  ));
   app.route("/auth", createAuthRoutes(authService, options.config));
   app.route("/computers", createComputerRoutes(
     options.store,
@@ -80,6 +90,13 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
       "/filesystem/download",
     );
   });
+  app.post("/gateway/computers/:computerId/feedback", async (context) => {
+    return await handleGatewayFeedbackRequest(context, {
+      store: options.store,
+      gatewayAccessService,
+      tunnelRegistry,
+    });
+  });
   app.get("/gateway/computers/:computerId/preview", async (context) => {
     return await proxyGatewayPreviewHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
@@ -95,7 +112,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.all("/gateway/computers/:computerId/agent/*", async (context) => {
     return await proxyGatewayAgentHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
-  app.route("/machines", createMachineRoutes(options.store, options.config));
+  app.route("/machines", createMachineRoutes(options.store, options.config, feedbackArchiveStorage));
   app.route("/llm", createAiGatewayRoutes(options.store, options.config));
   app.route("/firecrawl", createFirecrawlGatewayRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));

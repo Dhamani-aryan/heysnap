@@ -1,21 +1,29 @@
+import { createHash } from "node:crypto";
+
 import { Hono } from "hono";
 
 import { createOpaqueToken, hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerStatus } from "../db/types.js";
+import { serializeFeedbackReport } from "../feedback/serialization.js";
+import {
+  buildFeedbackArchiveStorageKey,
+  type FeedbackArchiveStorage,
+} from "../feedback/storage.js";
 import { authenticateMachineBearer } from "./auth.js";
 import {
   buildReleaseCheckResponse,
   DEFAULT_RELEASE_CHANNEL,
   DEFAULT_RELEASE_PLATFORM,
 } from "../releases/routes.js";
-import { notFound, unauthorized } from "../shared/errors.js";
+import { badRequest, forbidden, notFound, unauthorized } from "../shared/errors.js";
 import { serializeComputer } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
 
 export const createMachineRoutes = (
   store: CloudStore,
   config: CloudServerConfig,
+  feedbackArchiveStorage: FeedbackArchiveStorage,
 ): Hono => {
   const app = new Hono();
 
@@ -125,6 +133,95 @@ export const createMachineRoutes = (
     });
   });
 
+  app.post("/feedback/:feedbackId/archive", async (context) => {
+    const machine = await authenticateMachineBearer(store, config, context.req.header("authorization"));
+    const feedbackId = context.req.param("feedbackId");
+    const report = await store.getFeedbackReportById(feedbackId);
+
+    if (report === null) {
+      throw notFound("FEEDBACK_NOT_FOUND", "Feedback report not found");
+    }
+
+    if (report.computerId !== machine.computerId) {
+      throw forbidden("Machine is not allowed to upload this feedback archive");
+    }
+
+    const contentType = context.req.header("content-type")?.toLowerCase() ?? "";
+    if (!contentType.startsWith("application/zip")) {
+      throw badRequest("INVALID_ARCHIVE", "Feedback archive must be application/zip");
+    }
+
+    const maxArchiveBytes = config.feedbackArchiveMaxBytes ?? 100 * 1024 * 1024;
+    const contentLength = readContentLength(context.req.header("content-length"));
+    if (contentLength !== null && contentLength > maxArchiveBytes) {
+      await markFeedbackArchiveUploadFailed(store, feedbackId, "Feedback archive exceeded maximum upload size");
+      return context.json({
+        error: {
+          code: "ARCHIVE_TOO_LARGE",
+          message: "Feedback archive exceeded maximum upload size",
+        },
+      }, 413);
+    }
+
+    const archive = Buffer.from(await context.req.arrayBuffer());
+    if (archive.byteLength > maxArchiveBytes) {
+      await markFeedbackArchiveUploadFailed(store, feedbackId, "Feedback archive exceeded maximum upload size");
+      return context.json({
+        error: {
+          code: "ARCHIVE_TOO_LARGE",
+          message: "Feedback archive exceeded maximum upload size",
+        },
+      }, 413);
+    }
+
+    const computedSha256 = createHash("sha256").update(archive).digest("hex");
+    const reportedSha256 = context.req.header("x-heysnap-feedback-sha256")?.trim().toLowerCase();
+    if (reportedSha256 !== undefined && reportedSha256.length > 0 && reportedSha256 !== computedSha256) {
+      await markFeedbackArchiveUploadFailed(store, feedbackId, "Feedback archive SHA-256 mismatch");
+      throw badRequest("ARCHIVE_HASH_MISMATCH", "Feedback archive SHA-256 mismatch");
+    }
+
+    const fileCount = readNonNegativeIntegerHeader(context.req.header("x-heysnap-feedback-file-count"), "file count");
+    const machineContext = readMachineContextHeader(context.req.header("x-heysnap-feedback-machine-context"));
+    const archiveStorageKey = buildFeedbackArchiveStorageKey(config, {
+      feedbackId,
+      computerId: report.computerId,
+    });
+
+    try {
+      await feedbackArchiveStorage.putArchive({
+        key: archiveStorageKey,
+        body: archive,
+        contentType: "application/zip",
+      });
+
+      const completed = await store.completeFeedbackReportArchive({
+        feedbackId,
+        machineIdentityId: machine.id,
+        archiveStorageKey,
+        archiveSha256: computedSha256,
+        archiveBytes: archive.byteLength,
+        fileCount,
+        machineContext,
+      });
+
+      if (completed === null) {
+        throw notFound("FEEDBACK_NOT_FOUND", "Feedback report not found");
+      }
+
+      await store.touchMachineIdentity({ identityId: machine.id, lastUsedAt: new Date() });
+
+      return context.json({ feedback: serializeFeedbackReport(completed) });
+    } catch (error) {
+      await markFeedbackArchiveUploadFailed(
+        store,
+        feedbackId,
+        error instanceof Error ? error.message : "Failed to store feedback archive",
+      );
+      throw error;
+    }
+  });
+
   return app;
 };
 
@@ -221,4 +318,56 @@ const readQueryString = (value: string | undefined, fallback: string | null): st
 
   const trimmed = value.trim();
   return trimmed.length === 0 ? fallback : trimmed;
+};
+
+const readContentLength = (value: string | undefined): number | null => {
+  if (value === undefined || value.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const readNonNegativeIntegerHeader = (value: string | undefined, label: string): number => {
+  if (value === undefined || value.trim().length === 0) {
+    return 0;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw badRequest("INVALID_ARCHIVE_METADATA", `Feedback archive ${label} must be a non-negative integer`);
+  }
+
+  return parsed;
+};
+
+const readMachineContextHeader = (value: string | undefined): Record<string, unknown> => {
+  if (value === undefined || value.trim().length === 0) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64").toString("utf8")) as unknown;
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+};
+
+const markFeedbackArchiveUploadFailed = async (
+  store: CloudStore,
+  feedbackId: string,
+  errorMessage: string,
+): Promise<void> => {
+  await store.markFeedbackReportCommentOnly({
+    feedbackId,
+    errorMessage: errorMessage.slice(0, 1_000),
+  });
 };
