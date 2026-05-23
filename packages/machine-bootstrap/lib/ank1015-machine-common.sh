@@ -37,7 +37,6 @@ ank1015_machine_load_env() {
   : "${ANK1015_AGENT_TOOLS_ROOT:=$(ank1015_machine_root)/agent-tools}"
   : "${ANK1015_AGENT_TOOLS_BIN_DIR:=$ANK1015_AGENT_TOOLS_ROOT/bin}"
   : "${ANK1015_AGENT_SKILLS_CATALOG_DIR:=$(ank1015_machine_root)/agent-skills/catalog}"
-  : "${ANK1015_ACTIVE_SKILLS_DIR:=$HOME/.codex/skills}"
 }
 
 ank1015_machine_release_dir() {
