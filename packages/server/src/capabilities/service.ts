@@ -300,7 +300,6 @@ export class AgentCapabilitiesService {
     }
 
     await this.installSkill(skill.id, onProgress);
-    await this.setSkillActiveOnDisk(skill, active);
     this.setSkillState(skill.id, {
       active,
       lastError: undefined,
@@ -343,7 +342,6 @@ export class AgentCapabilitiesService {
       mkdir(this.paths.toolsRoot, { recursive: true }),
       mkdir(this.paths.toolsBinDir, { recursive: true }),
       mkdir(this.paths.skillsCatalogDir, { recursive: true }),
-      mkdir(this.paths.activeSkillsDir, { recursive: true }),
     ]);
   }
 
@@ -400,10 +398,6 @@ export class AgentCapabilitiesService {
   private async installBundledSkills(onProgress: (progress: CapabilityProgress) => void): Promise<void> {
     for (const skill of this.catalog.skills) {
       const skillState = this.state?.skills[skill.id];
-      if (skillState?.installedVersion === skill.version && skillState.installState === "installed") {
-        continue;
-      }
-
       onProgress({ message: `Installing bundled skill ${skill.label}` });
       const active = skill.activeByDefault === true ? true : skillState?.active ?? false;
       try {
@@ -414,7 +408,6 @@ export class AgentCapabilitiesService {
           active,
           lastError: undefined,
         });
-        await this.setSkillActiveOnDisk(skill, active);
       } catch (error) {
         if (await this.runHelperIfAvailable("install-skill", skill.id, undefined, onProgress)) {
           this.state = await this.loadState();
@@ -470,7 +463,6 @@ export class AgentCapabilitiesService {
 
         onProgress({ message: `${active ? "Activating" : "Deactivating"} ${skill.label}` });
         await this.writeSkillCatalog(skill);
-        await this.setSkillActiveOnDisk(skill, active);
         this.setSkillState(skill.id, {
           installedVersion: skill.version,
           installState: "installed",
@@ -527,24 +519,6 @@ export class AgentCapabilitiesService {
           throw error;
         }
         await delay(10);
-      }
-    }
-  }
-
-  private async setSkillActiveOnDisk(skill: AgentSkillDefinition, active: boolean): Promise<void> {
-    const activePath = join(this.paths.activeSkillsDir, skill.id);
-    await mkdir(this.paths.activeSkillsDir, { recursive: true });
-    await rm(activePath, { recursive: true, force: true });
-
-    if (!active) {
-      return;
-    }
-
-    try {
-      await symlink(join(this.paths.skillsCatalogDir, skill.id), activePath, "dir");
-    } catch (error) {
-      if (!(isNodeError(error) && error.code === "EEXIST")) {
-        throw error;
       }
     }
   }
@@ -816,8 +790,7 @@ const canFallbackToUserPaths = (error: unknown, env: NodeJS.ProcessEnv): boolean
   return env.ANK1015_CAPABILITIES_ROOT === undefined &&
     env.ANK1015_AGENT_TOOLS_ROOT === undefined &&
     env.ANK1015_AGENT_TOOLS_BIN_DIR === undefined &&
-    env.ANK1015_AGENT_SKILLS_CATALOG_DIR === undefined &&
-    env.ANK1015_ACTIVE_SKILLS_DIR === undefined;
+    env.ANK1015_AGENT_SKILLS_CATALOG_DIR === undefined;
 };
 
 interface RunOptions {
