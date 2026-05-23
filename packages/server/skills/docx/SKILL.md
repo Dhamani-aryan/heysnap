@@ -1,8 +1,3 @@
----
-name: docx
-description: "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation."
----
-
 # DOCX creation, editing, and analysis
 
 ## Overview
@@ -14,7 +9,7 @@ A .docx file is a ZIP archive containing XML files.
 | Task | Approach |
 |------|----------|
 | Read/analyze content | `pandoc` or unpack for raw XML |
-| Create new document | Use `docx-js` - see Creating New Documents below |
+| Create new document | Use `docx-js` plus design guidance - see Creating New Documents below |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 
 ### Converting .doc to .docx
@@ -76,6 +71,20 @@ After creating the file, validate it. If validation fails, unpack, fix the XML, 
 python scripts/office/validate.py doc.docx
 ```
 
+### Document Design Guidelines
+
+When the user asks for a polished report, proposal, memo, letterhead, academic paper, official document, or any document where appearance matters, read [`references/design_guidelines.md`](references/design_guidelines.md) before choosing fonts, spacing, colors, tables, headers, or page layout.
+
+Core rules to apply by default:
+- **Start with the document type**: corporate/report, executive brief, academic, legal, letter, or template-matched. Choose formatting values that fit the type; do not invent random decorative styling.
+- **Use styles, not scattered inline formatting**: define Normal, Title, Heading1, Heading2, Heading3, table/header/footer styles, then apply them consistently.
+- **Create hierarchy with scale and spacing**: body text 10.5-12pt, H3 12.5-14pt, H2 14-16pt, H1 18-22pt. Headings need more space before than after.
+- **Give pages breathing room**: 1 inch margins are the safe default; line spacing around 1.12-1.2 works well for business documents; avoid dense wall-of-text pages.
+- **Keep color restrained**: use black or dark gray body text; use one accent color for headings/rules/table headers; avoid large saturated backgrounds.
+- **Design tables for scanning**: fixed DXA widths, readable cell padding, repeated header row, subtle borders, optional light header shading; align numbers consistently.
+- **Do not fake document structure**: use real heading styles for TOC/navigation, real lists for bullets/numbering, tab stops for aligned header/footer text, and paragraph borders for rules.
+- **Verify visually**: for important documents, convert to PDF/images and inspect page balance, table fit, heading hierarchy, image sizing, and header/footer alignment.
+
 ### Page Size
 
 ```javascript
@@ -114,7 +123,7 @@ size: {
 
 ### Styles (Override Built-in Headings)
 
-Use Arial as the default font (universally supported). Keep titles black for readability.
+Use a conservative, widely available font set unless the user gives a brand/template. Arial is the safest default; Aptos/Calibri are acceptable for modern Office documents; Times New Roman is appropriate for legal/academic contexts. Keep body text dark and readable.
 
 ```javascript
 const doc = new Document({
@@ -408,9 +417,9 @@ Extracts XML, pretty-prints, merges adjacent runs, and converts smart quotes to 
 
 Edit files in `unpacked/word/`. See XML Reference below for patterns.
 
-**Use "Codex" as the author** for tracked changes and comments, unless the user explicitly requests a different name.
+Use the requested author name for tracked changes and comments. If the user does not specify one, use the neutral author name `Editor`.
 
-**Make precise patch/edit changes for string replacement. Do not write one-off Python scripts for simple XML edits.** Direct edits make the changed text auditable and keep the workflow easier to review.
+**Use the Edit tool directly for string replacement. Do not write Python scripts.** Scripts introduce unnecessary complexity. The Edit tool shows exactly what is being replaced.
 
 **CRITICAL: Use smart quotes for new content.** When adding text with apostrophes or quotes, use XML entities to produce smart quotes:
 ```xml
@@ -464,14 +473,14 @@ Validates with auto-repair, condenses XML, and creates DOCX. Use `--validate fal
 
 **Insertion:**
 ```xml
-<w:ins w:id="1" w:author="Codex" w:date="2025-01-01T00:00:00Z">
+<w:ins w:id="1" w:author="Editor" w:date="2025-01-01T00:00:00Z">
   <w:r><w:t>inserted text</w:t></w:r>
 </w:ins>
 ```
 
 **Deletion:**
 ```xml
-<w:del w:id="2" w:author="Codex" w:date="2025-01-01T00:00:00Z">
+<w:del w:id="2" w:author="Editor" w:date="2025-01-01T00:00:00Z">
   <w:r><w:delText>deleted text</w:delText></w:r>
 </w:del>
 ```
@@ -482,10 +491,10 @@ Validates with auto-repair, condenses XML, and creates DOCX. Use `--validate fal
 ```xml
 <!-- Change "30 days" to "60 days" -->
 <w:r><w:t>The term is </w:t></w:r>
-<w:del w:id="1" w:author="Codex" w:date="...">
+<w:del w:id="1" w:author="Editor" w:date="...">
   <w:r><w:delText>30</w:delText></w:r>
 </w:del>
-<w:ins w:id="2" w:author="Codex" w:date="...">
+<w:ins w:id="2" w:author="Editor" w:date="...">
   <w:r><w:t>60</w:t></w:r>
 </w:ins>
 <w:r><w:t> days.</w:t></w:r>
@@ -497,10 +506,10 @@ Validates with auto-repair, condenses XML, and creates DOCX. Use `--validate fal
   <w:pPr>
     <w:numPr>...</w:numPr>  <!-- list numbering if present -->
     <w:rPr>
-      <w:del w:id="1" w:author="Codex" w:date="2025-01-01T00:00:00Z"/>
+      <w:del w:id="1" w:author="Editor" w:date="2025-01-01T00:00:00Z"/>
     </w:rPr>
   </w:pPr>
-  <w:del w:id="2" w:author="Codex" w:date="2025-01-01T00:00:00Z">
+  <w:del w:id="2" w:author="Editor" w:date="2025-01-01T00:00:00Z">
     <w:r><w:delText>Entire paragraph content being deleted...</w:delText></w:r>
   </w:del>
 </w:p>
@@ -510,7 +519,7 @@ Without the `<w:del/>` in `<w:pPr><w:rPr>`, accepting changes leaves an empty pa
 **Rejecting another author's insertion** - nest deletion inside their insertion:
 ```xml
 <w:ins w:author="Jane" w:id="5">
-  <w:del w:author="Codex" w:id="10">
+  <w:del w:author="Editor" w:id="10">
     <w:r><w:delText>their inserted text</w:delText></w:r>
   </w:del>
 </w:ins>
@@ -521,7 +530,7 @@ Without the `<w:del/>` in `<w:pPr><w:rPr>`, accepting changes leaves an empty pa
 <w:del w:author="Jane" w:id="5">
   <w:r><w:delText>deleted text</w:delText></w:r>
 </w:del>
-<w:ins w:author="Codex" w:id="10">
+<w:ins w:author="Editor" w:id="10">
   <w:r><w:t>deleted text</w:t></w:r>
 </w:ins>
 ```
@@ -535,7 +544,7 @@ After running `comment.py` (see Step 2), add markers to document.xml. For replie
 ```xml
 <!-- Comment markers are direct children of w:p, never inside w:r -->
 <w:commentRangeStart w:id="0"/>
-<w:del w:id="1" w:author="Codex" w:date="2025-01-01T00:00:00Z">
+<w:del w:id="1" w:author="Editor" w:date="2025-01-01T00:00:00Z">
   <w:r><w:delText>deleted</w:delText></w:r>
 </w:del>
 <w:r><w:t> more text</w:t></w:r>

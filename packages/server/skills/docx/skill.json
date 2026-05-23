@@ -2,6 +2,6 @@
   "id": "docx",
   "label": "DOCX",
   "version": "1.0.0",
-  "description": "Create, read, edit, and inspect Word document files.",
+  "description": "create, read, edit, and manipulate Word documents (`.docx`)",
   "activeByDefault": true
 }
