@@ -23,6 +23,7 @@ import {
   handleFilesystemDownloadRequest,
   sendFilesystemDownloadError,
 } from "./filesystem/download.js";
+import { createFeedbackHttpService } from "./feedback/http.js";
 import { resolveFilesystemRoot } from "./filesystem/paths.js";
 import type { FilesystemRoot } from "./filesystem/types.js";
 import { attachWebSocketUpgradeRoute } from "./websocket/upgrade-router.js";
@@ -89,6 +90,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   });
   const agentHttpService = createAgentHttpService({ harness: agentHarness });
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
+  const feedbackHttpService = createFeedbackHttpService({ version });
   const browserControlService = createBrowserControlService({
     filesystemRootPath: filesystemRoot.absolutePath,
   });
@@ -113,6 +115,19 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
 
     if (requestUrl.pathname.startsWith("/agent")) {
       void agentHttpService.handleRequest(request, response);
+      return;
+    }
+
+    if (requestUrl.pathname.startsWith("/feedback")) {
+      void feedbackHttpService.handleRequest(request, response)
+        .then((handled) => {
+          if (handled) {
+            return;
+          }
+
+          response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          response.end("Not found");
+        });
       return;
     }
 
