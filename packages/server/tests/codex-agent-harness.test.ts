@@ -954,6 +954,9 @@ describe("codex agent harness", () => {
               ].join("\n"),
             },
           ],
+          responsesapiClientMetadata: {
+            "remove_request_user_input": "true",
+          },
         },
       },
     ]);
@@ -1237,6 +1240,9 @@ describe("codex agent harness", () => {
               ].join("\n"),
             },
           ],
+          responsesapiClientMetadata: {
+            "remove_request_user_input": "true",
+          },
         },
       },
     ]);
@@ -1333,6 +1339,9 @@ describe("codex agent harness", () => {
               ].join("\n"),
             },
           ],
+          responsesapiClientMetadata: {
+            "remove_request_user_input": "true",
+          },
         },
       },
     ]);
