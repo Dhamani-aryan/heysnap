@@ -38,6 +38,8 @@ in_app_browser = false
 browser_use = false
 browser_use_external = false
 computer_use = false
+multi_agent = false
+default_mode_request_user_input = false
 
 [model_providers.azure]
 name = "Azure"
@@ -50,7 +52,7 @@ supports_websockets = false
 "api-key" = "ANK1015_CODEX_GATEWAY_TOKEN"
 
 [skills]
-include_instructions = true
+include_instructions = false
 
 [skills.bundled]
 enabled = false
