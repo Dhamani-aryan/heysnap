@@ -2,6 +2,6 @@
   "id": "web",
   "label": "Web",
   "version": "1.0.0",
-  "description": "A small, agent-friendly CLI for working with the web over apis. Exposes - search, scrape and research commands.",
+  "description": "search engines, fetching public pages as markdown, quick research. API-based and fast. Reach for this first for lookups and public-page work.",
   "activeByDefault": true
 }

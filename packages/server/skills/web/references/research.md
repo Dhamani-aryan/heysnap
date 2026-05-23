@@ -166,9 +166,3 @@ web research "post-training methods 2026" \
 report=$(web research "claude code release notes" -q)
 test -s "$report" && echo "wrote $(wc -l <"$report") lines to $report"
 ```
-
-## See also
-
-- [`cli.md`](../cli.md) — top-level CLI overview
-- [`search.md`](./search.md) — the underlying search tool
-- [`scrape.md`](./scrape.md) — the underlying scrape tool

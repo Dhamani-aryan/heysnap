@@ -196,7 +196,3 @@ printf '%s' "$(cat ./query.txt)" | web search -n 5 --json
   curl -sO -H "User-Agent: Mozilla/5.0" -H "Referer: $page_url" "$image_url"
   ```
   See [`scrape.md`](./scrape.md#notes--gotchas) for the full caveat.
-
-## See also
-
-- [`cli.md`](./cli.md) — top-level CLI overview
