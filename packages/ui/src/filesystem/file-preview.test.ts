@@ -30,13 +30,12 @@ describe("standalone file preview urls", () => {
     const url = new URL(buildFilesystemPreviewerUrl(
       "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=token",
       "Reports/Budget Sheet.xlsx",
-      "2026-05-21:1234",
     ));
 
     expect(url.pathname).toBe("/gateway/computers/cmp_123/preview");
     expect(url.searchParams.get("accessToken")).toBe("token");
     expect(url.searchParams.get("path")).toBe("Reports/Budget Sheet.xlsx");
     expect(url.searchParams.get("chrome")).toBe("0");
-    expect(url.searchParams.get("v")).toBe("2026-05-21:1234");
+    expect(url.searchParams.has("v")).toBe(false);
   });
 });
