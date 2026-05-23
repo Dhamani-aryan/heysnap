@@ -33,7 +33,7 @@ RUN ln -sf /usr/local/bin/node /usr/bin/node \
   && corepack prepare pnpm@9.15.2 --activate \
   && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g @openai/codex @heysnap-ai/web @heysnap-ai/chrome-controller-cli@0.1.1 vercel@latest heysnap-image-gen@0.1.1 playwright@latest @playwright/test@latest docx pptxgenjs react-icons react react-dom sharp
 
-RUN playwright install --with-deps --no-shell chromium \
+RUN playwright install --with-deps chromium \
   && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH" \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
