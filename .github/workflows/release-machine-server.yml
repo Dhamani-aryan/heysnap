@@ -72,9 +72,19 @@ jobs:
           cp packages/server/package.json "$ARTIFACT_DIR/package.json"
           cp -R packages/server/dist "$ARTIFACT_DIR/dist"
           cp -R packages/server/skills "$ARTIFACT_DIR/skills"
+          cp -R packages/previewer "$ARTIFACT_DIR/previewer"
           if [ -d packages/server/migrations ]; then
             cp -R packages/server/migrations "$ARTIFACT_DIR/migrations"
           fi
+
+          ARTIFACT_DIR="$ARTIFACT_DIR" node <<'NODE'
+          const { readFileSync, writeFileSync } = require("node:fs");
+          const packagePath = `${process.env.ARTIFACT_DIR}/package.json`;
+          const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
+          packageJson.dependencies ??= {};
+          packageJson.dependencies["@ank1015-app/previewer"] = "file:./previewer";
+          writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
 
           npm install --omit=dev --ignore-scripts --prefix "$ARTIFACT_DIR"
 
