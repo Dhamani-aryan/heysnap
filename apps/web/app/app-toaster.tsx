@@ -36,6 +36,41 @@ export function AppToaster(): React.ReactElement {
     };
   }, []);
 
+  useEffect(() => {
+    const handleToast = (event: Event): void => {
+      const detail = event instanceof CustomEvent
+        ? event.detail as {
+          readonly type?: unknown;
+          readonly message?: unknown;
+          readonly description?: unknown;
+        }
+        : undefined;
+      const message = typeof detail?.message === "string" && detail.message.length > 0
+        ? detail.message
+        : "Done";
+      const description = typeof detail?.description === "string" && detail.description.length > 0
+        ? detail.description
+        : undefined;
+
+      if (detail?.type === "error") {
+        toast.error(message, { description });
+        return;
+      }
+
+      if (detail?.type === "success") {
+        toast.success(message, { description });
+        return;
+      }
+
+      toast(message, { description });
+    };
+
+    window.addEventListener("heysnap:toast", handleToast);
+    return () => {
+      window.removeEventListener("heysnap:toast", handleToast);
+    };
+  }, []);
+
   return (
     <Toaster
       position="bottom-right"

@@ -49,6 +49,7 @@ export interface MachineWorkspaceProps {
   readonly computer: CloudComputer;
   readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
+  readonly feedbackUrl?: string;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
@@ -71,6 +72,7 @@ export function MachineWorkspace({
   computer,
   filesystemPreviewBaseUrl,
   filesystemWebsocketUrl,
+  feedbackUrl,
   sarvamApiKey,
   selectedThreadId = null,
   workspacePanel = "chat",
@@ -1229,6 +1231,7 @@ export function MachineWorkspace({
           <FilesystemExplorer
             websocketUrl={filesystemWebsocketUrl}
             filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
+            feedbackUrl={feedbackUrl}
             agentBaseUrl={agentBaseUrl}
             sarvamApiKey={sarvamApiKey}
             browserControlStatus={browserControlStatus}
