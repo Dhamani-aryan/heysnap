@@ -45,6 +45,8 @@ export type BrowserControlStatusState =
   | "disconnected"
   | "error";
 
+const EXTENSION_RETRY_DELAY_MS = 2500;
+
 interface PendingBrowserControlRequest {
   readonly abortController: AbortController;
 }
@@ -189,11 +191,13 @@ export function BrowserControlBridge({
       return;
     }
 
+    const resolvedWebsocketUrl = websocketUrl;
     let webSocket: WebSocket | null = null;
     let isCancelled = false;
     const pendingRequests = new Map<string, PendingBrowserControlRequest>();
     const pendingAttachmentReads = new Map<string, PendingBrowserControlAttachmentRead>();
     const pendingOutputWrites = new Map<string, PendingBrowserControlOutputWrite>();
+    let extensionRetryTimer: number | undefined;
     const setStatus = (status: BrowserControlStatus): void => {
       if (!isCancelled) {
         onStatusChange?.(status);
@@ -219,7 +223,26 @@ export function BrowserControlBridge({
       }
     };
 
-    const connect = async (): Promise<void> => {
+    const handleConnectError = (error: unknown): void => {
+      setStatus({
+        state: "error",
+        label: "Connection error",
+        detail: error instanceof Error ? error.message : "Failed to connect browser control.",
+      });
+    };
+
+    const scheduleExtensionRetry = (): void => {
+      if (isCancelled || extensionRetryTimer !== undefined) {
+        return;
+      }
+
+      extensionRetryTimer = window.setTimeout(() => {
+        extensionRetryTimer = undefined;
+        void connect().catch(handleConnectError);
+      }, EXTENSION_RETRY_DELAY_MS);
+    };
+
+    async function connect(): Promise<void> {
       setStatus({ state: "checking_extension", label: "Checking" });
 
       const resolvedExecutor = executorRef.current ?? createExtensionExecutor(extensionIdRef.current);
@@ -229,6 +252,7 @@ export function BrowserControlBridge({
           label: "Extension missing",
           detail: "Chrome extension messaging is unavailable.",
         });
+        scheduleExtensionRetry();
         return;
       }
 
@@ -240,6 +264,7 @@ export function BrowserControlBridge({
           label: "Extension missing",
           detail: error instanceof Error ? error.message : "Chrome extension did not respond.",
         });
+        scheduleExtensionRetry();
         return;
       }
 
@@ -248,7 +273,7 @@ export function BrowserControlBridge({
       }
 
       setStatus({ state: "connecting", label: "Connecting" });
-      const socket = new WebSocket(websocketUrl);
+      const socket = new WebSocket(resolvedWebsocketUrl);
       webSocket = socket;
 
       socket.addEventListener("open", () => {
@@ -326,18 +351,15 @@ export function BrowserControlBridge({
       socket.addEventListener("error", () => {
         setStatus({ state: "error", label: "Connection error" });
       });
-    };
+    }
 
-    void connect().catch((error) => {
-      setStatus({
-        state: "error",
-        label: "Connection error",
-        detail: error instanceof Error ? error.message : "Failed to connect browser control.",
-      });
-    });
+    void connect().catch(handleConnectError);
 
     return () => {
       isCancelled = true;
+      if (extensionRetryTimer !== undefined) {
+        window.clearTimeout(extensionRetryTimer);
+      }
       closePendingRequests("Browser-control bridge unmounted");
       closePendingAttachmentReads("Browser-control bridge unmounted");
       closePendingOutputWrites("Browser-control bridge unmounted");
