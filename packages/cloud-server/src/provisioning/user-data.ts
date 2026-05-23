@@ -25,7 +25,6 @@ export const renderMachineUserData = (input: RenderMachineUserDataInput): string
     "ANK1015_AGENT_TOOLS_ROOT=/opt/ank1015/agent-tools",
     "ANK1015_AGENT_TOOLS_BIN_DIR=/opt/ank1015/agent-tools/bin",
     "ANK1015_AGENT_SKILLS_CATALOG_DIR=/opt/ank1015/agent-skills/catalog",
-    "ANK1015_ACTIVE_SKILLS_DIR=/home/agent/.codex/skills",
     "PATH=/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
   ].join("\n");
 

@@ -80,7 +80,8 @@ describe("AWS EC2 provisioning", () => {
     expect(userData).toContain("exec /usr/local/bin/ank1015-machine-bootstrap");
     expect(userData).toContain("PATH=/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(userData).toContain("ANK1015_MACHINE_TOKEN_FILE=/opt/ank1015/machine-token");
-    expect(userData).toContain("ANK1015_ACTIVE_SKILLS_DIR=/home/agent/.codex/skills");
+    expect(userData).toContain("ANK1015_AGENT_SKILLS_CATALOG_DIR=/opt/ank1015/agent-skills/catalog");
+    expect(userData).not.toContain("ANK1015_ACTIVE_SKILLS_DIR");
     expect(userData).not.toContain("MACHINE_SERVER_VERSION=");
     expect(userData).not.toContain("http://127.0.0.1:$PORT/status");
     expect(userData).not.toContain("install_update_if_idle");
