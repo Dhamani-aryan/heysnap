@@ -7,6 +7,7 @@ import {
   ArrowLeft02Icon,
   ArrowRight02Icon,
   Cancel01Icon,
+  ChatFeedbackIcon,
   Download05Icon,
   File02Icon,
   FileUploadIcon,
@@ -121,6 +122,9 @@ type OpenFileTab = {
 };
 
 type ActiveLeftPaneSurface = "directory" | "browser" | "file";
+type FeedbackSubmitState =
+  | { readonly status: "idle" }
+  | { readonly status: "submitting" };
 
 export type BrowserWindowTab = {
   readonly id: number;
@@ -270,6 +274,7 @@ export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
   readonly filesystemPreviewBaseUrl?: string;
   readonly agentBaseUrl?: string;
+  readonly feedbackUrl?: string;
   readonly sarvamApiKey?: string;
   readonly browserControlStatus?: BrowserControlStatus;
   readonly browserWindowError?: string | null;
@@ -316,6 +321,7 @@ export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
   filesystemPreviewBaseUrl,
   agentBaseUrl = "http://localhost:4000/agent",
+  feedbackUrl,
   sarvamApiKey,
   browserControlStatus,
   browserWindowError = null,
@@ -372,6 +378,9 @@ export function FilesystemExplorer({
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(getInitialRightSidebarOpen);
   const [isRightWorkAreaOpen, setIsRightWorkAreaOpen] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackSubmitState, setFeedbackSubmitState] = useState<FeedbackSubmitState>({ status: "idle" });
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [activeLeftPaneSurface, setActiveLeftPaneSurface] = useState<ActiveLeftPaneSurface>("directory");
@@ -582,6 +591,80 @@ export function FilesystemExplorer({
     showChatPanel();
     onNewThread?.();
   }, [onNewThread, showChatPanel]);
+
+  const openFeedbackDialog = useCallback((): void => {
+    setFeedbackSubmitState({ status: "idle" });
+    setIsFeedbackDialogOpen(true);
+  }, []);
+
+  const closeFeedbackDialog = useCallback((): void => {
+    if (feedbackSubmitState.status === "submitting") {
+      return;
+    }
+
+    setIsFeedbackDialogOpen(false);
+    setFeedbackSubmitState({ status: "idle" });
+  }, [feedbackSubmitState.status]);
+
+  const submitFeedback = useCallback(async (): Promise<void> => {
+    if (feedbackUrl === undefined) {
+      dispatchToast({ type: "error", message: "Feedback is not available for this workspace." });
+      return;
+    }
+
+    const comment = feedbackComment.trim();
+
+    if (comment.length === 0) {
+      dispatchToast({ type: "error", message: "Add a comment before sending feedback." });
+      return;
+    }
+
+    setFeedbackSubmitState({ status: "submitting" });
+
+    try {
+      const response = await fetch(feedbackUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          comment,
+          threadId: selectedThreadId,
+          cwd: currentPath,
+          clientContext: {
+            source: "workspace",
+            userAgent: window.navigator.userAgent,
+          },
+        }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        readonly feedback?: { readonly status?: string };
+        readonly error?: { readonly message?: string };
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error?.message ?? "Feedback could not be sent.");
+      }
+
+      const status = payload?.feedback?.status;
+      setFeedbackComment("");
+      setFeedbackSubmitState({ status: "idle" });
+      setIsFeedbackDialogOpen(false);
+      dispatchToast({
+        type: "success",
+        message: status === "complete" ? "Feedback sent" : "Feedback saved",
+        description: status === "complete"
+          ? "A session snapshot was attached."
+          : "The machine snapshot was unavailable, so only the comment was saved.",
+      });
+    } catch (error) {
+      setFeedbackSubmitState({ status: "idle" });
+      dispatchToast({
+        type: "error",
+        message: error instanceof Error ? error.message : "Feedback could not be sent.",
+      });
+    }
+  }, [currentPath, feedbackComment, feedbackUrl, selectedThreadId]);
 
   const handleSelectThread = useCallback((thread: AgentThreadSummary): void => {
     showChatPanel();
@@ -1147,6 +1230,7 @@ export function FilesystemExplorer({
         isFetching={isFetching}
         browserControlStatus={browserControlStatus}
         onNewThread={handleNewThread}
+        onShareFeedback={feedbackUrl === undefined ? undefined : openFeedbackDialog}
         isRightSidebarOpen={isRightSidebarOpen}
         isRightWorkAreaOpen={isRightWorkAreaOpen}
         onToggleRightWorkArea={handleToggleRightWorkArea}
@@ -1275,6 +1359,19 @@ export function FilesystemExplorer({
       </DesktopSplitPane>
       {rightSidebar}
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
+      {isFeedbackDialogOpen ? (
+        <FeedbackDialog
+          comment={feedbackComment}
+          currentPath={currentPath}
+          selectedThreadId={selectedThreadId}
+          state={feedbackSubmitState}
+          onChangeComment={(value) => {
+            setFeedbackComment(value);
+          }}
+          onClose={closeFeedbackDialog}
+          onSubmit={() => void submitFeedback()}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1317,6 +1414,91 @@ const UploadProgressDialog = ({
           <span>{formatBytes(progress.completedBytes)} / {formatBytes(progress.totalBytes)}</span>
         </div>
       </div>
+    </div>
+  );
+};
+
+const FeedbackDialog = ({
+  comment,
+  currentPath,
+  selectedThreadId,
+  state,
+  onChangeComment,
+  onClose,
+  onSubmit,
+}: {
+  readonly comment: string;
+  readonly currentPath: string;
+  readonly selectedThreadId: string | null;
+  readonly state: FeedbackSubmitState;
+  readonly onChangeComment: (value: string) => void;
+  readonly onClose: () => void;
+  readonly onSubmit: () => void;
+}): React.ReactElement => {
+  const canSubmit = comment.trim().length > 0 && state.status !== "submitting";
+
+  return (
+    <div className="feedback-dialog-backdrop" role="presentation">
+      <form
+        className="feedback-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="feedback-dialog-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSubmit) {
+            onSubmit();
+          }
+        }}
+      >
+        <div className="feedback-dialog-heading">
+          <div>
+            <h2 id="feedback-dialog-title">Share feedback</h2>
+            <p>{currentPath.length === 0 ? "Workspace root" : currentPath}</p>
+          </div>
+          <button
+            type="button"
+            className="feedback-dialog-close"
+            aria-label="Close feedback"
+            title="Close"
+            disabled={state.status === "submitting"}
+            onClick={onClose}
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={16} color="currentColor" strokeWidth={1.8} />
+          </button>
+        </div>
+        <textarea
+          className="feedback-dialog-input"
+          value={comment}
+          maxLength={5_000}
+          autoFocus
+          placeholder="What should we know?"
+          aria-label="Feedback comment"
+          disabled={state.status === "submitting"}
+          onChange={(event) => onChangeComment(event.currentTarget.value)}
+        />
+        <div className="feedback-dialog-meta">
+          <span>{selectedThreadId === null ? "No thread selected" : selectedThreadId}</span>
+          <span>{comment.length}/5000</span>
+        </div>
+        <div className="feedback-dialog-actions">
+          <button
+            type="button"
+            className="feedback-dialog-secondary"
+            disabled={state.status === "submitting"}
+            onClick={onClose}
+          >
+            Close
+          </button>
+          <button
+            type="submit"
+            className="feedback-dialog-primary"
+            disabled={!canSubmit}
+          >
+            {state.status === "submitting" ? "Sending" : "Send"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 };
@@ -1795,6 +1977,14 @@ const getBrowserWindowStatusText = (input: {
   return "No Chrome window is attached.";
 };
 
+const dispatchToast = (input: {
+  readonly type: "success" | "error";
+  readonly message: string;
+  readonly description?: string;
+}): void => {
+  window.dispatchEvent(new CustomEvent("heysnap:toast", { detail: input }));
+};
+
 const FinderToolbar = ({
   canGoBack,
   canGoForward,
@@ -1804,6 +1994,7 @@ const FinderToolbar = ({
   isFetching,
   browserControlStatus,
   onNewThread,
+  onShareFeedback,
   isRightSidebarOpen,
   isRightWorkAreaOpen,
   onToggleRightWorkArea,
@@ -1827,6 +2018,7 @@ const FinderToolbar = ({
   readonly isFetching: boolean;
   readonly browserControlStatus?: BrowserControlStatus;
   readonly onNewThread?: () => void;
+  readonly onShareFeedback?: () => void;
   readonly isRightSidebarOpen: boolean;
   readonly isRightWorkAreaOpen: boolean;
   readonly onToggleRightWorkArea: () => void;
@@ -1885,6 +2077,15 @@ const FinderToolbar = ({
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
+      {onShareFeedback === undefined ? null : (
+        <ToolbarButton
+          onClick={onShareFeedback}
+          ariaLabel="Share feedback"
+          title="Share feedback"
+        >
+          <HugeiconsIcon icon={ChatFeedbackIcon} size={18} color="currentColor" strokeWidth={1.8} />
+        </ToolbarButton>
+      )}
       <ToolbarButton
         onClick={onToggleRightWorkArea}
         ariaLabel={isRightWorkAreaOpen ? "Hide right work area" : "Show right work area"}

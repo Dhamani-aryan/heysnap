@@ -57,6 +57,7 @@ export interface CloudWorkspaceRendererProps {
   readonly computer: CloudComputer;
   readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
+  readonly feedbackUrl?: string;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
@@ -483,6 +484,11 @@ function CloudAppContent({
         filesystemWebsocketUrl: buildGatewayWebsocketUrl({
           baseUrl: client.baseUrl,
           path: workspaceSession.accessSession.routes.filesystemWebSocketUrl,
+          token: workspaceSession.accessSession.accessSession.token,
+        }),
+        feedbackUrl: buildGatewayHttpUrl({
+          baseUrl: client.baseUrl,
+          path: `/gateway/computers/${encodeURIComponent(selectedComputer.id)}/feedback`,
           token: workspaceSession.accessSession.accessSession.token,
         }),
         sarvamApiKey,
