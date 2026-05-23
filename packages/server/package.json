@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
+    "@types/yazl": "^3.3.1",
     "tsx": "^4.19.4",
     "vitest": "^4.1.5"
   },
@@ -25,6 +26,7 @@
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^5.0.0",
     "trash": "^10.1.1",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "yazl": "^3.3.1"
   }
 }
