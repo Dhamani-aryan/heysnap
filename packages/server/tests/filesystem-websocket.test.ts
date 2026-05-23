@@ -132,76 +132,6 @@ describe("filesystem websocket", () => {
     });
   });
 
-  it("sends file updates for open files outside the active directory", async () => {
-    const root = await createRoot();
-    await mkdir(join(root, "open"), { recursive: true });
-    await mkdir(join(root, "current"), { recursive: true });
-    await writeFile(join(root, "open", "report.txt"), "old");
-    const { url } = await startFilesystemServer(root);
-    const client = await connect(`${url}/filesystem`);
-
-    await client.next("hello");
-    await client.next("snapshot");
-
-    client.socket.send(JSON.stringify({ type: "subscribe", requestId: "subscribe-current", path: "current" }));
-    await client.next("snapshot");
-
-    client.socket.send(JSON.stringify({
-      type: "watchFiles",
-      requestId: "watch-open-files",
-      paths: ["open/report.txt"],
-    }));
-
-    expect(await client.next("ack")).toMatchObject({
-      type: "ack",
-      requestId: "watch-open-files",
-      action: "watchFiles",
-    });
-    expect(await client.next("fileUpdates")).toMatchObject({
-      type: "fileUpdates",
-      reason: "subscription",
-      entries: [{ path: "open/report.txt", size: 3 }],
-    });
-
-    await writeFile(join(root, "open", "unwatched.txt"), "noise");
-    await client.none("fileUpdates");
-
-    await writeFile(join(root, "open", "report.txt"), "new content");
-
-    expect(await client.next("fileUpdates")).toMatchObject({
-      type: "fileUpdates",
-      reason: "watch",
-      entries: [{ path: "open/report.txt", size: 11 }],
-    });
-  });
-
-  it("reports missing watched files", async () => {
-    const root = await createRoot();
-    await mkdir(join(root, "open"), { recursive: true });
-    const { url } = await startFilesystemServer(root);
-    const client = await connect(`${url}/filesystem`);
-
-    await client.next("hello");
-    await client.next("snapshot");
-
-    client.socket.send(JSON.stringify({
-      type: "watchFiles",
-      requestId: "watch-missing-files",
-      paths: ["open/missing.txt"],
-    }));
-
-    expect(await client.next("ack")).toMatchObject({
-      type: "ack",
-      requestId: "watch-missing-files",
-      action: "watchFiles",
-    });
-    expect(await client.next("fileUpdates")).toMatchObject({
-      type: "fileUpdates",
-      reason: "subscription",
-      missingPaths: ["open/missing.txt"],
-    });
-  });
-
   it("restores remembered directory and open files across reconnects", async () => {
     const root = await createRoot();
     await mkdir(join(root, "current"), { recursive: true });
@@ -220,12 +150,16 @@ describe("filesystem websocket", () => {
     });
 
     firstClient.socket.send(JSON.stringify({
-      type: "watchFiles",
-      requestId: "watch-open-files",
+      type: "setOpenFiles",
+      requestId: "set-open-files",
       paths: ["open/report.txt"],
     }));
-    await firstClient.next("ack");
-    await firstClient.next("fileUpdates");
+    expect(await firstClient.next("ack")).toMatchObject({
+      type: "ack",
+      requestId: "set-open-files",
+      action: "setOpenFiles",
+      result: { paths: ["open/report.txt"] },
+    });
     firstClient.socket.close();
 
     const secondClient = await connect(`${url}/filesystem`);
@@ -243,7 +177,7 @@ describe("filesystem websocket", () => {
     });
   });
 
-  it("does not restore closed or missing open files", async () => {
+  it("does not restore missing open files", async () => {
     const root = await createRoot();
     await mkdir(join(root, "open"), { recursive: true });
     await writeFile(join(root, "open", "keep.txt"), "keep");
@@ -254,19 +188,50 @@ describe("filesystem websocket", () => {
     await firstClient.next("snapshot");
 
     firstClient.socket.send(JSON.stringify({
-      type: "watchFiles",
-      requestId: "watch-open-files",
+      type: "setOpenFiles",
+      requestId: "set-open-files",
       paths: ["open/keep.txt", "open/missing.txt"],
     }));
     await firstClient.next("ack");
-    await firstClient.next("fileUpdates");
+    firstClient.socket.close();
+
+    const secondClient = await connect(`${url}/filesystem`);
+    expect(await secondClient.next("hello")).toMatchObject({
+      type: "hello",
+      viewState: {
+        openFiles: [{ path: "open/keep.txt", type: "file", size: 4 }],
+      },
+    });
+  });
+
+  it("clears remembered open files", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "open"), { recursive: true });
+    await writeFile(join(root, "open", "keep.txt"), "keep");
+    const { url } = await startFilesystemServer(root);
+    const firstClient = await connect(`${url}/filesystem`);
+
+    await firstClient.next("hello");
+    await firstClient.next("snapshot");
 
     firstClient.socket.send(JSON.stringify({
-      type: "watchFiles",
-      requestId: "watch-closed-files",
-      paths: [],
+      type: "setOpenFiles",
+      requestId: "set-open-files",
+      paths: ["open/keep.txt"],
     }));
     await firstClient.next("ack");
+
+    firstClient.socket.send(JSON.stringify({
+      type: "setOpenFiles",
+      requestId: "clear-open-files",
+      paths: [],
+    }));
+    expect(await firstClient.next("ack")).toMatchObject({
+      type: "ack",
+      requestId: "clear-open-files",
+      action: "setOpenFiles",
+      result: { paths: [] },
+    });
     firstClient.socket.close();
 
     const secondClient = await connect(`${url}/filesystem`);
