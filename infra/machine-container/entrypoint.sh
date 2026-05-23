@@ -39,7 +39,6 @@ ANK1015_CAPABILITIES_ROOT=${ANK1015_CAPABILITIES_ROOT:-$machine_root/agent-capab
 ANK1015_AGENT_TOOLS_ROOT=${ANK1015_AGENT_TOOLS_ROOT:-$machine_root/agent-tools}
 ANK1015_AGENT_TOOLS_BIN_DIR=${ANK1015_AGENT_TOOLS_BIN_DIR:-$machine_root/agent-tools/bin}
 ANK1015_AGENT_SKILLS_CATALOG_DIR=${ANK1015_AGENT_SKILLS_CATALOG_DIR:-$machine_root/agent-skills/catalog}
-ANK1015_ACTIVE_SKILLS_DIR=${ANK1015_ACTIVE_SKILLS_DIR:-$agent_home/.codex/skills}
 PATH=${PATH:-/opt/ank1015/agent-tools/bin:/opt/ank1015/venvs/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
 ENV
 

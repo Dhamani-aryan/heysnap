@@ -258,6 +258,8 @@ export const createComputerRoutes = (
       accessSession: serializeComputerAccessSession(result.accessSession, result.token),
       routes: {
         filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
+        filesystemPreviewBaseUrl: `/gateway/computers/${computer.id}/preview`,
+        filesystemPreviewWebSocketUrl: `/gateway/computers/${computer.id}/preview/ws`,
         browserControlWebSocketUrl: `/gateway/computers/${computer.id}/browser-control`,
         agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
         capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,

@@ -8,6 +8,8 @@ import { badGateway, notFound, serviceUnavailable } from "../shared/errors.js";
 const GATEWAY_PREFIX = "/llm/openai/v1";
 const PROVIDER = "azure";
 const IMAGE_MODEL = "gpt-image-2";
+const CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
+const REQUEST_USER_INPUT_TOOL_NAME = "request_user_input";
 const DEFAULT_CAPTURE_BODY_MAX_BYTES = 262_144;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -63,9 +65,15 @@ export const createAiGatewayRoutes = (
     const upstreamUrl = buildUpstreamUrl(azureBaseUrl, requestUrl, routeKind);
     const captureBodies = config.aiGatewayCaptureBodies === true;
     const captureMaxBytes = config.aiGatewayCaptureBodyMaxBytes ?? DEFAULT_CAPTURE_BODY_MAX_BYTES;
+    const removeRequestUserInputTool = shouldRemoveRequestUserInputTool(context.req.raw.headers);
     const requestBody = routeKind === "images"
       ? await readImageProxyRequestBody(context.req.raw, captureBodies, captureMaxBytes)
-      : await readProxyRequestBody(context.req.raw, captureBodies, captureMaxBytes);
+      : await readProxyRequestBody(
+        context.req.raw,
+        captureBodies,
+        captureMaxBytes,
+        removeRequestUserInputTool,
+      );
     const usageModel = routeKind === "images" ? IMAGE_MODEL : extractModelFromJsonText(requestBody.text);
     const gatewayMetadata = {
       gatewayPath: requestUrl.pathname,
@@ -85,11 +93,12 @@ export const createAiGatewayRoutes = (
     });
 
     try {
+      const upstreamRequestHeaders = routeKind === "images"
+        ? buildImageUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body)
+        : buildResponsesUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body);
       const upstreamResponse = await fetch(upstreamUrl, {
         method: context.req.method,
-        headers: routeKind === "images"
-          ? buildImageUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body)
-          : buildResponsesUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body),
+        headers: upstreamRequestHeaders,
         body: requestBody.body,
         ...(["GET", "HEAD"].includes(context.req.method) ? {} : { duplex: "half" as const }),
       });
@@ -102,7 +111,7 @@ export const createAiGatewayRoutes = (
         captureBodies,
         captureMaxBytes,
         requestCapture: requestBody.capture,
-        requestHeaders: redactHeaders(context.req.raw.headers),
+        requestHeaders: redactHeaders(upstreamRequestHeaders),
         responseHeaders: redactHeaders(upstreamResponse.headers),
         model: usageModel,
         metadata: gatewayMetadata,
@@ -191,6 +200,7 @@ const readProxyRequestBody = async (
   request: Request,
   captureBodies: boolean,
   maxBytes: number,
+  removeRequestUserInputTool: boolean,
 ): Promise<{
   readonly body: RequestInit["body"] | null | undefined;
   readonly text: string | null;
@@ -209,12 +219,69 @@ const readProxyRequestBody = async (
   const bytes = new Uint8Array(await request.arrayBuffer());
   const capture = captureBodies ? captureBytes(bytes, maxBytes) : null;
   const text = new TextDecoder().decode(bytes);
+  const normalizedText = contentType.includes("application/json") && removeRequestUserInputTool
+    ? removeRequestUserInputToolFromJsonText(text)
+    : null;
+  const upstreamText = normalizedText ?? text;
 
   return {
-    body: bytes,
-    text,
-    capture,
+    body: normalizedText ?? bytes,
+    text: upstreamText,
+    capture: captureBodies
+      ? normalizedText === null ? capture : captureText(normalizedText, maxBytes)
+      : null,
   };
+};
+
+const shouldRemoveRequestUserInputTool = (headers: Headers): boolean => {
+  const rawMetadata = headers.get(CODEX_TURN_METADATA_HEADER);
+
+  if (rawMetadata === null) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(rawMetadata) as unknown;
+    const metadata = asRecord(parsed);
+    return isTruthyMetadataFlag(metadata?.["remove_request_user_input"]);
+  } catch {
+    return false;
+  }
+};
+
+const isTruthyMetadataFlag = (value: unknown): boolean => value === true || value === "true";
+
+const removeRequestUserInputToolFromJsonText = (text: string): string | null => {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const requestBody = parsed as Record<string, unknown>;
+    const tools = requestBody["tools"];
+
+    if (!Array.isArray(tools)) {
+      return null;
+    }
+
+    const filteredTools = tools.filter((tool) => {
+      const toolRecord = asRecord(tool);
+      return toolRecord?.["name"] !== REQUEST_USER_INPUT_TOOL_NAME;
+    });
+
+    if (filteredTools.length === tools.length) {
+      return null;
+    }
+
+    return JSON.stringify({
+      ...requestBody,
+      tools: filteredTools,
+    });
+  } catch {
+    return null;
+  }
 };
 
 const readImageProxyRequestBody = async (
@@ -263,7 +330,7 @@ const readImageProxyRequestBody = async (
     return {
       body: normalizedText,
       text: normalizedText,
-      capture,
+      capture: captureBodies ? captureText(normalizedText, maxBytes) : capture,
     };
   }
 
@@ -374,6 +441,10 @@ const captureBytes = (bytes: Uint8Array, maxBytes: number): BodyCapture => {
     text: new TextDecoder().decode(slice),
     truncated: bytes.byteLength > maxBytes,
   };
+};
+
+const captureText = (text: string, maxBytes: number): BodyCapture => {
+  return captureBytes(new TextEncoder().encode(text), maxBytes);
 };
 
 const redactHeaders = (headers: Headers): Record<string, string> => {

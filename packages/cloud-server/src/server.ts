@@ -25,6 +25,9 @@ import type { GatewayHttpResponse, GatewayHttpStreamResponse, TunnelStatusRegist
 
 export type { TunnelStatusRegistry } from "./gateway/tunnel.js";
 
+const PREVIEW_ACCESS_COOKIE_NAME = "heysnap_preview_access";
+const PREVIEW_PUBLIC_BASE_PATH_HEADER = "x-heysnap-preview-public-base-path";
+
 export interface CreateAppOptions {
   readonly store: CloudStore;
   readonly config: CloudServerConfig;
@@ -53,7 +56,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     },
     allowHeaders: ["Authorization", "Content-Type", "Last-Event-ID"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    exposeHeaders: ["Content-Disposition", "Content-Length", "Content-Range", "X-HeySnap-Xlsx-Asset-Id"],
+    exposeHeaders: ["Content-Disposition", "Content-Length", "Content-Range"],
     maxAge: 600,
   }));
 
@@ -77,29 +80,11 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
       "/filesystem/download",
     );
   });
-  app.get("/gateway/computers/:computerId/filesystem/preview", async (context) => {
-    return await proxyGatewayFilesystemHttpRequest(
-      context,
-      gatewayAccessService,
-      tunnelRegistry,
-      "/filesystem/preview",
-    );
+  app.get("/gateway/computers/:computerId/preview", async (context) => {
+    return await proxyGatewayPreviewHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
-  app.get("/gateway/computers/:computerId/filesystem/xlsx", async (context) => {
-    return await proxyGatewayFilesystemHttpRequest(
-      context,
-      gatewayAccessService,
-      tunnelRegistry,
-      "/filesystem/xlsx",
-    );
-  });
-  app.get("/gateway/computers/:computerId/filesystem/xlsx-assets/*", async (context) => {
-    return await proxyGatewayFilesystemHttpRequest(
-      context,
-      gatewayAccessService,
-      tunnelRegistry,
-      "/filesystem/xlsx-assets",
-    );
+  app.get("/gateway/computers/:computerId/preview/*", async (context) => {
+    return await proxyGatewayPreviewHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
   app.all("/gateway/computers/:computerId/capabilities", async (context) => {
     return await proxyGatewayCapabilitiesHttpRequest(context, gatewayAccessService, tunnelRegistry);
@@ -149,7 +134,7 @@ const proxyGatewayFilesystemHttpRequest = async (
   context: Context<{ Variables: AppVariables }>,
   gatewayAccessService: GatewayAccessService,
   tunnelRegistry: TunnelStatusRegistry,
-  targetPathname: "/filesystem/download" | "/filesystem/preview" | "/filesystem/xlsx" | "/filesystem/xlsx-assets",
+  targetPathname: "/filesystem/download",
 ): Promise<Response> => {
   const computerId = context.req.param("computerId");
   const requestUrl = new URL(context.req.url);
@@ -178,7 +163,7 @@ const proxyGatewayFilesystemHttpRequest = async (
   }
 
   const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
-    path: buildFilesystemProxyTargetPath(computerId, requestUrl, targetPathname),
+    path: buildFilesystemProxyTargetPath(requestUrl, targetPathname),
   });
 
   if (proxied === null) {
@@ -186,6 +171,60 @@ const proxyGatewayFilesystemHttpRequest = async (
   }
 
   return toGatewayDownloadResponse(proxied);
+};
+
+const proxyGatewayPreviewHttpRequest = async (
+  context: Context<{ Variables: AppVariables }>,
+  gatewayAccessService: GatewayAccessService,
+  tunnelRegistry: TunnelStatusRegistry,
+): Promise<Response> => {
+  const computerId = context.req.param("computerId");
+  const requestUrl = new URL(context.req.url);
+
+  if (computerId === undefined || computerId.length === 0) {
+    return context.json({ error: { code: "NOT_FOUND", message: "Computer not found" } }, 404);
+  }
+
+  const queryToken = requestUrl.searchParams.get("accessToken")
+    ?? requestUrl.searchParams.get("token")
+    ?? undefined;
+  const token = readBearerToken(context.req.header("authorization"))
+    ?? queryToken
+    ?? readCookie(context.req.header("cookie"), PREVIEW_ACCESS_COOKIE_NAME)
+    ?? undefined;
+
+  if (token === undefined || token.length === 0) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Gateway access token is required" } }, 401);
+  }
+
+  const accessSession = await gatewayAccessService.authenticateAccessToken({ token, computerId });
+
+  if (accessSession === null) {
+    return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
+  }
+
+  if (tunnelRegistry.proxyHttpRequest === undefined) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
+    path: buildPreviewProxyTargetPath(computerId, requestUrl),
+    headers: {
+      [PREVIEW_PUBLIC_BASE_PATH_HEADER]: buildPreviewGatewayBasePath(computerId),
+    },
+  });
+
+  if (proxied === null) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  return toGatewayPreviewResponse(proxied, queryToken !== undefined && token === queryToken ? {
+    cookie: buildPreviewAccessCookie({
+      computerId,
+      token: queryToken,
+      secure: isSecureRequest(context, requestUrl),
+    }),
+  } : undefined);
 };
 
 const proxyGatewayAgentHttpRequest = async (
@@ -279,22 +318,32 @@ const proxyGatewayCapabilitiesHttpRequest = async (
 };
 
 const buildFilesystemProxyTargetPath = (
-  computerId: string,
   requestUrl: URL,
-  targetPathname: "/filesystem/download" | "/filesystem/preview" | "/filesystem/xlsx" | "/filesystem/xlsx-assets",
+  targetPathname: "/filesystem/download",
 ): string => {
-  const gatewayPrefix = `/gateway/computers/${encodeURIComponent(computerId)}`;
-  const sourcePrefix = `${gatewayPrefix}${targetPathname}`;
-  const suffix = targetPathname === "/filesystem/xlsx-assets" && requestUrl.pathname.startsWith(sourcePrefix)
-    ? requestUrl.pathname.slice(sourcePrefix.length)
+  const query = new URLSearchParams(requestUrl.searchParams);
+  query.delete("accessToken");
+  query.delete("token");
+  const queryString = query.toString();
+
+  return `${targetPathname}${queryString.length > 0 ? `?${queryString}` : ""}`;
+};
+
+const buildPreviewProxyTargetPath = (computerId: string, requestUrl: URL): string => {
+  const prefix = buildPreviewGatewayBasePath(computerId);
+  const suffix = requestUrl.pathname.startsWith(prefix)
+    ? requestUrl.pathname.slice(prefix.length)
     : "";
   const query = new URLSearchParams(requestUrl.searchParams);
   query.delete("accessToken");
   query.delete("token");
   const queryString = query.toString();
 
-  return `${targetPathname}${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
+  return `/preview${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
+
+const buildPreviewGatewayBasePath = (computerId: string): string =>
+  `/gateway/computers/${encodeURIComponent(computerId)}/preview`;
 
 const buildAgentProxyTargetPath = (computerId: string, requestUrl: URL): string => {
   const prefix = `/gateway/computers/${encodeURIComponent(computerId)}/agent`;
@@ -376,6 +425,30 @@ const toGatewayDownloadResponse = (proxied: GatewayHttpResponse): Response => {
   });
 };
 
+const toGatewayPreviewResponse = (
+  proxied: GatewayHttpResponse,
+  options: { readonly cookie?: string } = {},
+): Response => {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(proxied.headers)) {
+    if (isForwardedPreviewHeader(name)) {
+      headers.set(name, value);
+    }
+  }
+
+  headers.set("content-length", String(proxied.body.byteLength));
+
+  if (options.cookie !== undefined) {
+    headers.append("set-cookie", options.cookie);
+  }
+
+  return new Response(new Uint8Array(proxied.body), {
+    status: proxied.statusCode,
+    headers,
+  });
+};
+
 const toGatewayAgentResponse = (proxied: GatewayHttpStreamResponse): Response => {
   const headers = new Headers();
 
@@ -410,8 +483,14 @@ const isForwardedDownloadHeader = (name: string): boolean => {
   const normalized = name.toLowerCase();
   return normalized === "content-type" ||
     normalized === "content-disposition" ||
-    normalized === "cache-control" ||
-    normalized === "x-heysnap-xlsx-asset-id";
+    normalized === "cache-control";
+};
+
+const isForwardedPreviewHeader = (name: string): boolean => {
+  const normalized = name.toLowerCase();
+  return normalized === "content-type" ||
+    normalized === "content-disposition" ||
+    normalized === "cache-control";
 };
 
 const isForwardedAgentHeader = (name: string): boolean => {
@@ -441,6 +520,54 @@ const readBearerToken = (authorization: string | undefined): string | undefined 
   }
 
   return token.trim();
+};
+
+const readCookie = (cookieHeader: string | undefined, name: string): string | undefined => {
+  if (cookieHeader === undefined) {
+    return undefined;
+  }
+
+  for (const part of cookieHeader.split(";")) {
+    const [rawName, ...rawValueParts] = part.trim().split("=");
+    if (rawName !== name || rawValueParts.length === 0) {
+      continue;
+    }
+
+    const rawValue = rawValueParts.join("=");
+    try {
+      return decodeURIComponent(rawValue);
+    } catch {
+      return rawValue;
+    }
+  }
+
+  return undefined;
+};
+
+const buildPreviewAccessCookie = (input: {
+  readonly computerId: string;
+  readonly token: string;
+  readonly secure: boolean;
+}): string => {
+  const sameSite = input.secure ? "None" : "Lax";
+  const attributes = [
+    `${PREVIEW_ACCESS_COOKIE_NAME}=${encodeURIComponent(input.token)}`,
+    `Path=${buildPreviewGatewayBasePath(input.computerId)}`,
+    "HttpOnly",
+    "Max-Age=3600",
+    `SameSite=${sameSite}`,
+  ];
+
+  if (input.secure) {
+    attributes.push("Secure");
+  }
+
+  return attributes.join("; ");
+};
+
+const isSecureRequest = (context: Context<{ Variables: AppVariables }>, requestUrl: URL): boolean => {
+  const forwardedProto = context.req.header("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  return requestUrl.protocol === "https:" || forwardedProto === "https";
 };
 
 const ADMIN_DIST_RELATIVE_FROM_SOURCE = "../admin-ui/dist";

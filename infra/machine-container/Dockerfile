@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ank1015/ms-playwright
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -30,7 +31,12 @@ RUN apt-get update \
 RUN ln -sf /usr/local/bin/node /usr/bin/node \
   && corepack enable \
   && corepack prepare pnpm@9.15.2 --activate \
-  && npm install -g @openai/codex @heysnap-ai/web @heysnap-ai/chrome-controller-cli@0.1.1 vercel@latest heysnap-image-gen@0.1.1 docx pptxgenjs react-icons react react-dom sharp
+  && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g @openai/codex @heysnap-ai/web @heysnap-ai/chrome-controller-cli@0.1.1 vercel@latest heysnap-image-gen@0.1.1 playwright@latest @playwright/test@latest docx pptxgenjs react-icons react react-dom sharp
+
+RUN playwright install --with-deps --no-shell chromium \
+  && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH" \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN install -d -m 0755 /opt/ank1015/venvs \
   && python -m venv /opt/ank1015/venvs/default \

@@ -35,7 +35,6 @@ ensure_user_and_directories() {
   install -d -m 0755 -o agent -g agent "$ANK1015_FILESYSTEM_ROOT"
   install -d -m 0755 -o agent -g agent "$HOME"
   install -d -m 0700 -o agent -g agent "$HOME/.codex"
-  install -d -m 0755 -o agent -g agent "$ANK1015_ACTIVE_SKILLS_DIR"
   install -d -m 0755 -o root -g root "$(ank1015_machine_release_dir)"
   install -d -m 0775 -o root -g ank1015 "$ANK1015_CAPABILITIES_ROOT"
   install -d -m 0775 -o root -g ank1015 "$ANK1015_AGENT_TOOLS_ROOT"

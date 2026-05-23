@@ -42,6 +42,7 @@ type MobileMachineWorkspaceContextValue = {
   currentPath: string;
   error: string | null;
   filesystemClient: FilesystemClient | null;
+  filesystemPreviewBaseUrl: string | null;
   filesystemWebsocketUrl: string | null;
   goBack: () => void;
   goForward: () => void;
@@ -114,6 +115,18 @@ export function MobileMachineWorkspaceProvider({
     });
   }, [client.baseUrl, session.accessSession]);
 
+  const filesystemPreviewBaseUrl = useMemo(() => {
+    if (session.accessSession?.routes.filesystemPreviewBaseUrl === undefined) {
+      return null;
+    }
+
+    return buildGatewayHttpUrl({
+      baseUrl: client.baseUrl,
+      path: session.accessSession.routes.filesystemPreviewBaseUrl,
+      token: session.accessSession.accessSession.token,
+    });
+  }, [client.baseUrl, session.accessSession]);
+
   const agentBaseUrl = useMemo(() => {
     if (session.accessSession === null) {
       return null;
@@ -158,48 +171,6 @@ export function MobileMachineWorkspaceProvider({
       onError: (message) => {
         setFilesystemError(toFilesystemErrorMessage(message));
       },
-      onFileUpdates: ({ entries: updatedEntries }) => {
-        if (updatedEntries.length === 0) {
-          return;
-        }
-
-        const updatedEntriesByPath = new Map(
-          updatedEntries.map((entry) => [entry.path, entry]),
-        );
-
-        setOpenFileEntry((currentEntry) => {
-          if (currentEntry === null) {
-            return null;
-          }
-
-          const updatedEntry = updatedEntriesByPath.get(currentEntry.path);
-          if (updatedEntry !== undefined) {
-            return updatedEntry.type === 'file' ? updatedEntry : null;
-          }
-
-          return currentEntry;
-        });
-
-        setListing((currentListing) => {
-          if (currentListing === null) {
-            return currentListing;
-          }
-
-          let didChange = false;
-          const nextEntries = currentListing.entries.map((entry) => {
-            const updatedEntry = updatedEntriesByPath.get(entry.path);
-
-            if (updatedEntry === undefined) {
-              return entry;
-            }
-
-            didChange = true;
-            return updatedEntry;
-          });
-
-          return didChange ? { ...currentListing, entries: nextEntries } : currentListing;
-        });
-      },
       onListing: (nextListing) => {
         const isInitialListing = !hasReceivedListing;
         hasReceivedListing = true;
@@ -232,9 +203,9 @@ export function MobileMachineWorkspaceProvider({
   useEffect(() => {
     const paths = openFilePath === null ? [] : [openFilePath];
 
-    void filesystemClient?.watchFiles(paths).catch((error) => {
+    void filesystemClient?.setOpenFiles(paths).catch((error) => {
       setFilesystemError(toFilesystemErrorMessage(
-        error instanceof Error ? error.message : 'Failed to watch open file.',
+        error instanceof Error ? error.message : 'Failed to remember open file.',
       ));
     });
   }, [filesystemClient, openFilePath]);
@@ -387,6 +358,7 @@ export function MobileMachineWorkspaceProvider({
     currentPath,
     error: filesystemError ?? session.error,
     filesystemClient,
+    filesystemPreviewBaseUrl,
     filesystemWebsocketUrl,
     goBack,
     goForward,
@@ -414,6 +386,7 @@ export function MobileMachineWorkspaceProvider({
     currentPath,
     filesystemClient,
     filesystemError,
+    filesystemPreviewBaseUrl,
     filesystemWebsocketUrl,
     goBack,
     goForward,

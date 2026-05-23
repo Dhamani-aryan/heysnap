@@ -290,7 +290,7 @@ const PayloadCard = ({
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>
-          Captured payload. Secrets in headers are redacted server-side.
+          Captured upstream payload. Secrets in headers are redacted server-side.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

@@ -1,8 +1,3 @@
----
-name: "chrome"
-description: "Control the user's dedicated Chrome window. Use this skill for browser tasks, authenticated websites, user-visible web workflows, or when the HeySnap UI context includes filepath \"chrome\". The browser runs on the user's device, so it can use the user's logged-in sessions, cookies, location/IP, and real browser state. If Chrome is not already open, browser commands can create the dedicated window automatically. Prefer this skill for most of web related tasks except for quick web searches (use web skill for that)."
----
-
 # Chrome Skill
 
 Use this skill whenever the task needs the user's real browser rather than a headless or remote web fetch. This includes logging into websites, reading pages behind authentication, clicking through web apps, filling forms, checking browser-visible state, downloading from websites, or continuing work in the Chrome surface the user has open in HeySnap.

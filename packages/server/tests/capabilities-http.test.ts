@@ -328,7 +328,6 @@ const createTempPaths = async (): Promise<{ readonly root: string; readonly path
       toolsRoot: join(root, "tools"),
       toolsBinDir: join(root, "tools", "bin"),
       skillsCatalogDir: join(root, "skills", "catalog"),
-      activeSkillsDir: join(root, "active-skills"),
     },
   };
 };

@@ -55,6 +55,7 @@ export interface CloudWorkspaceRendererProps {
   readonly browserControlExtensionId?: string;
   readonly capabilitiesBaseUrl?: string;
   readonly computer: CloudComputer;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
@@ -474,6 +475,11 @@ function CloudAppContent({
           token: workspaceSession.accessSession.accessSession.token,
         }),
         computer: selectedComputer,
+        filesystemPreviewBaseUrl: workspaceSession.accessSession.routes.filesystemPreviewBaseUrl === undefined ? undefined : buildGatewayHttpUrl({
+          baseUrl: client.baseUrl,
+          path: workspaceSession.accessSession.routes.filesystemPreviewBaseUrl,
+          token: workspaceSession.accessSession.accessSession.token,
+        }),
         filesystemWebsocketUrl: buildGatewayWebsocketUrl({
           baseUrl: client.baseUrl,
           path: workspaceSession.accessSession.routes.filesystemWebSocketUrl,

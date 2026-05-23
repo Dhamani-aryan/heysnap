@@ -234,6 +234,65 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
+  it("routes preview websocket subpaths through a connected machine tunnel", async () => {
+    const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
+    const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
+    const gateway = await openWebSocket(
+      `${baseUrl}/gateway/computers/${computer.id}/preview/ws?accessToken=${access.token}`,
+    );
+    const openMessage = await machineOpen;
+
+    expect(openMessage).toMatchObject({
+      type: "open",
+      route: "preview",
+      path: "/preview/ws",
+      metadata: {
+        userId: user.id,
+        accessSessionId: access.accessSession.id,
+        computerId: computer.id,
+      },
+    });
+
+    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
+    gateway.send(JSON.stringify({ type: "watch", path: "Budget.xlsx" }));
+
+    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
+    expect(dataMessage.type).toBe("data");
+    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
+      type: "watch",
+      path: "Budget.xlsx",
+    });
+
+    gateway.close();
+    machine.close();
+    await closeServer(server);
+  });
+
+  it("authenticates preview websocket subpaths with the scoped preview cookie", async () => {
+    const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
+    const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
+    const gateway = await openWebSocket(
+      `${baseUrl}/gateway/computers/${computer.id}/preview/ws`,
+      { cookie: `heysnap_preview_access=${encodeURIComponent(access.token)}` },
+    );
+    const openMessage = await machineOpen;
+
+    expect(openMessage).toMatchObject({
+      type: "open",
+      route: "preview",
+      path: "/preview/ws",
+      metadata: {
+        userId: user.id,
+        accessSessionId: access.accessSession.id,
+        computerId: computer.id,
+      },
+    });
+
+    gateway.close();
+    machine.close();
+    await closeServer(server);
+  });
+
   it("normalizes reserved websocket close codes before forwarding them", () => {
     expect(normalizeWebSocketCloseCode(1005)).toBe(1000);
     expect(normalizeWebSocketCloseCode(1006)).toBe(1000);

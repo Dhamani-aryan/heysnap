@@ -1,11 +1,10 @@
 import { createServer, type Server } from "node:http";
-import { dirname } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { watch, type FSWatcher } from "chokidar";
 
 import { FilesystemError, toFilesystemError } from "./errors.js";
 import { FilesystemService, type TrashFunction } from "./service.js";
-import { resolveClientPath } from "./paths.js";
+import { resolveClientPath, toClientPath } from "./paths.js";
 import { attachWebSocketUpgradeRoute } from "../websocket/upgrade-router.js";
 import type {
   FilesystemClientMessage,
@@ -77,10 +76,6 @@ class FilesystemSocketSession {
   private showHidden: boolean;
   private watcher: FSWatcher | null = null;
   private watchTimer: ReturnType<typeof setTimeout> | null = null;
-  private openFilePaths: string[] = [];
-  private openFileVersions = new Map<string, string>();
-  private fileWatcher: FSWatcher | null = null;
-  private fileWatchTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
   constructor(
@@ -137,12 +132,12 @@ class FilesystemSocketSession {
         case "refresh":
           await this.publishSnapshot("refresh", message.requestId);
           break;
-        case "watchFiles":
-          await this.replaceFileWatcher(message.paths);
-          this.options.viewState.openFilePaths = this.openFilePaths;
-          this.send({ type: "ack", requestId: message.requestId, action: "watchFiles", result: { paths: this.openFilePaths } });
-          await this.publishFileUpdates("subscription");
+        case "setOpenFiles": {
+          const paths = this.normalizeOpenFilePaths(message.paths);
+          this.options.viewState.openFilePaths = paths;
+          this.send({ type: "ack", requestId: message.requestId, action: "setOpenFiles", result: { paths } });
           break;
+        }
         case "createFolder": {
           const entry = await this.service.createFolder(message.path ?? this.activePath, message.name);
           this.send({ type: "ack", requestId: message.requestId, action: "createFolder", result: entry });
@@ -206,99 +201,13 @@ class FilesystemSocketSession {
     return this.options.initialPath;
   }
 
-  private async replaceFileWatcher(paths: readonly string[]): Promise<void> {
-    const nextOpenFilePaths = [...new Set(paths)].sort((left, right) => left.localeCompare(right));
-    const parentDirectories = [...new Set(
-      nextOpenFilePaths.map((path) => dirname(resolveClientPath(this.options.root.absolutePath, path))),
-    )];
-
-    await this.closeFileWatcher();
-    this.openFilePaths = nextOpenFilePaths;
-    this.openFileVersions = new Map(
-      [...this.openFileVersions.entries()].filter(([path]) => this.openFilePaths.includes(path)),
-    );
-
-    if (this.openFilePaths.length === 0) {
-      return;
-    }
-
-    const watcher = watch(parentDirectories, {
-      depth: 0,
-      ignoreInitial: true,
-      persistent: true,
-    });
-
-    watcher.on("all", () => {
-      this.scheduleFileUpdates();
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      watcher.once("ready", resolve);
-      watcher.once("error", reject);
-    });
-
-    this.fileWatcher = watcher;
-  }
-
-  private scheduleFileUpdates(): void {
-    if (this.fileWatchTimer !== null) {
-      clearTimeout(this.fileWatchTimer);
-    }
-
-    this.fileWatchTimer = setTimeout(() => {
-      this.fileWatchTimer = null;
-      void this.publishFileUpdates("watch").catch((error) => {
-        const filesystemError = toFilesystemError(error);
-        this.sendError(undefined, filesystemError.code, filesystemError.message);
-      });
-    }, this.debounceMs);
-  }
-
-  private async publishFileUpdates(reason: "watch" | "subscription"): Promise<void> {
-    if (this.openFilePaths.length === 0) {
-      return;
-    }
-
-    const entries: FilesystemEntry[] = [];
-    const missingPaths: string[] = [];
-    const nextOpenFileVersions = new Map<string, string>();
-
-    await Promise.all(this.openFilePaths.map(async (path) => {
-      try {
-        const entry = await this.service.getEntry(path);
-
-        if (entry.type === "file") {
-          const version = getFileEntryVersion(entry);
-          nextOpenFileVersions.set(path, version);
-
-          if (this.openFileVersions.get(path) !== version) {
-            entries.push(entry);
-          }
-        } else {
-          nextOpenFileVersions.set(path, "missing");
-
-          if (this.openFileVersions.get(path) !== "missing") {
-            missingPaths.push(path);
-          }
-        }
-      } catch {
-        nextOpenFileVersions.set(path, "missing");
-
-        if (this.openFileVersions.get(path) !== "missing") {
-          missingPaths.push(path);
-        }
-      }
-    }));
-
-    this.openFileVersions = nextOpenFileVersions;
-
-    if (entries.length === 0 && missingPaths.length === 0) {
-      return;
-    }
-
-    entries.sort((left, right) => left.path.localeCompare(right.path));
-    missingPaths.sort((left, right) => left.localeCompare(right));
-    this.send({ type: "fileUpdates", reason, entries, missingPaths });
+  private normalizeOpenFilePaths(paths: readonly string[]): string[] {
+    return [...new Set(
+      paths.map((path) => toClientPath(
+        this.options.root.absolutePath,
+        resolveClientPath(this.options.root.absolutePath, path),
+      )),
+    )].sort((left, right) => left.localeCompare(right));
   }
 
   private async publishSnapshot(reason: SnapshotReason, requestId?: string): Promise<void> {
@@ -370,7 +279,6 @@ class FilesystemSocketSession {
 
     this.closed = true;
     await this.closeWatcher();
-    await this.closeFileWatcher();
   }
 
   private async closeWatcher(): Promise<void> {
@@ -381,20 +289,6 @@ class FilesystemSocketSession {
 
     const watcher = this.watcher;
     this.watcher = null;
-
-    if (watcher !== null) {
-      await watcher.close();
-    }
-  }
-
-  private async closeFileWatcher(): Promise<void> {
-    if (this.fileWatchTimer !== null) {
-      clearTimeout(this.fileWatchTimer);
-      this.fileWatchTimer = null;
-    }
-
-    const watcher = this.fileWatcher;
-    this.fileWatcher = null;
 
     if (watcher !== null) {
       await watcher.close();
@@ -446,7 +340,7 @@ const isClientMessage = (value: unknown): value is FilesystemClientMessage => {
     case "refresh":
     case "ping":
       return true;
-    case "watchFiles":
+    case "setOpenFiles":
       return Array.isArray(record["paths"]) && record["paths"].every((path) => typeof path === "string");
     case "createFolder":
       return optionalString(record["path"]) && optionalString(record["name"]);
@@ -491,9 +385,6 @@ const parseBoolean = (rawValue: string | null): boolean => {
 
   return rawValue === "true" || rawValue === "1";
 };
-
-const getFileEntryVersion = (entry: FilesystemEntry): string =>
-  `${entry.updatedAt}\0${String(entry.size ?? "")}`;
 
 const dataToText = (data: WebSocket.RawData): string => {
   if (typeof data === "string") {

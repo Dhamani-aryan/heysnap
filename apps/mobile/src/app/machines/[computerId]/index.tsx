@@ -40,6 +40,7 @@ export default function MachineScreen() {
     currentPath,
     error,
     filesystemClient,
+    filesystemPreviewBaseUrl,
     filesystemWebsocketUrl,
     goBack,
     goForward,
@@ -162,6 +163,7 @@ export default function MachineScreen() {
         <FilePreviewPane
           key={previewEntry.path}
           entry={previewEntry}
+          filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
           filesystemWebsocketUrl={filesystemWebsocketUrl}
           palette={palette}
           onBack={closePreview}

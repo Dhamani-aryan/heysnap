@@ -247,6 +247,3 @@ web scrape https://blog.example.com/post --max-chars 20000
 - Multiple formats in one call still — there's no
   reason to scrape twice if you might want both markdown and links.
 
-## See also
-
-- [`search.md`](./search.md) — pair `search` → `scrape` for discovery + read

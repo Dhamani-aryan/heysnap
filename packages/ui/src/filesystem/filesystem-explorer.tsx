@@ -45,41 +45,15 @@ import pdfFileIconSrc from "../../../../apps/assets/files/pdf_file_icon.png";
 import xlsxFileIconSrc from "../../../../apps/assets/files/xlsx_file_icon.png";
 import fileIconSrc from "./assets/macos/File.png";
 import folderIconSrc from "./assets/macos/Folder.png";
+import {
+  buildFilesystemPreviewerUrl,
+  resolveFilesystemPreviewBaseUrl,
+} from "./file-preview";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
-const HeySnapAudioPlayer = lazy(() =>
-  import("heysnap-web-viewers/audio").then((module) => ({ default: module.HeySnapAudioPlayer })),
-);
-const HeySnapCodeViewer = lazy(() =>
-  import("heysnap-web-viewers/code").then((module) => ({ default: module.HeySnapCodeViewer })),
-);
-const HeySnapDocxViewer = lazy(() =>
-  import("heysnap-web-viewers/docx").then((module) => ({ default: module.HeySnapDocxViewer })),
-);
-const HeySnapHtmlViewer = lazy(() =>
-  import("heysnap-web-viewers/html").then((module) => ({ default: module.HeySnapHtmlViewer })),
-);
-const HeySnapImageViewer = lazy(() =>
-  import("heysnap-web-viewers/image").then((module) => ({ default: module.HeySnapImageViewer })),
-);
-const HeySnapMarkdownViewer = lazy(() =>
-  import("heysnap-web-viewers/markdown").then((module) => ({ default: module.HeySnapMarkdownViewer })),
-);
 const ChatMarkdown = lazy(() =>
   import("../agent/chat-markdown").then((module) => ({ default: module.ChatMarkdown })),
-);
-const HeySnapPdfViewer = lazy(() =>
-  import("heysnap-web-viewers/pdf").then((module) => ({ default: module.HeySnapPdfViewer })),
-);
-const HeySnapPPTViewer = lazy(() =>
-  import("heysnap-web-viewers/ppt").then((module) => ({ default: module.HeySnapPPTViewer })),
-);
-const HeySnapVideoViewer = lazy(() =>
-  import("heysnap-web-viewers/video").then((module) => ({ default: module.HeySnapVideoViewer })),
-);
-const HeySnapXlsxViewer = lazy(() =>
-  import("heysnap-web-viewers/xlsx").then((module) => ({ default: module.HeySnapXlsxViewer })),
 );
 
 const HISTORY_LIMIT = 64;
@@ -94,8 +68,6 @@ const DEFAULT_BROWSER_STREAM_ASPECT_RATIO = 16 / 10;
 const DEFAULT_BROWSER_WINDOW_URL = "chrome://newtab";
 const LEFT_PANE_RATIO_STORAGE_KEY = "filesystem-explorer:left-pane-ratio";
 const RIGHT_SIDEBAR_OPEN_STORAGE_KEY = "filesystem-explorer:right-sidebar-open";
-const PPT_VIEWER_SERVER_URL = "http://13.126.207.124/Kd5QihM3zhwV2WztLXAnBc6n07Goa6O3mByrs-rqWjU/ppt";
-const XLSX_ASSET_ID_HEADER = "x-heysnap-xlsx-asset-id";
 const CONTEXT_MENU_WIDTH = 200;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 const BACKGROUND_CONTEXT_MENU_HEIGHT = 148;
@@ -296,6 +268,7 @@ const toListingErrorMessage = (message: string | null): string | null => {
 
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly agentBaseUrl?: string;
   readonly sarvamApiKey?: string;
   readonly browserControlStatus?: BrowserControlStatus;
@@ -341,6 +314,7 @@ export interface FilesystemExplorerProps {
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
+  filesystemPreviewBaseUrl,
   agentBaseUrl = "http://localhost:4000/agent",
   sarvamApiKey,
   browserControlStatus,
@@ -504,9 +478,6 @@ export function FilesystemExplorer({
         }
         onPathChangeRef.current?.(nextListing.path);
       },
-      onFileUpdates: ({ entries }) => {
-        setOpenFileTabs((currentTabs) => syncOpenFileTabsFromEntries(currentTabs, entries));
-      },
       onViewState: (viewState) => {
         setOpenFileTabs(viewState.openFiles.map(toOpenFileTab));
         setActiveFilePath(null);
@@ -565,8 +536,8 @@ export function FilesystemExplorer({
   useEffect(() => {
     const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
 
-    void clientRef.current?.watchFiles(paths).catch((error) => {
-      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to watch open files."));
+    void clientRef.current?.setOpenFiles(paths).catch((error) => {
+      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to remember open files."));
     });
   }, [openFileWatchKey]);
 
@@ -1288,6 +1259,7 @@ export function FilesystemExplorer({
             openFileTabs={openFileTabs}
             activeFilePath={activeFileTab?.path ?? null}
             websocketUrl={websocketUrl}
+            filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
           />
         </div>
         {activeLeftPaneSurface === "directory" ? (
@@ -2097,132 +2069,35 @@ const ToolbarButton = ({
 
 const FileViewer = ({
   file,
+  filesystemPreviewBaseUrl,
   websocketUrl,
 }: {
   readonly file: OpenFileTab;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly websocketUrl: string;
 }): React.ReactElement => {
-  const fileVersion = getOpenFileTabVersion(file);
+  const previewBaseUrl = resolveFilesystemPreviewBaseUrl(websocketUrl, filesystemPreviewBaseUrl);
 
-  if (isPdfFile(file.name)) {
+  if (previewBaseUrl === null) {
     return (
-      <PdfViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
-      />
+      <section className="heysnap-document-viewer" aria-label={file.name}>
+        <DocumentViewerState
+          message="File preview is not available on this server yet. Restart or update the cloud server and machine server."
+          variant="error"
+        />
+      </section>
     );
   }
 
-  if (isDocxFile(file.name)) {
-    return (
-      <DocxViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
+  return (
+    <section className="heysnap-document-viewer" aria-label={file.name}>
+      <iframe
+        className="heysnap-file-preview-frame"
+        src={buildFilesystemPreviewerUrl(previewBaseUrl, file.path)}
+        title={file.name}
       />
-    );
-  }
-
-  if (isPptxFile(file.name)) {
-    return (
-      <PptViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isXlsxFile(file.name)) {
-    return (
-      <XlsxViewer
-        fileName={file.name}
-        xlsxUrl={buildFilesystemXlsxUrl(websocketUrl, file.path, fileVersion)}
-      />
-    );
-  }
-
-  if (isOfficePdfPreviewFile(file.name)) {
-    return (
-      <PdfViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemPreviewUrl(websocketUrl, file.path, "pdf", fileVersion)}
-      />
-    );
-  }
-
-  if (isDelimitedTextFile(file.name)) {
-    return (
-      <DelimitedTextViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-        delimiter={getDelimitedTextDelimiter(file.name)}
-      />
-    );
-  }
-
-  if (isImageFile(file.name)) {
-    return (
-      <ImageViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isMarkdownFile(file.name)) {
-    return (
-      <MarkdownViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isHtmlFile(file.name)) {
-    return (
-      <HtmlViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isCodeFile(file.name)) {
-    return (
-      <CodeViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isPlainTextFile(file.name)) {
-    return (
-      <PlainTextViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isAudioFile(file.name)) {
-    return (
-      <AudioViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  if (isVideoFile(file.name)) {
-    return (
-      <VideoViewer
-        fileName={file.name}
-        fileUrl={buildFilesystemDownloadUrl(websocketUrl, [file.path], fileVersion)}
-      />
-    );
-  }
-
-  return <FileViewerPlaceholder file={file} />;
+    </section>
+  );
 };
 
 const MemoizedFileViewer = memo(FileViewer);
@@ -2687,10 +2562,12 @@ const BrowserControlPanel = ({
 const FileViewerStack = ({
   openFileTabs,
   activeFilePath,
+  filesystemPreviewBaseUrl,
   websocketUrl,
 }: {
   readonly openFileTabs: OpenFileTab[];
   readonly activeFilePath: string | null;
+  readonly filesystemPreviewBaseUrl?: string;
   readonly websocketUrl: string;
 }): React.ReactElement => (
   <>
@@ -2703,192 +2580,16 @@ const FileViewerStack = ({
           className={isActive ? "left-pane-surface active" : "left-pane-surface inactive"}
           aria-hidden={!isActive}
         >
-          <MemoizedFileViewer file={tab} websocketUrl={websocketUrl} />
+          <MemoizedFileViewer
+            file={tab}
+            filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
+            websocketUrl={websocketUrl}
+          />
         </div>
       );
     })}
   </>
 );
-
-const FileViewerPlaceholder = ({
-  file,
-}: {
-  readonly file: OpenFileTab;
-}): React.ReactElement => (
-  <section className="file-viewer-placeholder" aria-label={file.name}>
-    <h1>{file.name}</h1>
-  </section>
-);
-
-const PdfViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "application/pdf");
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading PDF..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading PDF viewer..." />}>
-        <HeySnapPdfViewer
-          src={file}
-          bodyBackground="var(--heysnap-document-viewer-body-background)"
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-          sidebarBackground="var(--heysnap-document-viewer-sidebar-background)"
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const DocxViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(
-    fileName,
-    fileUrl,
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  );
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading DOCX..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading DOCX viewer..." />}>
-        <HeySnapDocxViewer
-          src={file}
-          documentName={fileName}
-          bodyBackground="var(--heysnap-document-viewer-body-background)"
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const PptViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(
-    fileName,
-    fileUrl,
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  );
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading PPTX..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading PPTX viewer..." />}>
-        <HeySnapPPTViewer
-          src={file}
-          serverUrl={PPT_VIEWER_SERVER_URL}
-          documentName={fileName}
-          bodyBackground="var(--heysnap-document-viewer-body-background)"
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-          sidebarBackground="var(--heysnap-document-viewer-sidebar-background)"
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const XlsxViewer = ({
-  fileName,
-  xlsxUrl,
-}: {
-  readonly fileName: string;
-  readonly xlsxUrl: string;
-}): React.ReactElement => {
-  const { workbook, error } = useFetchedXlsxWorkbook(xlsxUrl);
-  const theme = useResolvedTheme();
-  const className = [
-    "heysnap-document-viewer",
-    "heysnap-xlsx-viewer",
-    theme === "dark" ? "theme-dark" : "theme-light",
-  ].join(" ");
-
-  if (error !== null) {
-    return (
-      <section className={className} aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (workbook === null) {
-    return (
-      <section className={className} aria-label={fileName}>
-        <DocumentViewerState message="Loading XLSX..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className={className} aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading XLSX viewer..." />}>
-        <HeySnapXlsxViewer workbook={workbook} title={fileName} />
-      </Suspense>
-    </section>
-  );
-};
 
 const DocumentViewerState = ({
   message,
@@ -2901,540 +2602,6 @@ const DocumentViewerState = ({
     <p>{message}</p>
   </div>
 );
-
-const useFetchedViewerFile = (
-  fileName: string,
-  fileUrl: string,
-  fallbackMimeType: string,
-): {
-  readonly file: File | null;
-  readonly error: string | null;
-} => {
-  const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const abortController = new AbortController();
-    let isCancelled = false;
-
-    setFile(null);
-    setError(null);
-
-    const fetchFile = async (): Promise<void> => {
-      const response = await fetch(fileUrl, { signal: abortController.signal });
-
-      if (!response.ok) {
-        throw new Error(await readPreviewErrorMessage(response, fileUrl));
-      }
-
-      const blob = await response.blob();
-      const mimeType = blob.type.length > 0 && blob.type !== "application/octet-stream"
-        ? blob.type
-        : fallbackMimeType;
-      const viewerFile = new File([blob], fileName, {
-        type: mimeType,
-      });
-
-      if (!isCancelled) {
-        setFile(viewerFile);
-      }
-    };
-
-    void fetchFile().catch((fetchError) => {
-      if (!isCancelled && !isAbortError(fetchError)) {
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to load file.");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-    };
-  }, [fallbackMimeType, fileName, fileUrl]);
-
-  return { file, error };
-};
-
-const useFetchedXlsxWorkbook = (
-  xlsxUrl: string,
-): {
-  readonly workbook: unknown | null;
-  readonly error: string | null;
-} => {
-  const [workbook, setWorkbook] = useState<unknown | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const abortController = new AbortController();
-    let isCancelled = false;
-
-    setWorkbook(null);
-    setError(null);
-
-    const fetchWorkbook = async (): Promise<void> => {
-      const response = await fetch(xlsxUrl, { signal: abortController.signal });
-
-      if (!response.ok) {
-        throw new Error(await readPreviewErrorMessage(response, xlsxUrl));
-      }
-
-      const assetId = response.headers.get(XLSX_ASSET_ID_HEADER);
-
-      if (assetId === null || assetId.length === 0) {
-        throw new Error("Server did not return XLSX asset metadata.");
-      }
-
-      const parsedWorkbook = await response.json() as unknown;
-      attachXlsxAssetUrls(parsedWorkbook, (assetPath) => buildFilesystemXlsxAssetUrl(xlsxUrl, assetId, assetPath));
-
-      if (!isCancelled) {
-        setWorkbook(parsedWorkbook);
-      }
-    };
-
-    void fetchWorkbook().catch((fetchError) => {
-      if (!isCancelled && !isAbortError(fetchError)) {
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to load XLSX.");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-    };
-  }, [xlsxUrl]);
-
-  return { workbook, error };
-};
-
-const DelimitedTextViewer = ({
-  fileName,
-  fileUrl,
-  delimiter,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-  readonly delimiter: "," | "\t";
-}): React.ReactElement => {
-  const [rows, setRows] = useState<string[][] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const abortController = new AbortController();
-    let isCancelled = false;
-
-    setRows(null);
-    setError(null);
-
-    const loadRows = async (): Promise<void> => {
-      const response = await fetch(fileUrl, { signal: abortController.signal });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load ${delimiter === "\t" ? "TSV" : "CSV"} (${String(response.status)}).`);
-      }
-
-      const text = await response.text();
-      const parsedRows = parseDelimitedText(text, delimiter);
-
-      if (!isCancelled) {
-        setRows(parsedRows);
-      }
-    };
-
-    void loadRows().catch((loadError) => {
-      if (!isCancelled && !isAbortError(loadError)) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load file.");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-    };
-  }, [delimiter, fileUrl]);
-
-  if (error !== null) {
-    return (
-      <section className="delimited-viewer" aria-label={fileName}>
-        <DelimitedViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (rows === null) {
-    return (
-      <section className="delimited-viewer" aria-label={fileName}>
-        <DelimitedViewerState message={`Loading ${delimiter === "\t" ? "TSV" : "CSV"}...`} />
-      </section>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      <section className="delimited-viewer" aria-label={fileName}>
-        <DelimitedViewerState message="This file is empty." />
-      </section>
-    );
-  }
-
-  const columnCount = Math.max(...rows.map((row) => row.length));
-
-  return (
-    <section className="delimited-viewer" aria-label={fileName}>
-      <div className="delimited-table-wrap">
-        <table className="delimited-table">
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={`row:${String(rowIndex)}`}>
-                {Array.from({ length: columnCount }, (_, columnIndex) => (
-                  <td key={`cell:${String(rowIndex)}:${String(columnIndex)}`}>
-                    {row[columnIndex] ?? ""}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-};
-
-const DelimitedViewerState = ({
-  message,
-  variant = "info",
-}: {
-  readonly message: string;
-  readonly variant?: "info" | "error";
-}): React.ReactElement => (
-  <div className={variant === "error" ? "delimited-viewer-state error" : "delimited-viewer-state"}>
-    <p>{message}</p>
-  </div>
-);
-
-const ImageViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, getImageMimeType(fileName));
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading image..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading image viewer..." />}>
-        <HeySnapImageViewer
-          src={file}
-          alt={fileName}
-          documentName={fileName}
-          bodyBackground="var(--heysnap-document-viewer-body-background)"
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const PlainTextViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const abortController = new AbortController();
-    let isCancelled = false;
-
-    setText(null);
-    setError(null);
-
-    const loadText = async (): Promise<void> => {
-      const response = await fetch(fileUrl, { signal: abortController.signal });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load text (${String(response.status)}).`);
-      }
-
-      const nextText = await response.text();
-
-      if (!isCancelled) {
-        setText(nextText);
-      }
-    };
-
-    void loadText().catch((loadError) => {
-      if (!isCancelled && !isAbortError(loadError)) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load text.");
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      abortController.abort();
-    };
-  }, [fileUrl]);
-
-  if (error !== null) {
-    return (
-      <section className="text-viewer" aria-label={fileName}>
-        <TextViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (text === null) {
-    return (
-      <section className="text-viewer" aria-label={fileName}>
-        <TextViewerState message="Loading text..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="text-viewer" aria-label={fileName}>
-      <pre className="text-viewer-content">{text}</pre>
-    </section>
-  );
-};
-
-const TextViewerState = ({
-  message,
-  variant = "info",
-}: {
-  readonly message: string;
-  readonly variant?: "info" | "error";
-}): React.ReactElement => (
-  <div className={variant === "error" ? "text-viewer-state error" : "text-viewer-state"}>
-    <p>{message}</p>
-  </div>
-);
-
-const CodeViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "text/plain");
-  const theme = useResolvedTheme();
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading code..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading code viewer..." />}>
-        <HeySnapCodeViewer
-          src={file}
-          documentName={fileName}
-          theme={theme === "dark" ? "heysnap-dark" : "heysnap-light"}
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-          bodyBackground="var(--heysnap-document-viewer-header-background)"
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const MarkdownViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "text/markdown");
-  const theme = useResolvedTheme();
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading markdown..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading markdown viewer..." />}>
-        <HeySnapMarkdownViewer
-          src={file}
-          documentName={fileName}
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-          bodyBackground="var(--heysnap-document-viewer-header-background)"
-          codeTheme={theme === "dark" ? "heysnap-dark" : "heysnap-light"}
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const HtmlViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, "text/html");
-  const theme = useResolvedTheme();
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading HTML..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading HTML viewer..." />}>
-        <HeySnapHtmlViewer
-          src={file}
-          documentName={fileName}
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-          bodyBackground="var(--heysnap-document-viewer-header-background)"
-          codeTheme={theme === "dark" ? "heysnap-dark" : "heysnap-light"}
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const AudioViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, getAudioMimeType(fileName));
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading audio..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading audio player..." />}>
-        <HeySnapAudioPlayer
-          src={file}
-          documentName={fileName}
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-          bodyBackground="var(--heysnap-document-viewer-sidebar-background)"
-        />
-      </Suspense>
-    </section>
-  );
-};
-
-const VideoViewer = ({
-  fileName,
-  fileUrl,
-}: {
-  readonly fileName: string;
-  readonly fileUrl: string;
-}): React.ReactElement => {
-  const { file, error } = useFetchedViewerFile(fileName, fileUrl, getVideoMimeType(fileName));
-
-  if (error !== null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message={error} variant="error" />
-      </section>
-    );
-  }
-
-  if (file === null) {
-    return (
-      <section className="heysnap-document-viewer" aria-label={fileName}>
-        <DocumentViewerState message="Loading video..." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="heysnap-document-viewer" aria-label={fileName}>
-      <Suspense fallback={<DocumentViewerState message="Loading video player..." />}>
-        <HeySnapVideoViewer
-          src={file}
-          documentName={fileName}
-          headerBackground="var(--heysnap-document-viewer-header-background)"
-          headerForeground="var(--heysnap-document-viewer-header-foreground)"
-        />
-      </Suspense>
-    </section>
-  );
-};
 
 const DesktopSplitPane = ({
   children,
@@ -5426,47 +4593,6 @@ const getParentPath = (path: string): string => {
   return parts.slice(0, -1).join("/");
 };
 
-const syncOpenFileTabsFromEntries = (
-  currentTabs: OpenFileTab[],
-  entries: readonly FilesystemEntry[],
-): OpenFileTab[] => {
-  if (currentTabs.length === 0) {
-    return currentTabs;
-  }
-
-  const fileEntriesByPath = new Map(
-    entries
-      .filter((entry) => entry.type === "file")
-      .map((entry) => [entry.path, entry]),
-  );
-  let didChange = false;
-  const nextTabs = currentTabs.map((tab) => {
-    const entry = fileEntriesByPath.get(tab.path);
-
-    if (entry === undefined) {
-      return tab;
-    }
-
-    const nextTab = toOpenFileTab(entry);
-
-    if (
-      tab.name === nextTab.name &&
-      tab.path === nextTab.path &&
-      tab.size === nextTab.size &&
-      tab.updatedAt === nextTab.updatedAt
-    ) {
-      return tab;
-    }
-
-    didChange = true;
-    return nextTab;
-  });
-
-  return didChange ? nextTabs : currentTabs;
-};
-
-const getOpenFileTabVersion = (file: OpenFileTab): string => `${file.updatedAt}:${String(file.size ?? "")}`;
-
 const toFilesystemUploadFile = async (source: Extract<BrowserUploadSource, { readonly type: "file" }>): Promise<FilesystemUploadFile> => ({
   type: "file",
   relativePath: source.relativePath,
@@ -5546,270 +4672,8 @@ const isPdfFile = (fileName: string): boolean =>
 const isDocxFile = (fileName: string): boolean =>
   fileName.toLowerCase().endsWith(".docx");
 
-const isPptxFile = (fileName: string): boolean =>
-  fileName.toLowerCase().endsWith(".pptx");
-
-const isXlsxFile = (fileName: string): boolean =>
-  fileName.toLowerCase().endsWith(".xlsx");
-
 const isSpreadsheetFile = (fileName: string): boolean =>
   /\.(xls|xlsx)$/iu.test(fileName);
-
-const isOfficePdfPreviewFile = (fileName: string): boolean =>
-  /\.(ppt|xls)$/iu.test(fileName);
-
-const isDelimitedTextFile = (fileName: string): boolean =>
-  /\.(csv|tsv)$/iu.test(fileName);
-
-const isImageFile = (fileName: string): boolean =>
-  /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/iu.test(fileName);
-
-const isMarkdownFile = (fileName: string): boolean =>
-  /\.(md|markdown|mdx)$/iu.test(fileName);
-
-const isHtmlFile = (fileName: string): boolean =>
-  /\.html?$/iu.test(fileName);
-
-const isCodeFile = (fileName: string): boolean =>
-  /(^|\/)(dockerfile|makefile|\.dockerignore|\.editorconfig|\.eslintignore|\.eslintrc|\.gitignore|\.npmrc|\.prettierignore|\.prettierrc)$/iu.test(fileName) ||
-  /(^|\/)\.env(?:\..+)?$/iu.test(fileName) ||
-  /\.(bash|c|cc|cjs|cljs|clj|conf|cpp|cs|css|cxx|dart|env|erl|ex|exs|fish|fs|go|gql|graphql|h|handlebars|hbs|hh|hpp|ini|java|js|json|jsonc|jsx|kt|kts|less|lua|mjs|php|pl|proto|ps1|py|r|rb|rs|scala|scss|sh|sql|svelte|swift|toml|ts|tsx|vue|xml|ya?ml|zsh)$/iu.test(fileName);
-
-const isPlainTextFile = (fileName: string): boolean =>
-  /\.(log|text|txt)$/iu.test(fileName);
-
-const isAudioFile = (fileName: string): boolean =>
-  /\.(aac|aif|aiff|flac|m4a|mp3|oga|ogg|opus|wav|weba)$/iu.test(fileName);
-
-const isVideoFile = (fileName: string): boolean =>
-  /\.(m4v|mov|mp4|mpeg|mpg|ogv|webm)$/iu.test(fileName);
-
-const getImageMimeType = (fileName: string): string => {
-  const mimeTypeByExtension: Record<string, string> = {
-    avif: "image/avif",
-    bmp: "image/bmp",
-    gif: "image/gif",
-    ico: "image/x-icon",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    svg: "image/svg+xml",
-    webp: "image/webp",
-  };
-
-  return mimeTypeByExtension[getFileExtension(fileName)] ?? "application/octet-stream";
-};
-
-const getAudioMimeType = (fileName: string): string => {
-  const mimeTypeByExtension: Record<string, string> = {
-    aac: "audio/aac",
-    aif: "audio/aiff",
-    aiff: "audio/aiff",
-    flac: "audio/flac",
-    m4a: "audio/mp4",
-    mp3: "audio/mpeg",
-    oga: "audio/ogg",
-    ogg: "audio/ogg",
-    opus: "audio/ogg",
-    wav: "audio/wav",
-    weba: "audio/webm",
-  };
-
-  return mimeTypeByExtension[getFileExtension(fileName)] ?? "application/octet-stream";
-};
-
-const getVideoMimeType = (fileName: string): string => {
-  const mimeTypeByExtension: Record<string, string> = {
-    m4v: "video/mp4",
-    mov: "video/quicktime",
-    mp4: "video/mp4",
-    mpeg: "video/mpeg",
-    mpg: "video/mpeg",
-    ogv: "video/ogg",
-    webm: "video/webm",
-  };
-
-  return mimeTypeByExtension[getFileExtension(fileName)] ?? "application/octet-stream";
-};
-
-const getFileExtension = (fileName: string): string => {
-  const extensionIndex = fileName.lastIndexOf(".");
-
-  return extensionIndex >= 0 ? fileName.slice(extensionIndex + 1).toLowerCase() : "";
-};
-
-const useResolvedTheme = (): "light" | "dark" => {
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    if (typeof document !== "undefined" && document.documentElement.classList.contains("dark")) {
-      return "dark";
-    }
-
-    return "light";
-  });
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const updateTheme = (): void => {
-      setTheme(root.classList.contains("dark") ? "dark" : "light");
-    };
-    const observer = new MutationObserver(updateTheme);
-
-    updateTheme();
-    observer.observe(root, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
-  return theme;
-};
-
-const getDelimitedTextDelimiter = (fileName: string): "," | "\t" =>
-  fileName.toLowerCase().endsWith(".tsv") ? "\t" : ",";
-
-const parseDelimitedText = (text: string, delimiter: "," | "\t"): string[][] => {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let index = 0;
-  let isQuoted = false;
-
-  while (index < text.length) {
-    const character = text[index];
-    const nextCharacter = text[index + 1];
-
-    if (isQuoted) {
-      if (character === "\"" && nextCharacter === "\"") {
-        cell += "\"";
-        index += 2;
-        continue;
-      }
-
-      if (character === "\"") {
-        isQuoted = false;
-        index += 1;
-        continue;
-      }
-
-      cell += character;
-      index += 1;
-      continue;
-    }
-
-    if (character === "\"" && cell.length === 0) {
-      isQuoted = true;
-      index += 1;
-      continue;
-    }
-
-    if (character === delimiter) {
-      row.push(cell);
-      cell = "";
-      index += 1;
-      continue;
-    }
-
-    if (character === "\n" || character === "\r") {
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = "";
-      index += character === "\r" && nextCharacter === "\n" ? 2 : 1;
-      continue;
-    }
-
-    cell += character;
-    index += 1;
-  }
-
-  if (cell.length > 0 || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-
-  return rows;
-};
-
-const attachXlsxAssetUrls = (
-  workbook: unknown,
-  assetUrlForPath: (assetPath: string) => string,
-): void => {
-  const root = toMutableRecord(workbook);
-  const workbookRecord = toMutableRecord(root?.["workbook"]);
-  const sheets = Array.isArray(workbookRecord?.["sheets"]) ? workbookRecord["sheets"] : [];
-
-  for (const sheetValue of sheets) {
-    const sheet = toMutableRecord(sheetValue);
-
-    if (sheet === null) {
-      continue;
-    }
-
-    const drawings = Array.isArray(sheet["drawings"]) ? sheet["drawings"] : [];
-    for (const drawingValue of drawings) {
-      const drawing = toMutableRecord(drawingValue);
-      const images = Array.isArray(drawing?.["images"]) ? drawing["images"] : [];
-      images.forEach((image) => attachXlsxAssetUrl(image, assetUrlForPath));
-    }
-
-    const images = Array.isArray(sheet["images"]) ? sheet["images"] : [];
-    images.forEach((image) => attachXlsxAssetUrl(image, assetUrlForPath));
-  }
-};
-
-const attachXlsxAssetUrl = (
-  imageValue: unknown,
-  assetUrlForPath: (assetPath: string) => string,
-): void => {
-  const image = toMutableRecord(imageValue);
-  const assetPath = image?.["assetPath"];
-
-  if (image === null || typeof assetPath !== "string" || assetPath.length === 0) {
-    return;
-  }
-
-  image["assetUrl"] = assetUrlForPath(assetPath);
-};
-
-const toMutableRecord = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
-
-const readPreviewErrorMessage = async (response: Response, url: string): Promise<string> => {
-  try {
-    const body = await response.json() as {
-      readonly code?: unknown;
-      readonly message?: unknown;
-      readonly error?: {
-        readonly code?: unknown;
-        readonly message?: unknown;
-      };
-    };
-
-    if (typeof body.message === "string" && body.message.length > 0) {
-      return body.message;
-    }
-
-    if (typeof body.error?.message === "string" && body.error.message.length > 0) {
-      if (response.status === 404 && url.includes("/filesystem/preview")) {
-        return "File preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
-      }
-
-      return body.error.message;
-    }
-  } catch {
-    // Fall through to the status-based message when the response is not JSON.
-  }
-
-  if (response.status === 404 && url.includes("/filesystem/preview")) {
-    return "File preview is not available on this server yet. Restart or update the web/cloud server and the machine server.";
-  }
-
-  return `Failed to load preview (${String(response.status)}).`;
-};
 
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) {
@@ -5831,7 +4695,6 @@ const formatBytes = (bytes: number): string => {
 const buildFilesystemDownloadUrl = (
   filesystemWebsocketUrl: string,
   paths: readonly string[],
-  version?: string,
 ): string => {
   const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
   const url = new URL(filesystemWebsocketUrl, baseUrl);
@@ -5849,86 +4712,6 @@ const buildFilesystemDownloadUrl = (
   paths.forEach((path) => {
     url.searchParams.append("path", path);
   });
-  if (version !== undefined) {
-    url.searchParams.set("v", version);
-  }
-
-  return url.toString();
-};
-
-const buildFilesystemPreviewUrl = (
-  filesystemWebsocketUrl: string,
-  path: string,
-  format: "pdf",
-  version?: string,
-): string => {
-  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
-  const url = new URL(filesystemWebsocketUrl, baseUrl);
-
-  if (url.protocol === "ws:") {
-    url.protocol = "http:";
-  } else if (url.protocol === "wss:") {
-    url.protocol = "https:";
-  }
-
-  url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/preview");
-  url.searchParams.delete("path");
-  url.searchParams.delete("showHidden");
-  url.searchParams.delete("v");
-  url.searchParams.set("path", path);
-  url.searchParams.set("format", format);
-  if (version !== undefined) {
-    url.searchParams.set("v", version);
-  }
-
-  return url.toString();
-};
-
-const buildFilesystemXlsxUrl = (
-  filesystemWebsocketUrl: string,
-  path: string,
-  version?: string,
-): string => {
-  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
-  const url = new URL(filesystemWebsocketUrl, baseUrl);
-
-  if (url.protocol === "ws:") {
-    url.protocol = "http:";
-  } else if (url.protocol === "wss:") {
-    url.protocol = "https:";
-  }
-
-  url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/xlsx");
-  url.searchParams.delete("path");
-  url.searchParams.delete("showHidden");
-  url.searchParams.delete("v");
-  url.searchParams.set("path", path);
-  if (version !== undefined) {
-    url.searchParams.set("v", version);
-  }
-
-  return url.toString();
-};
-
-const buildFilesystemXlsxAssetUrl = (
-  xlsxUrl: string,
-  assetId: string,
-  assetPath: string,
-): string => {
-  const url = new URL(xlsxUrl);
-  const encodedAssetPath = assetPath
-    .split("/")
-    .filter((segment) => segment.length > 0)
-    .map(encodeURIComponent)
-    .join("/");
-
-  url.pathname = url.pathname.replace(
-    /\/filesystem\/xlsx\/?$/u,
-    `/filesystem/xlsx-assets/${encodeURIComponent(assetId)}/${encodedAssetPath}`,
-  );
-  url.searchParams.delete("path");
-  url.searchParams.delete("showHidden");
-  url.searchParams.delete("v");
 
   return url.toString();
 };

@@ -1,6 +1,13 @@
 import { createServer, type Server } from "node:http";
 import { basename, resolve } from "node:path";
 
+import {
+  bindPreviewWebSocketServer,
+  createPreviewService,
+  type PreviewServiceOptions,
+} from "@ank1015-app/previewer";
+import { WebSocketServer } from "ws";
+
 import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
 import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
 import { createAgentHttpService } from "./agent/http.js";
@@ -16,19 +23,16 @@ import {
   handleFilesystemDownloadRequest,
   sendFilesystemDownloadError,
 } from "./filesystem/download.js";
-import {
-  handleFilesystemPreviewRequest,
-  sendFilesystemPreviewError,
-  type FilesystemPreviewOptions,
-} from "./filesystem/preview.js";
-import {
-  filesystemXlsxCorsHeaders,
-  handleFilesystemXlsxRequest,
-  sendFilesystemXlsxError,
-  type FilesystemXlsxOptions,
-} from "./filesystem/xlsx.js";
 import { resolveFilesystemRoot } from "./filesystem/paths.js";
 import type { FilesystemRoot } from "./filesystem/types.js";
+import { attachWebSocketUpgradeRoute } from "./websocket/upgrade-router.js";
+
+export interface FilesystemPreviewerOptions extends Omit<
+  PreviewServiceOptions,
+  "allowAbsolutePaths" | "basePath" | "resolvePath" | "rootPath"
+> {
+  readonly basePath?: string;
+}
 
 export interface StartServerOptions {
   readonly port?: number;
@@ -36,13 +40,14 @@ export interface StartServerOptions {
   readonly filesystemRoot?: string | FilesystemRoot;
   readonly codexBin?: string;
   readonly version?: string;
-  readonly filesystemPreview?: FilesystemPreviewOptions;
-  readonly filesystemXlsx?: FilesystemXlsxOptions;
+  readonly filesystemPreviewer?: FilesystemPreviewerOptions;
 }
 
 export interface LocalServerUrls {
   readonly healthUrl: string;
   readonly filesystemWebSocketUrl: string;
+  readonly filesystemPreviewBaseUrl: string;
+  readonly filesystemPreviewWebSocketUrl: string;
   readonly agentBaseUrl: string;
   readonly capabilitiesBaseUrl: string;
 }
@@ -62,6 +67,7 @@ export interface MachineServerStatus {
   readonly version: string;
   readonly activeSessions: {
     readonly filesystem: number;
+    readonly filesystemPreview: number;
     readonly browserControl: number;
     readonly agent: number;
     readonly total: number;
@@ -85,6 +91,12 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
   const browserControlService = createBrowserControlService({
     filesystemRootPath: filesystemRoot.absolutePath,
+  });
+  const filesystemPreviewService = createPreviewService({
+    ...options.filesystemPreviewer,
+    basePath: options.filesystemPreviewer?.basePath ?? "/preview",
+    rootPath: filesystemRoot.absolutePath,
+    allowAbsolutePaths: false,
   });
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
@@ -117,29 +129,27 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
       return;
     }
 
-    if (requestUrl.pathname === "/filesystem/preview") {
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, filesystemDownloadCorsHeaders);
-        response.end();
-        return;
-      }
+    if (isPathUnderBasePath(requestUrl.pathname, filesystemPreviewService.basePath)) {
+      void filesystemPreviewService.handleRequest(request, response)
+        .then((handled) => {
+          if (handled) {
+            return;
+          }
 
-      void handleFilesystemPreviewRequest(request, response, filesystemRoot, options.filesystemPreview).catch((error) => {
-        sendFilesystemPreviewError(response, error);
-      });
-      return;
-    }
+          response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          response.end("Not found");
+        })
+        .catch((error) => {
+          if (response.headersSent) {
+            response.destroy(error instanceof Error ? error : undefined);
+            return;
+          }
 
-    if (requestUrl.pathname === "/filesystem/xlsx" || requestUrl.pathname.startsWith("/filesystem/xlsx-assets/")) {
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, filesystemXlsxCorsHeaders);
-        response.end();
-        return;
-      }
-
-      void handleFilesystemXlsxRequest(request, response, filesystemRoot, options.filesystemXlsx).catch((error) => {
-        sendFilesystemXlsxError(response, error);
-      });
+          response.writeHead(500, { "content-type": "application/json" });
+          response.end(JSON.stringify({
+            error: error instanceof Error ? error.message : "Preview request failed",
+          }));
+        });
       return;
     }
 
@@ -163,6 +173,9 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     root: filesystemRoot,
   });
   attachBrowserControlWebSocketServer(server, browserControlService);
+  const filesystemPreviewSocketServer = new WebSocketServer({ noServer: true });
+  bindPreviewWebSocketServer(filesystemPreviewSocketServer, filesystemPreviewService);
+  attachWebSocketUpgradeRoute(server, filesystemPreviewService.websocketPath, filesystemPreviewSocketServer);
 
   await listen(server, requestedPort, host);
 
@@ -172,15 +185,17 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const localWebSocketBaseUrl = `ws://127.0.0.1:${String(port)}`;
   const getStatus = (): MachineServerStatus => {
     const filesystem = filesystemSocketServer.clients.size;
+    const filesystemPreview = filesystemPreviewSocketServer.clients.size;
     const browserControl = browserControlService.socketServer.clients.size;
     const agent = agentHttpService.runManager.getActiveRunCount();
-    const total = filesystem + browserControl + agent;
+    const total = filesystem + filesystemPreview + browserControl + agent;
 
     return {
       ok: true,
       version,
       activeSessions: {
         filesystem,
+        filesystemPreview,
         browserControl,
         agent,
         total,
@@ -197,6 +212,8 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     urls: {
       healthUrl: `${localBaseUrl}/health`,
       filesystemWebSocketUrl: `${localWebSocketBaseUrl}/filesystem`,
+      filesystemPreviewBaseUrl: `${localBaseUrl}${filesystemPreviewService.basePath}`,
+      filesystemPreviewWebSocketUrl: `${localWebSocketBaseUrl}${filesystemPreviewService.websocketPath}`,
       agentBaseUrl: `${localBaseUrl}/agent`,
       capabilitiesBaseUrl: `${localBaseUrl}/capabilities`,
     },
@@ -204,12 +221,18 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     async stop() {
       await Promise.all([
         closeWebSocketServer(filesystemSocketServer),
+        closeWebSocketServer(filesystemPreviewSocketServer),
         closeWebSocketServer(browserControlService.socketServer),
       ]);
       await closeServer(server);
     },
   };
 };
+
+const isPathUnderBasePath = (pathname: string, basePath: string): boolean =>
+  basePath === "/"
+    ? true
+    : pathname === basePath || pathname.startsWith(`${basePath}/`);
 
 const normalizeFilesystemRoot = (root: string | FilesystemRoot | undefined): FilesystemRoot => {
   if (root === undefined) {

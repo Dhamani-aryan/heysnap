@@ -11,6 +11,7 @@ const runningServer = await startServer({
 
 console.log(`server listening on http://127.0.0.1:${runningServer.port}`);
 console.log(`filesystem root: ${runningServer.filesystemRoot.absolutePath}`);
+console.log(`filesystem preview: ${runningServer.urls.filesystemPreviewBaseUrl}`);
 console.log(`agent api: ${runningServer.urls.agentBaseUrl}`);
 console.log(`capabilities api: ${runningServer.urls.capabilitiesBaseUrl}`);
 

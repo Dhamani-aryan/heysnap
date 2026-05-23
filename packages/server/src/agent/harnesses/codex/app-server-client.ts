@@ -117,6 +117,9 @@ export class CodexStdioAppServerClient implements CodexAppServerClient {
   private async initialize(): Promise<void> {
     await this.sendRequest("initialize", {
       clientInfo: CLIENT_INFO,
+      capabilities: {
+        experimentalApi: true
+      }
     });
     this.sendNotification("initialized", {});
   }

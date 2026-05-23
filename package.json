@@ -19,6 +19,7 @@
     "dev:local:status": "node scripts/local-dev/machine-status.mjs",
     "dev:local:down": "node scripts/local-dev/down.mjs",
     "dev:local:prune": "node scripts/local-dev/prune.mjs",
+    "dev:previewer": "pnpm --filter @ank1015-app/previewer dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"

@@ -1,24 +1,9 @@
----
-name: "image-gen"
-description: "Generate or edit raster images when the task benefits from AI-created bitmap visuals such as photos, illustrations, textures, sprites, mockups, or transparent-background cutouts. Use when Snap should create a brand-new image, transform an existing image, or derive visual variants from references, and the output should be a bitmap asset rather than repo-native code or vector. Do not use when the task is better handled by editing existing SVG/vector/code-native assets, extending an established icon or logo system, or building the visual directly in HTML/CSS/canvas."
----
-
 # Image Generation Skill
 
 Generates or edits images for the current project (for example website assets, game assets, UI mockups, product mockups, wireframes, logo design, photorealistic images, or infographics) using the globally available image-gen cli.
 
-
-## When to use
-- Generate a new image (concept art, product shot, cover, website hero)
-- Generate a new image using one or more reference images for style, composition, or mood
-- Edit an existing image (inpainting, lighting or weather transformations, background replacement, object removal, compositing, transparent background)
-- Produce many assets or variants for one task
-
-## When not to use
-- Extending or matching an existing SVG/vector icon set, logo system, or illustration library inside the repo
-- Creating simple shapes, diagrams, wireframes, or icons that are better produced directly in SVG, HTML/CSS, or canvas
-- Making a small project-local asset edit when the source file already exists in an editable native format
-- Any task where the user clearly wants deterministic code-native output instead of a generated bitmap
+Don't treat this as an AI image tool. It is very versatile and can give very realistic images and perfect very accurate edits as well.
+Avoid using this tool when the editing can directly be done through code.
 
 # image-gen CLI
 

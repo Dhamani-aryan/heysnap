@@ -33,7 +33,7 @@ export interface FilesystemViewState {
 export type FilesystemClientMessage =
   | { readonly type: "subscribe"; readonly requestId: string; readonly path?: string; readonly showHidden?: boolean }
   | { readonly type: "refresh"; readonly requestId: string }
-  | { readonly type: "watchFiles"; readonly requestId: string; readonly paths: string[] }
+  | { readonly type: "setOpenFiles"; readonly requestId: string; readonly paths: string[] }
   | { readonly type: "createFolder"; readonly requestId: string; readonly path?: string; readonly name?: string }
   | { readonly type: "upload"; readonly requestId: string; readonly path?: string; readonly files: FilesystemUploadFile[] }
   | { readonly type: "rename"; readonly requestId: string; readonly path: string; readonly newName: string }
@@ -43,7 +43,6 @@ export type FilesystemClientMessage =
 export type FilesystemServerMessage =
   | { readonly type: "hello"; readonly root: { readonly name: string; readonly path: "" }; readonly serverTime: string; readonly viewState?: FilesystemViewState }
   | { readonly type: "snapshot"; readonly requestId?: string; readonly reason: "subscribe" | "refresh" | "watch" | "mutation"; readonly listing: FilesystemListing }
-  | { readonly type: "fileUpdates"; readonly reason: "watch" | "subscription"; readonly entries: FilesystemEntry[]; readonly missingPaths: string[] }
-  | { readonly type: "ack"; readonly requestId: string; readonly action: "watchFiles" | "createFolder" | "upload" | "rename" | "trash"; readonly result?: unknown }
+  | { readonly type: "ack"; readonly requestId: string; readonly action: "setOpenFiles" | "createFolder" | "upload" | "rename" | "trash"; readonly result?: unknown }
   | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string }
   | { readonly type: "pong"; readonly requestId: string; readonly serverTime: string };

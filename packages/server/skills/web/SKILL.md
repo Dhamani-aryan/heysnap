@@ -1,8 +1,3 @@
----
-name: "web"
-description: "A small, agent-friendly CLI for quick web searches and research. Use this to quickly get search information and results. Exposes - search, scrape and research commands. Use when need to find something, get content of a url or research deeply something on the internet quickly. For any other web tasks use the chrome skill."
----
-
 # Web Skill
 
 An easy to use cli to get data from the web. Use when need to find something, get content of a url or research something on the internet quickly. Auth Configured automatically.

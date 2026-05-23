@@ -1,8 +1,3 @@
----
-name: xlsx
-description: "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \"the xlsx in my downloads\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved."
----
-
 # Requirements for Outputs
 
 ## All Excel files
@@ -175,6 +170,85 @@ sheet.column_dimensions['A'].width = 20
 
 wb.save('output.xlsx')
 ```
+
+### Designing polished Excel files
+
+When creating a new workbook from scratch, make it usable as a native Excel deliverable, not just a data dump. When editing an existing template, match the existing workbook style instead of imposing these defaults.
+
+#### Layout standards
+- Hide gridlines on all newly created presentation/report sheets: `ws.sheet_view.showGridLines = False`
+- Start polished report content at `B2` when space allows, leaving top/left padding for a cleaner worksheet.
+- Use clear hierarchy: title, subtitle or date/source line, section headers, table headers, data rows, total rows.
+- Freeze headers for large tables: `ws.freeze_panes = "B5"` or the first data cell below headers.
+- Set column widths and row heights explicitly enough that headers, units, and labels are readable.
+- Use merged cells only for report titles or group headers. Do not merge cells inside source data ranges, formula ranges, or PivotTable source tables.
+- For multi-sheet reports, include a first `Summary` or `Cover` sheet when it helps navigation. Include key metrics, sheet index, and notes/sources. Do not add a cover sheet for simple one-table exports unless it improves the deliverable.
+
+#### Visual style
+- Keep the palette restrained. For general reports, use white, black, gray, and one blue accent.
+- For financial reports, use the financial model color standards above for cell role: blue inputs, black formulas, green same-workbook links, red external links.
+- Use fills sparingly: dark fill with white bold text for headers, light gray or light blue for section bands, and a distinct total-row style.
+- Avoid over-formatting every cell. Prefer whitespace, alignment, number formats, and a few meaningful borders.
+- Apply number formats consistently: currency, percentage, date, multiple, integer, and text years should display correctly.
+- Put units in headers, not inside every numeric cell, e.g. `Revenue ($mm)` or `Margin (%)`.
+
+#### Conditional formatting
+Use conditional formatting when it helps users scan results. Apply it to a small number of important numeric/KPI columns, not the whole workbook.
+
+```python
+from openpyxl.formatting.rule import DataBarRule, ColorScaleRule, IconSetRule
+
+ws.conditional_formatting.add(
+    "C5:C100",
+    DataBarRule(start_type="min", end_type="max", color="4A90D9", showValue=True),
+)
+ws.conditional_formatting.add(
+    "D5:D100",
+    ColorScaleRule(
+        start_type="min", start_color="F8696B",
+        mid_type="percentile", mid_value=50, mid_color="FFEB84",
+        end_type="max", end_color="63BE7B",
+    ),
+)
+ws.conditional_formatting.add(
+    "E5:E100",
+    IconSetRule(icon_style="3TrafficLights1", type="percent", values=[0, 33, 67]),
+)
+```
+
+### Native Excel charts
+
+If the user asks for charts, graphs, visuals, dashboard views, or visualization, create real embedded Excel charts in the workbook using `openpyxl.chart`. Do not create only a "chart data" sheet with instructions for the user to insert charts manually. Do not use static PNG/JPG charts unless the user explicitly asks for image files.
+
+Choose chart types by data shape:
+- Time series or trends: line chart
+- Category comparison: column or bar chart
+- Composition with six or fewer categories: pie or doughnut chart
+- Relationship between two numeric variables: scatter chart
+
+```python
+from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+
+# Example: native column chart from a table with headers in B4:C10
+chart = BarChart()
+chart.type = "col"
+chart.title = "Revenue by Region"
+chart.y_axis.title = "Revenue ($mm)"
+chart.x_axis.title = "Region"
+
+data = Reference(ws, min_col=3, min_row=4, max_row=10)      # includes series header
+cats = Reference(ws, min_col=2, min_row=5, max_row=10)      # category labels
+chart.add_data(data, titles_from_data=True)
+chart.set_categories(cats)
+chart.height = 7
+chart.width = 12
+ws.add_chart(chart, "E4")
+```
+
+After creating charts:
+- Save and reload the workbook, then confirm each intended chart exists: `any(ws._charts for ws in wb.worksheets)`.
+- Confirm the chart source ranges point to non-empty cells and include headers where appropriate.
+- Run `scripts/recalc.py` if chart data depends on formulas, then check for formula errors.
 
 ### Editing existing Excel files
 

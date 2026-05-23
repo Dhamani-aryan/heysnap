@@ -275,6 +275,9 @@ export class CodexAgentHarness implements IAgentHarness {
       const turnResponse = await this.client.request<CodexTurnStartResponse>("turn/start", {
         threadId,
         input: input.codexInput,
+        responsesapiClientMetadata: {
+          "remove_request_user_input": "true"
+        }
       });
       turnId = turnResponse.turn.id;
       const scope = { runId: turnId, threadId };

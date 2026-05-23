@@ -1155,6 +1155,10 @@ button {
   z-index: 12;
 }
 
+.cloud-browser-extension-backdrop {
+  z-index: 14;
+}
+
 .cloud-machines-onboarding-modal {
   position: relative;
   width: min(100%, 520px);
@@ -1294,6 +1298,76 @@ button {
 .cloud-machines-onboarding-close:hover {
   background: var(--cloud-surface-muted);
   color: var(--cloud-text);
+}
+
+.cloud-browser-extension-modal {
+  position: relative;
+  width: min(100%, 500px);
+  justify-items: center;
+  gap: 18px;
+  padding: 26px 24px 24px;
+}
+
+.cloud-browser-extension-title {
+  margin: 0;
+  color: #252629;
+  font-size: 28px;
+  font-weight: 350;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-align: center;
+}
+
+:root.dark .cloud-browser-extension-title {
+  color: #e3e4e6;
+}
+
+.cloud-browser-extension-pointer-stage {
+  position: relative;
+  display: grid;
+  width: min(100%, 260px);
+  height: 126px;
+  place-items: center;
+  overflow: hidden;
+  margin: 4px 0 0;
+}
+
+.cloud-browser-extension-pointer {
+  display: block;
+  width: 62px;
+  height: 62px;
+  filter: drop-shadow(0 12px 18px rgba(59, 131, 246, 0.24));
+  transform-origin: 25% 25%;
+}
+
+.cloud-browser-extension-copy {
+  max-width: 390px;
+  margin: 0;
+  color: var(--cloud-muted);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.cloud-browser-extension-action {
+  min-width: 126px;
+  height: 38px;
+  margin-top: 2px;
+  font-size: 14px;
+  padding: 0 18px;
+  text-decoration: none;
+}
+
+.cloud-browser-extension-modal .cloud-machines-onboarding-close {
+  top: 25px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-browser-extension-pointer {
+    transform: none !important;
+  }
 }
 
 :root.dark .cloud-modal {

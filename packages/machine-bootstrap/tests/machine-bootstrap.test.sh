@@ -13,7 +13,7 @@ bash -n "$ROOT_DIR"/scripts/ank1015-machine-bootstrap \
 
 grep -Fq 'agent_home="${ANK1015_AGENT_HOME:-/home/agent}"' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
 grep -Fq 'HOME=$agent_home' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
-grep -Fq 'ANK1015_ACTIVE_SKILLS_DIR=${ANK1015_ACTIVE_SKILLS_DIR:-$agent_home/.codex/skills}' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
+! grep -Fq 'ANK1015_ACTIVE_SKILLS_DIR' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
 ! grep -Fq 'HOME=${HOME:-/home/agent}' "$ROOT_DIR"/../../infra/machine-container/entrypoint.sh
 
 require() {
@@ -174,7 +174,6 @@ ANK1015_CAPABILITIES_ROOT=$MACHINE_ROOT/agent-capabilities
 ANK1015_AGENT_TOOLS_ROOT=$MACHINE_ROOT/agent-tools
 ANK1015_AGENT_TOOLS_BIN_DIR=$MACHINE_ROOT/agent-tools/bin
 ANK1015_AGENT_SKILLS_CATALOG_DIR=$MACHINE_ROOT/agent-skills/catalog
-ANK1015_ACTIVE_SKILLS_DIR=$MACHINE_ROOT/home/agent/.codex/skills
 PATH=$FAKE_BIN:$ROOT_DIR/scripts:$PATH
 ENV
 printf 'bootstrap-token\n' >"$MACHINE_ROOT/bootstrap-token"

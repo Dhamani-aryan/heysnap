@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -95,9 +95,17 @@ export const runLocalReleasePublisher = async () => {
   mkdirSync(plan.stageDir, { recursive: true });
   mkdirSync(plan.artifactDir, { recursive: true });
 
-  cpSync(resolve(repoRoot, "packages/server/package.json"), join(plan.stageDir, "package.json"));
+  const serverPackageJson = JSON.parse(readFileSync(resolve(repoRoot, "packages/server/package.json"), "utf8"));
+  serverPackageJson.dependencies = {
+    ...serverPackageJson.dependencies,
+    "@ank1015-app/previewer": "file:previewer",
+  };
+  writeFileSync(join(plan.stageDir, "package.json"), `${JSON.stringify(serverPackageJson, null, 2)}\n`);
   cpSync(resolve(repoRoot, "packages/server/dist"), join(plan.stageDir, "dist"), { recursive: true });
   cpSync(resolve(repoRoot, "packages/server/skills"), join(plan.stageDir, "skills"), { recursive: true });
+  mkdirSync(join(plan.stageDir, "previewer"), { recursive: true });
+  cpSync(resolve(repoRoot, "packages/previewer/package.json"), join(plan.stageDir, "previewer/package.json"));
+  cpSync(resolve(repoRoot, "packages/previewer/dist"), join(plan.stageDir, "previewer/dist"), { recursive: true });
   const migrationsDir = resolve(repoRoot, "packages/server/migrations");
   if (existsSync(migrationsDir)) {
     cpSync(migrationsDir, join(plan.stageDir, "migrations"), { recursive: true });
