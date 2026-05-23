@@ -47,8 +47,8 @@ def main():
     )
     parser.add_argument(
         "--author",
-        default="Codex",
-        help="Author name for redlining validation (default: Codex)",
+        default="Editor",
+        help="Author name for redlining validation (default: Editor)",
     )
     args = parser.parse_args()
 
