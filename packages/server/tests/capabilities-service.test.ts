@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -94,6 +94,37 @@ describe("agent capabilities service", () => {
     });
   });
 
+  it("refreshes the bundled skill catalog without creating active symlinks", async () => {
+    const { root, paths } = await createTempPaths();
+    await writeFile(paths.stateFile, JSON.stringify({
+      catalogVersion: "test",
+      codexBin: null,
+      tools: {},
+      skills: {
+        "fake-skill": {
+          id: "fake-skill",
+          installedVersion: "1.0",
+          installState: "installed",
+          active: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }));
+    const service = new AgentCapabilitiesService({
+      catalog: createCatalog({
+        skills: [{ activeByDefault: true }],
+      }),
+      paths,
+      env: { PATH: process.env.PATH ?? "", HOME: root },
+    });
+
+    await service.initialize();
+
+    await expect(access(join(paths.skillsCatalogDir, "fake-skill", "SKILL.md"))).resolves.toBeUndefined();
+    await expect(access(join(root, "active-skills"))).rejects.toThrow();
+  });
+
   it("reactivates default-active bundled skills when their version changes", async () => {
     const { root, paths } = await createTempPaths();
     await writeFile(paths.stateFile, JSON.stringify({
@@ -138,7 +169,6 @@ const createTempPaths = async (): Promise<{ readonly root: string; readonly path
       toolsRoot: join(root, "tools"),
       toolsBinDir: join(root, "tools", "bin"),
       skillsCatalogDir: join(root, "skills", "catalog"),
-      activeSkillsDir: join(root, "active-skills"),
     },
   };
 };
