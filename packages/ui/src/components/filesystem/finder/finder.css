@@ -1,0 +1,657 @@
+.finder-toolbar {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  height: 56px;
+  flex-shrink: 0;
+  align-items: flex-start;
+  background: transparent;
+  padding: 8px 8px 0;
+}
+
+:root.dark .finder-toolbar {
+  background: transparent;
+}
+
+.toolbar-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-pill {
+  display: flex;
+  width: 66px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f9f9f9;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  outline: 1px solid rgba(0, 0, 0, 0.035);
+}
+
+:root.dark .nav-pill {
+  background: #1a1a1a;
+  outline-color: rgba(255, 255, 255, 0.06);
+}
+
+.toolbar-button {
+  display: flex;
+  width: 33px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: rgba(0, 0, 0, 0.5);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.nav-pill .toolbar-button:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.nav-pill .toolbar-button:last-child {
+  border-radius: 0 999px 999px 0;
+}
+
+:root.dark .toolbar-button {
+  color: #a3a3a3;
+}
+
+.toolbar-button:not(:disabled):hover,
+.toolbar-button.active {
+  background: #f5f5f5;
+  color: #111111;
+}
+
+:root.dark .toolbar-button:not(:disabled):hover,
+:root.dark .toolbar-button.active {
+  background: #1a1a1a;
+  color: #f5f5f5;
+}
+
+.tab-strip-wrap {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.directory-tab {
+  display: inline-flex;
+  min-width: 0;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color 120ms ease;
+}
+
+.directory-tab.active {
+  color: rgba(0, 0, 0, 0.78);
+}
+
+.directory-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.directory-tab:hover {
+  background: rgba(0, 0, 0, 0.045);
+}
+
+:root.dark .directory-tab {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+:root.dark .directory-tab.active {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+:root.dark .directory-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tab-strip {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.file-tab {
+  position: relative;
+  display: flex;
+  height: 32px;
+  width: max-content;
+  min-width: 64px;
+  max-width: 238px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border-radius: 8px;
+  padding: 0 12px 0 10px;
+  color: rgba(0, 0, 0, 0.58);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.file-tab:hover,
+.file-tab.active {
+  background: rgba(0, 0, 0, 0.045);
+  color: rgba(0, 0, 0, 0.82);
+}
+
+:root.dark .file-tab {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+:root.dark .file-tab:hover,
+:root.dark .file-tab.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.file-tab-activate {
+  display: flex;
+  min-width: 0;
+  max-width: 190px;
+  flex: 0 1 auto;
+  align-items: center;
+  align-self: stretch;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.file-tab-leading {
+  position: relative;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-tab-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  opacity: 0.86;
+  transition: opacity 120ms ease;
+}
+
+.file-tab-type-icon {
+  display: block;
+  width: auto;
+  height: 17px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.file-tab-title {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.browser-file-tab {
+  flex: 0 0 auto;
+}
+
+.browser-collapsed-tab {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: rgba(0, 0, 0, 0.48);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.browser-collapsed-tab:not(:disabled):hover {
+  background: rgba(0, 0, 0, 0.045);
+  color: rgba(0, 0, 0, 0.82);
+}
+
+.browser-collapsed-tab:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+:root.dark .browser-collapsed-tab:disabled {
+  opacity: 0.5;
+}
+
+:root.dark .browser-collapsed-tab {
+  color: rgba(255, 255, 255, 0.54);
+}
+
+:root.dark .browser-collapsed-tab:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.file-tab.long-name .file-tab-title {
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
+}
+
+.file-tab-close {
+  position: absolute;
+  inset: 1px;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgba(0, 0, 0, 0.74);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.file-tab-close:hover {
+  background: rgba(0, 0, 0, 0.26);
+  color: #ffffff;
+}
+
+.file-tab:hover .file-tab-file-icon,
+.file-tab-leading:focus-within .file-tab-file-icon {
+  opacity: 0;
+}
+
+.file-tab:hover .file-tab-close,
+.file-tab-leading:focus-within .file-tab-close {
+  background: rgba(0, 0, 0, 0.22);
+  color: #ffffff;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:root.dark .file-tab-close {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+:root.dark .file-tab-close:hover {
+  background: rgba(255, 255, 255, 0.56);
+  color: #111111;
+}
+
+:root.dark .file-tab:hover .file-tab-close,
+:root.dark .file-tab-leading:focus-within .file-tab-close {
+  background: rgba(255, 255, 255, 0.48);
+  color: #111111;
+}
+
+.toolbar-spinner {
+  display: flex;
+  width: 12px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.new-thread-button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: rgba(0, 0, 0, 0.5);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.new-thread-button:hover {
+  background: #f5f5f5;
+  color: #111111;
+}
+
+:root.dark .new-thread-button {
+  color: #a3a3a3;
+}
+
+:root.dark .new-thread-button:hover {
+  background: #1a1a1a;
+  color: #f5f5f5;
+}
+
+.finder-body {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  background: #ffffff;
+  user-select: none;
+}
+
+.finder-body.tiles {
+  padding: 12px 2px 12px 28px;
+}
+
+.finder-body.tiles.empty {
+  padding: 0;
+}
+
+:root.dark .finder-body {
+  background: #202021;
+}
+
+.finder-tiles {
+  display: grid;
+  gap: 8px 12px;
+  grid-template-columns: repeat(auto-fill, 96px);
+}
+
+.finder-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  padding: 12px 8px 8px;
+  text-align: center;
+  outline: none;
+}
+
+.finder-item:focus-visible {
+  outline: 2px solid rgba(0, 100, 225, 0.6);
+}
+
+:root.dark .finder-item:focus-visible {
+  outline-color: rgba(0, 89, 209, 0.6);
+}
+
+.finder-item-icon {
+  display: flex;
+  width: 76px;
+  max-width: 76px;
+  height: 58px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background-color 120ms ease;
+}
+
+.finder-item:hover .finder-item-icon,
+.finder-item:hover .finder-item-label {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.finder-item.selected .finder-item-icon {
+  background: #e6e6e6;
+}
+
+:root.dark .finder-item:hover .finder-item-icon,
+:root.dark .finder-item:hover .finder-item-label {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+:root.dark .finder-item.selected .finder-item-icon {
+  background: #343434;
+}
+
+.finder-item-label {
+  max-width: 96px;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: rgba(0, 0, 0, 0.82);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-item.selected .finder-item-label {
+  background: #0064e1;
+  color: #ffffff;
+}
+
+:root.dark .finder-item-label {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+:root.dark .finder-item.selected .finder-item-label {
+  background: #0059d1;
+}
+
+.finder-rename-input {
+  width: 96px;
+  border: 1px solid #0064e1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 11px;
+  line-height: 1.2;
+  outline: none;
+  padding: 1px 5px;
+  text-align: center;
+}
+
+:root.dark .finder-rename-input {
+  border-color: #4d9bff;
+  background: #242426;
+  color: #ffffff;
+}
+
+.desktop-context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  width: 200px;
+  flex-direction: column;
+  gap: 1px;
+  border: 0.5px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 10px 32px rgba(0, 0, 0, 0.18),
+    0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.72);
+  padding: 5px 5px;
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+}
+
+:root.dark .desktop-context-menu {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(32, 32, 33, 0.55);
+  box-shadow:
+    0 10px 32px rgba(0, 0, 0, 0.45),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.context-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 24px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  text-align: left;
+  transition: none;
+}
+
+.context-menu-item:not(:disabled):hover,
+.context-menu-item.disabled:hover {
+  background: #0064e1;
+  color: #ffffff;
+}
+
+.context-menu-item:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.context-menu-item.disabled {
+  opacity: 1;
+}
+
+.context-menu-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.context-menu-item:hover .context-menu-icon {
+  opacity: 1;
+}
+
+.context-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-arrow {
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.context-menu-item:not(:disabled):hover .context-menu-arrow,
+.context-menu-item.disabled:hover .context-menu-arrow {
+  opacity: 1;
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 5px 6px;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+:root.dark .context-menu-separator {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.selection-rectangle {
+  pointer-events: none;
+  position: absolute;
+  z-index: 10;
+  border: 1px solid rgba(0, 100, 225, 0.75);
+  border-radius: 3px;
+  background: rgba(0, 100, 225, 0.16);
+}
+
+:root.dark .selection-rectangle {
+  border-color: rgba(66, 149, 255, 0.82);
+  background: rgba(66, 149, 255, 0.2);
+}
+
+.entry-icon {
+  user-select: none;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+}
+
+.finder-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.finder-empty p {
+  max-width: 384px;
+  margin: 0;
+  color: rgba(0, 0, 0, 0.46);
+  font-size: 14px;
+}
+
+:root.dark .finder-empty p {
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.finder-empty p.error {
+  color: #c13e3e;
+}
+
+:root.dark .finder-empty p.error {
+  color: #ff8a8a;
+}
+
+.finder-empty-inline {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.finder-empty-inline p {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.34);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+}
+
+:root.dark .finder-empty-inline p {
+  color: rgba(255, 255, 255, 0.32);
+}
