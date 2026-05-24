@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseBrowserControlServerMessage } from "./browser-control-bridge";
+import { parseBrowserControlServerMessage } from "../../src/cloud/browser-control-bridge";
 
 describe("browser-control bridge protocol", () => {
   it("parses request attachment metadata", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ComputerAccessSessionResponse } from "./cloud-client";
+import type { ComputerAccessSessionResponse } from "../../src/cloud/cloud-client";
 import {
   ACCESS_SESSION_REFRESH_BUFFER_MS,
   getRemoteMachineUnavailableMessage,
@@ -8,7 +8,7 @@ import {
   isRemoteMachineConnectable,
   isRemoteMachinePendingStartup,
   isRemoteMachineTerminal,
-} from "./machine-status";
+} from "../../src/cloud/machine-status";
 
 describe("machine status helpers", () => {
   it("identifies connectable machine statuses", () => {

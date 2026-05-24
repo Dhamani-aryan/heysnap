@@ -5,7 +5,7 @@ import {
   getCapabilities,
   installTool,
   sendCapabilityOperationInput,
-} from "./capabilities-client";
+} from "../../src/cloud/capabilities-client";
 
 describe("capabilities REST client", () => {
   afterEach(() => {
