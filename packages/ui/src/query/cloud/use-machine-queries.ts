@@ -3,8 +3,8 @@
 import { useCallback, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { CloudComputer, ComputerAccessSessionResponse } from "../cloud-client";
-import { useCloudAuthStore, useCloudMachinesStore, useCloudRuntime, useMachineAccessStore } from "../cloud-runtime";
+import type { CloudComputer, ComputerAccessSessionResponse } from "../../cloud/cloud-client";
+import { useCloudAuthStore, useCloudMachinesStore, useCloudRuntime, useMachineAccessStore } from "../../cloud/cloud-runtime";
 import {
   ACCESS_SESSION_REFRESH_BUFFER_MS,
   getRemoteMachineUnavailableMessage,
@@ -12,9 +12,9 @@ import {
   isRemoteMachineConnectable,
   isRemoteMachinePendingStartup,
   isRemoteMachineTerminal,
-} from "../machine-status";
-import { emptyEntry } from "../state/machine-access-store";
-import { selectComputers, selectHasPendingMachine } from "../state/machines-store";
+} from "../../cloud/machine-status";
+import { emptyEntry } from "../../stores/cloud/machine-access-store";
+import { selectComputers, selectHasPendingMachine } from "../../stores/cloud/machines-store";
 import { cloudQueryKeys } from "./cloud-query-keys";
 import { isAuthFailure, useClearCloudSession } from "./use-cloud-session";
 

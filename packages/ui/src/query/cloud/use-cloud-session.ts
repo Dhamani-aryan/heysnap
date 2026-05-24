@@ -3,8 +3,8 @@
 import { useCallback, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { CloudApiError } from "../cloud-client";
-import { useCloudRuntime } from "../cloud-runtime";
+import { CloudApiError } from "../../cloud/cloud-client";
+import { useCloudRuntime } from "../../cloud/cloud-runtime";
 
 export const MACHINES_ONBOARDING_STORAGE_KEY_SUFFIX = ":machines-onboarding-shown";
 

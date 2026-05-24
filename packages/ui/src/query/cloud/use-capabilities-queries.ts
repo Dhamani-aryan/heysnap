@@ -16,7 +16,7 @@ import {
   type CapabilitiesResponse,
   type CapabilitiesSnapshot,
   type CapabilityOperationResponse,
-} from "../capabilities-client";
+} from "../../cloud/capabilities-client";
 import { cloudQueryKeys } from "./cloud-query-keys";
 
 export const CAPABILITY_OPERATION_POLL_INTERVAL_MS = 1000;
