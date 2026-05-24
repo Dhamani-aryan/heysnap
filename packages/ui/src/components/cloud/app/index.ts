@@ -1,4 +1,4 @@
-export { CloudAppCore } from "../components/cloud/app";
+export { CloudAppCore } from "./cloud-app-core";
 export type {
   CloudAppCoreProps,
   CloudAppProps,
@@ -6,4 +6,4 @@ export type {
   CloudRouteChangeOptions,
   CloudWorkspaceLoaderRendererProps,
   CloudWorkspaceRendererProps,
-} from "../components/cloud/app";
+} from "./cloud-app-core";
