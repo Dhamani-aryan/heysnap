@@ -4,7 +4,7 @@ import {
   buildFilesystemPreviewerUrl,
   deriveFilesystemPreviewBaseUrl,
   resolveFilesystemPreviewBaseUrl,
-} from "./file-preview";
+} from "../../src/filesystem/file-preview";
 
 describe("standalone file preview urls", () => {
   it("derives the local preview base URL from the filesystem websocket URL", () => {
