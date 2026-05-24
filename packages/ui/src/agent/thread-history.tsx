@@ -4,9 +4,9 @@ import { WorkHistoryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { useAgentThreadGroupsQuery } from "./agent-queries";
+import { useAgentThreadGroupsQuery } from "../query/agent/agent-queries";
 import { AgentRuntimeProvider, useAgentThreadListStore, useOptionalAgentRuntime } from "./agent-runtime";
-import { selectHasThreads } from "./agent-thread-list-store";
+import { selectHasThreads } from "../stores/agent/agent-thread-list-store";
 import type { AgentThreadGroup, AgentThreadSummary } from "./types";
 
 export interface ThreadHistoryButtonProps {

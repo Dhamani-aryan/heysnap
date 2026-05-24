@@ -5,7 +5,7 @@ import {
   useAgentRunMutation,
   useAgentThreadQuery,
   useCloseAgentRuntimeRunOnUnmount,
-} from "./agent-queries";
+} from "../query/agent/agent-queries";
 import {
   AgentRuntimeProvider,
   useAgentChatStore,

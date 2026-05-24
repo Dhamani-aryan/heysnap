@@ -11,10 +11,10 @@ import {
   retrieveAgentThreadGroups,
   startAgentRun,
   steerAgentRun,
-} from "./agent-client";
-import type { ActiveRunState } from "./agent-store";
-import { useAgentRuntime } from "./agent-runtime";
-import { selectHasStreamingThreads } from "./agent-thread-list-store";
+} from "../../agent/agent-client";
+import type { ActiveRunState } from "../../stores/agent/agent-store";
+import { useAgentRuntime } from "../../agent/agent-runtime";
+import { selectHasStreamingThreads } from "../../stores/agent/agent-thread-list-store";
 import type {
   AgentContent,
   AgentRunEvent,
@@ -22,7 +22,7 @@ import type {
   AgentThreadSummary,
   AgentUiContext,
   UserMessage,
-} from "./types";
+} from "../../agent/types";
 
 const agentQueryKeys = {
   thread: (agentBaseUrl: string, threadId: string | null) =>
