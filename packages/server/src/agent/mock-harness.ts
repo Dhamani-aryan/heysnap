@@ -287,8 +287,8 @@ const createSeedThreads = (): MutableAgentThread[] => {
 
   return [
     createSeedThread({
-      id: "mock-thread-desktop-plan",
-      title: "Plan the desktop chat surface",
+      id: "mock-thread-chat-plan",
+      title: "Plan the chat surface",
       startPath: "",
       lastPath: "",
       createdAt: now - 1000 * 60 * 60 * 28,
@@ -355,7 +355,7 @@ const createSeedThreads = (): MutableAgentThread[] => {
       createdAt: now - 1000 * 60 * 60 * 52,
       updatedAt: now - 1000 * 60 * 47,
       duration: 91_000,
-      userText: "Build the shared filesystem explorer and keep web and desktop identical.",
+      userText: "Build the shared filesystem explorer and keep web and mobile aligned.",
       assistantText: [
         "Implemented as a shared React surface so both apps consume the same component.",
         "",
@@ -363,7 +363,7 @@ const createSeedThreads = (): MutableAgentThread[] => {
         "",
         "1. The server keeps paths root-relative.",
         "2. The UI handles selection, context menus, rename, trash, and folder navigation.",
-        "3. Web and desktop only pass their WebSocket URL overrides.",
+        "3. Client apps only pass their WebSocket URL overrides.",
         "",
         "The next useful pass is connecting selected files and folders to the agent context.",
       ].join("\n"),

@@ -12,7 +12,7 @@ describe("mock agent harness", () => {
     expect(result.groups.length).toBeGreaterThan(0);
     expect(result.groups.some((group) => group.threads.length > 0)).toBe(true);
     expect(result.groups.flatMap((group) => group.threads).map((thread) => thread.title)).toContain(
-      "Plan the desktop chat surface",
+      "Plan the chat surface",
     );
   });
 
