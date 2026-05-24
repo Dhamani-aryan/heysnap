@@ -1,6 +1,6 @@
 # @ank1015-app/ui
 
-Shared React UI package used by both the web app and desktop app.
+Shared React UI package used by the web and mobile app surfaces.
 
 This package owns the product UI surface: cloud auth shell, `My Machines`,
 machine workspace layout, filesystem browser, and agent chat/thread views.
@@ -17,7 +17,7 @@ machine workspace layout, filesystem browser, and agent chat/thread views.
 ## Consumers
 
 - `apps/web` renders `CloudApp`.
-- `apps/desktop` renders the same `CloudApp` in Electron.
+- `apps/mobile` uses the shared cloud client and product concepts.
 
 ## Commands
 
@@ -29,5 +29,5 @@ pnpm --filter @ank1015-app/ui build
 ## Notes
 
 This package should stay runtime-agnostic. It should not directly import
-Electron, Node, AWS, Docker, or cloud-server internals. Runtime-specific
+Node, AWS, Docker, or cloud-server internals. Runtime-specific
 behavior should be passed in through props.
