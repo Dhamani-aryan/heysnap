@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { executeBrowserControlExtensionCommand, shouldWaitForNavigationCommit } from "./machine-workspace";
+import { executeBrowserControlExtensionCommand, shouldWaitForNavigationCommit } from "../../src/cloud/machine-workspace";
 
 describe("machine workspace browser load waiting", () => {
   it("keeps waiting while Chrome reports a pending tab URL", () => {
