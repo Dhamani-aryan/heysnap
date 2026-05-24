@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { AgentThreadGroup, AgentThreadSummary } from "./types";
+import type { AgentThreadGroup, AgentThreadSummary } from "../../agent/types";
 
 export interface AgentThreadListState {
   readonly groups: readonly AgentThreadGroup[];

@@ -6,7 +6,7 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
-import { getAssistantMarkdown, getTextContent, type AgentTimelineRow } from "./agent-store";
+import { getAssistantMarkdown, getTextContent, type AgentTimelineRow } from "../stores/agent/agent-store";
 import { useAgentRuntime } from "./agent-runtime";
 import type {
   AgentContent,

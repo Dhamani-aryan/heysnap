@@ -11,7 +11,7 @@ import type {
   AssistantMessage,
   TextContent,
   UserMessage,
-} from "./types";
+} from "../../agent/types";
 
 export interface ActiveRunState {
   readonly runId: string | null;
