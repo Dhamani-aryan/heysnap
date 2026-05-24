@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "./markdown-links";
+import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../../src/agent/markdown-links";
 
 describe("markdown file links", () => {
   it("resolves relative links against the current transcript path", () => {

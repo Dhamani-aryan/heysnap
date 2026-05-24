@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getClipboardAttachmentFiles } from "./prompt-composer";
+import { getClipboardAttachmentFiles } from "../../src/agent/prompt-composer";
 
 const createClipboardData = ({
   files = [],

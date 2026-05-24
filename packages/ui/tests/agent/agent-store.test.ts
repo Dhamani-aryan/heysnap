@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { createAgentChatStore, getAssistantMarkdown, getTextContent } from "./agent-store";
-import { createAgentThreadListStore, selectHasStreamingThreads } from "./agent-thread-list-store";
-import type { AgentRunEvent, AgentRuntimeItem, AgentThread } from "./types";
+import { createAgentChatStore, getAssistantMarkdown, getTextContent } from "../../src/stores/agent/agent-store";
+import { createAgentThreadListStore, selectHasStreamingThreads } from "../../src/stores/agent/agent-thread-list-store";
+import type { AgentRunEvent, AgentRuntimeItem, AgentThread } from "../../src/agent/types";
 
 const baseEvent = (
   type: AgentRunEvent["type"],

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { computeStableRows, deriveTimelineRows, type StableRowsState } from "./timeline-model";
-import type { AgentMessage } from "./types";
+import { computeStableRows, deriveTimelineRows, type StableRowsState } from "../../src/agent/timeline-model";
+import type { AgentMessage } from "../../src/agent/types";
 
 const userMessage: AgentMessage = {
   role: "user",
