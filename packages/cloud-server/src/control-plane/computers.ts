@@ -90,82 +90,6 @@ export const createComputerRoutes = (
     }
   });
 
-  app.post("/local", async (context) => {
-    const user = context.get("currentUser");
-    const body = await readJsonBody(context.req.raw);
-    const localDeviceId = stringField(body, "localDeviceId", { required: true, maxLength: 200 }) ?? "";
-    const name = stringField(body, "name", { required: true, maxLength: 120 }) ?? "Local Machine";
-    const machineServerVersion = stringField(body, "machineServerVersion", { maxLength: 120 }) ?? null;
-    const capabilities = readCapabilities(body["capabilities"]);
-    const replacedLocalDeviceIds = readLocalDeviceIds(body["replacedLocalDeviceIds"])
-      .filter((replacedLocalDeviceId) => replacedLocalDeviceId !== localDeviceId);
-    const providerMetadata = {
-      provider: "electron-local",
-      localDeviceId,
-    };
-    const existing = (await store.listComputersForUser(user.id)).find((computer) =>
-      computer.kind === "local" &&
-      readProviderMetadataString(computer.providerMetadata, "localDeviceId") === localDeviceId
-    );
-    const now = new Date();
-    const computer = existing === undefined
-      ? await store.createComputer({
-          ownerUserId: user.id,
-          name,
-          kind: "local",
-          status: "online",
-          providerMetadata,
-          capabilities,
-        })
-      : await store.updateComputerForUser({
-          userId: user.id,
-          computerId: existing.id,
-          name,
-          status: "online",
-          providerMetadata,
-          capabilities,
-          machineServerVersion,
-          lastHeartbeatAt: now,
-        }) ?? existing;
-    const machineToken = await createActivatedMachineToken(store, computer.id, config);
-    const syncedComputer = existing === undefined
-      ? await store.updateComputerForUser({
-          userId: user.id,
-          computerId: computer.id,
-          machineServerVersion,
-          lastHeartbeatAt: now,
-        }) ?? computer
-      : computer;
-
-    if (replacedLocalDeviceIds.length > 0) {
-      const computers = await store.listComputersForUser(user.id);
-
-      await Promise.all(computers.map(async (localComputer) => {
-        if (
-          localComputer.id !== computer.id &&
-          localComputer.kind === "local" &&
-          replacedLocalDeviceIds.includes(
-            readProviderMetadataString(localComputer.providerMetadata, "localDeviceId") ?? "",
-          )
-        ) {
-          await store.deleteComputerForUser({
-            userId: user.id,
-            computerId: localComputer.id,
-          });
-        }
-      }));
-    }
-
-    return context.json({
-      computer: serializeUserComputer(syncedComputer, tunnelRegistry),
-      machine: {
-        computerId: syncedComputer.id,
-        token: machineToken,
-        heartbeatIntervalSeconds: 30,
-      },
-    }, existing === undefined ? 201 : 200);
-  });
-
   app.get("/:computerId", async (context) => {
     const computer = await readOwnedComputer(store, context.get("currentUser").id, context.req.param("computerId"));
 
@@ -289,30 +213,6 @@ const createInitialProviderMetadata = (config: CloudServerConfig): Record<string
   };
 };
 
-const createActivatedMachineToken = async (
-  store: CloudStore,
-  computerId: string,
-  config: CloudServerConfig,
-): Promise<string> => {
-  const bootstrapToken = createOpaqueToken();
-  const identity = await store.createMachineIdentity({
-    computerId,
-    bootstrapTokenHash: hashToken(bootstrapToken, config.sessionSecret),
-  });
-  const machineToken = createOpaqueToken();
-  const activated = await store.activateMachineIdentity({
-    identityId: identity.id,
-    tokenHash: hashToken(machineToken, config.sessionSecret),
-    activatedAt: new Date(),
-  });
-
-  if (activated === null) {
-    throw new HttpError(500, "MACHINE_TOKEN_CREATE_FAILED", "Failed to create machine token");
-  }
-
-  return machineToken;
-};
-
 const serializeUserComputer = (
   computer: ComputerRecord,
   tunnelRegistry: TunnelStatusRegistry,
@@ -320,39 +220,6 @@ const serializeUserComputer = (
   ...serializeComputer(computer),
   tunnelConnected: tunnelRegistry.isConnected(computer.id),
 });
-
-const readCapabilities = (value: unknown): string[] => {
-  if (value === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
-    return [];
-  }
-
-  return value;
-};
-
-const readLocalDeviceIds = (value: unknown): string[] => {
-  if (value === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-};
-
-const readProviderMetadataString = (metadata: unknown, key: string): string | null => {
-  if (typeof metadata !== "object" || metadata === null || !(key in metadata)) {
-    return null;
-  }
-
-  const value = (metadata as Record<string, unknown>)[key];
-  return typeof value === "string" && value.length > 0 ? value : null;
-};
 
 const readOwnedComputer = async (
   store: CloudStore,
