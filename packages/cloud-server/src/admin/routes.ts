@@ -76,7 +76,9 @@ export const createAdminRoutes = (
         ownerEmail: users.find((user) => user.id === computer.ownerUserId)?.email ?? null,
         tunnelConnected: tunnelRegistry.isConnected(computer.id),
       })),
-      releases: releases.map(serializeReleaseManifest),
+      releases: releases
+        .filter((release) => release.target === "machine-server")
+        .map(serializeReleaseManifest),
     });
   });
 
@@ -532,24 +534,6 @@ export const createAdminRoutes = (
     }
 
     return context.json({ identity: serializeMachineIdentity(identity) });
-  });
-
-  app.post("/releases/desktop", async (context) => {
-    const body = await readJsonBody(context.req.raw);
-    const manifest = await store.upsertReleaseManifest({
-      target: "desktop",
-      channel: readReleaseChannel(body),
-      platform: stringField(body, "platform", { required: true, maxLength: 120 }) ?? "",
-      version: stringField(body, "version", { required: true, maxLength: 120 }) ?? "",
-      downloadUrl: stringField(body, "downloadUrl", { required: true, maxLength: 2000 }) ?? "",
-      signatureUrl: stringField(body, "signatureUrl", { maxLength: 2000 }) ?? null,
-      dockerImage: null,
-      notes: stringField(body, "notes", { maxLength: 4000 }) ?? null,
-      metadata: readMetadata(body["metadata"]),
-      releasedAt: readReleasedAt(body["releasedAt"]),
-    });
-
-    return context.json({ release: serializeReleaseManifest(manifest) }, 201);
   });
 
   app.post("/releases/machine-server", async (context) => {
