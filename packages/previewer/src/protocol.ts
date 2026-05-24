@@ -17,6 +17,7 @@ export type PreviewFile = {
   readonly size: number;
   readonly mtime: number;
   readonly data: string;
+  readonly assetBaseUrl?: string;
 };
 
 export type PreviewWorkbook = {

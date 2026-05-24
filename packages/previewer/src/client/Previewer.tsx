@@ -277,6 +277,7 @@ const MarkdownPreview = ({
     <HeySnapMarkdownViewer
       key={`${file.path}:${String(file.mtime)}`}
       src={src}
+      assetBaseUrl={file.assetBaseUrl}
       documentName={file.name}
       codeTheme={theme.codeTheme}
       headerBackground={theme.headerBackground}

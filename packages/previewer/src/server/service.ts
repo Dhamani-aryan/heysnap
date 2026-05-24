@@ -40,6 +40,10 @@ interface HtmlPreviewRoot {
   readonly entryPath: string;
 }
 
+interface FileAssetRoot {
+  readonly rootPath: string;
+}
+
 export class PreviewService {
   readonly basePath: string;
   readonly websocketPath: string;
@@ -47,6 +51,7 @@ export class PreviewService {
   private readonly resolvePath: PreviewPathResolver;
   private readonly debounceMs: number;
   private readonly htmlRoots = new Map<string, HtmlPreviewRoot>();
+  private readonly fileAssetRoots = new Map<string, FileAssetRoot>();
   private readonly xlsxAssetDirs = new Map<string, string>();
 
   constructor(private readonly options: PreviewServiceOptions = {}) {
@@ -90,6 +95,11 @@ export class PreviewService {
       return true;
     }
 
+    if (subpath.startsWith("/api/file-assets/")) {
+      await this.handleFileAsset(subpath, response);
+      return true;
+    }
+
     if (subpath.startsWith("/api/xlsx-assets/")) {
       await this.handleXlsxAsset(subpath, response);
       return true;
@@ -106,6 +116,7 @@ export class PreviewService {
 
   async cleanupConnection(connectionId: string): Promise<void> {
     this.htmlRoots.delete(connectionId);
+    this.fileAssetRoots.delete(connectionId);
     const xlsxAssetDirectory = this.xlsxAssetDirs.get(connectionId);
 
     if (xlsxAssetDirectory !== undefined) {
@@ -130,6 +141,10 @@ export class PreviewService {
     this.htmlRoots.set(connectionId, root);
   }
 
+  registerFileAssetRoot(connectionId: string, root: FileAssetRoot): void {
+    this.fileAssetRoots.set(connectionId, root);
+  }
+
   registerXlsxAssetDirectory(connectionId: string, directory: string): void {
     const previousDirectory = this.xlsxAssetDirs.get(connectionId);
     this.xlsxAssetDirs.set(connectionId, directory);
@@ -147,6 +162,15 @@ export class PreviewService {
       encodeURIComponent(connectionId),
       encodePathSegments(entryPath),
     );
+  }
+
+  buildFileAssetBaseUrl(connectionId: string, publicBasePath = this.basePath): string {
+    return `${joinUrlPath(
+      publicBasePath,
+      "api",
+      "file-assets",
+      encodeURIComponent(connectionId),
+    )}/`;
   }
 
   buildXlsxAssetUrl(connectionId: string, assetPath: string, publicBasePath = this.basePath): string {
@@ -180,6 +204,48 @@ export class PreviewService {
 
     try {
       ensurePathInside(root.rootPath, assetPath, "invalid html-preview path");
+      const assetStats = await stat(assetPath);
+
+      if (!assetStats.isFile()) {
+        sendJson(response, 404, { error: "not found" });
+        return;
+      }
+
+      response.writeHead(200, {
+        ...previewCorsHeaders,
+        "cache-control": "no-store",
+        "content-length": String(assetStats.size),
+        "content-type": mimeForPath(assetPath),
+      });
+      createReadStream(assetPath).pipe(response);
+    } catch (error) {
+      sendJson(response, error instanceof PreviewPathError ? 400 : 404, {
+        error: error instanceof Error ? error.message : "not found",
+      });
+    }
+  }
+
+  private async handleFileAsset(subpath: string, response: ServerResponse): Promise<void> {
+    const match = /^\/api\/file-assets\/([^/]+)\/(.+)$/u.exec(subpath);
+
+    if (match === null) {
+      sendJson(response, 400, { error: "bad file-asset path" });
+      return;
+    }
+
+    const connectionId = decodeURIComponent(match[1] ?? "");
+    const root = this.fileAssetRoots.get(connectionId);
+
+    if (root === undefined) {
+      sendJson(response, 404, { error: "unknown connection id" });
+      return;
+    }
+
+    const relativePath = decodePath(match[2] ?? "");
+    const assetPath = resolve(root.rootPath, relativePath);
+
+    try {
+      ensurePathInside(root.rootPath, assetPath, "invalid file-asset path");
       const assetStats = await stat(assetPath);
 
       if (!assetStats.isFile()) {
@@ -449,7 +515,7 @@ class PreviewSocketSession {
       return;
     }
 
-    await this.sendBytes(filePath, publicPath, fileStats.size, fileStats.mtimeMs);
+    await this.sendBytes(filePath, publicPath, fileStats.size, fileStats.mtimeMs, publicBasePath);
   }
 
   private async sendBytes(
@@ -457,8 +523,10 @@ class PreviewSocketSession {
     publicPath: string,
     size: number,
     mtime: number,
+    publicBasePath: string | undefined,
   ): Promise<void> {
     const buffer = await readFile(filePath);
+    const assetBaseUrl = this.createAssetBaseUrl(filePath, publicBasePath);
     this.send({
       type: "file",
       path: publicPath,
@@ -467,7 +535,17 @@ class PreviewSocketSession {
       size,
       mtime,
       data: buffer.toString("base64"),
+      ...(assetBaseUrl === undefined ? {} : { assetBaseUrl }),
     });
+  }
+
+  private createAssetBaseUrl(filePath: string, publicBasePath: string | undefined): string | undefined {
+    if (!isMarkdownPath(filePath)) {
+      return undefined;
+    }
+
+    this.service.registerFileAssetRoot(this.connectionId, { rootPath: dirname(filePath) });
+    return this.service.buildFileAssetBaseUrl(this.connectionId, publicBasePath);
   }
 
   private sendHtmlPreview(
@@ -624,6 +702,11 @@ const isXlsxPath = (path: string): boolean =>
 const isHtmlPath = (path: string): boolean => {
   const extension = extname(path).toLowerCase();
   return extension === ".html" || extension === ".htm";
+};
+
+const isMarkdownPath = (path: string): boolean => {
+  const extension = extname(path).toLowerCase();
+  return extension === ".md" || extension === ".markdown" || extension === ".mdx";
 };
 
 const sendJson = (response: ServerResponse, statusCode: number, body: unknown): void => {

@@ -119,6 +119,12 @@ export interface HeySnapMarkdownViewerProps extends Omit<BaseViewerProps, "src">
    */
   previewClassName?: string;
   /**
+   * Base URL used to resolve relative image paths in rendered markdown.
+   * Callers that load markdown from a filesystem can point this at an
+   * authenticated asset route for files next to the document.
+   */
+  assetBaseUrl?: string;
+  /**
    * Padding around the preview content. Pass `0` to align preview margins
    * with the code mode's gutter. @default 28
    */
@@ -180,7 +186,7 @@ const REMARK_PLUGINS = [remarkGfm];
  * Anchor links open in a new tab when they look external — a common
  * affordance the GFM spec doesn't dictate but most preview surfaces ship.
  */
-const DEFAULT_COMPONENTS: Components = {
+const createDefaultComponents = (assetBaseUrl?: string): Components => ({
   table: ({ children, ...rest }) => (
     <div className="heysnap-md-table-wrap">
       <table {...rest}>{children}</table>
@@ -198,7 +204,10 @@ const DEFAULT_COMPONENTS: Components = {
       </a>
     );
   },
-};
+  img: ({ src, alt, ...rest }) => (
+    <img src={resolveMarkdownAssetUrl(src, assetBaseUrl)} alt={alt ?? ""} {...rest} />
+  ),
+});
 
 /**
  * Read-only markdown viewer with a Preview / Code toggle. Preview mode
@@ -249,6 +258,7 @@ export function HeySnapMarkdownViewer({
   bodyBackground = DEFAULTS.bodyBackground,
   bodyStyle,
   previewClassName,
+  assetBaseUrl,
   previewPadding = DEFAULTS.previewPadding,
   components,
 
@@ -303,8 +313,8 @@ export function HeySnapMarkdownViewer({
   // others. Memoized so react-markdown sees a stable reference between
   // renders when neither input changed.
   const mergedComponents = useMemo<Components>(
-    () => ({ ...DEFAULT_COMPONENTS, ...components }),
-    [components],
+    () => ({ ...createDefaultComponents(assetBaseUrl), ...components }),
+    [assetBaseUrl, components],
   );
 
   // ── Render ──────────────────────────────────────────────────────────
@@ -511,4 +521,33 @@ function makeMarkdownFile(text: string, name: string): File | Blob {
     // fall through to the Blob path which the code viewer also accepts.
   }
   return new Blob([text], { type: "text/markdown" });
+}
+
+function resolveMarkdownAssetUrl(src: string | undefined, assetBaseUrl: string | undefined): string | undefined {
+  if (src === undefined || assetBaseUrl === undefined || !isRelativeMarkdownAssetUrl(src)) {
+    return src;
+  }
+
+  try {
+    const documentBase = typeof window !== "undefined" && typeof window.location?.href === "string"
+      ? window.location.href
+      : "http://localhost/";
+    const base = assetBaseUrl.endsWith("/") ? assetBaseUrl : `${assetBaseUrl}/`;
+    return new URL(src, new URL(base, documentBase)).toString();
+  } catch {
+    return src;
+  }
+}
+
+function isRelativeMarkdownAssetUrl(src: string): boolean {
+  const trimmed = src.trim();
+
+  return (
+    trimmed.length > 0 &&
+    !trimmed.startsWith("#") &&
+    !trimmed.startsWith("/") &&
+    !trimmed.startsWith("?") &&
+    !trimmed.startsWith("//") &&
+    !/^[a-z][a-z\d+.-]*:/iu.test(trimmed)
+  );
 }
