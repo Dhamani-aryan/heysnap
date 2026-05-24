@@ -1,17 +1,17 @@
 # Architecture
 
-This application is a multi-device coding-agent platform. A device is any
-computer that can run the machine server, primarily cloud VM/EC2 instances
-created by the control plane.
+This application is a cloud-machine coding-agent platform. A computer is a
+cloud VM/EC2 instance created by the control plane and running the machine
+server.
 
-The UI should not care whether the selected computer is local or remote. It
-selects a computer, receives an authenticated connection for that computer, and
-then talks to the same filesystem and agent protocols everywhere.
+The UI selects a computer, receives an authenticated connection for that
+computer, and then talks to the filesystem and agent protocols exposed by the
+machine server.
 
 ## System Shape
 
 ```text
-Web app / Electron app
+Web app / mobile app
   -> Cloud server
        -> control plane
        -> gateway
@@ -37,7 +37,7 @@ cloud VMs as a host systemd service.
 The intended repo boundaries are:
 
 - `apps/web`: browser UI for cloud computers.
-- `apps/desktop`: Electron UI for the same cloud-computer workflow.
+- `apps/mobile`: mobile UI for cloud computers.
 - `packages/ui`: shared React UI and client-side filesystem/agent protocol
   clients.
 - `packages/server`: machine server that runs on each computer.
@@ -52,7 +52,7 @@ A computer is a persistent environment owned by a user.
 
 Cloud computers are VMs/EC2 instances created by the control plane. They have
 persistent disk, a machine identity, a machine server, and an agent harness.
-Both web and desktop clients open them through hosted gateway access sessions.
+Clients open them through hosted gateway access sessions.
 
 Example computer states:
 
@@ -86,7 +86,7 @@ provisioning and installed into the VM as a secret.
 
 There are two important token types:
 
-- **User token:** proves who is using the web or desktop app.
+- **User token:** proves who is using the web or mobile app.
 - **Machine token:** proves which machine server is registering, heartbeating,
   or opening a tunnel.
 
@@ -151,8 +151,7 @@ The current machine-server protocol starts with:
 - `/filesystem`: WebSocket filesystem listing and mutation protocol.
 - `/agent`: WebSocket agent thread and run protocol.
 
-The same machine server should run in all environments. A cloud VM and the local
-Electron machine should expose the same protocol surface so the UI can switch
+Cloud machines should expose the same protocol surface so the UI can switch
 between computers without changing behavior.
 
 The machine server should report capabilities to the cloud server. Examples:
@@ -180,7 +179,7 @@ Preferred remote shape:
 Machine server
   -> opens outbound tunnel to cloud gateway
 
-Browser / Electron
+Browser / mobile client
   -> connects to cloud gateway
   -> gateway authenticates user
   -> gateway checks computer ownership
@@ -240,23 +239,6 @@ From the UI's perspective, selecting a remote VM just provides active
 filesystem and agent WebSocket URLs. The shared UI continues using the same
 protocol clients.
 
-## Electron App Flow
-
-The Electron app has two kinds of computers:
-
-- remote cloud computers from the cloud server
-- the local machine
-
-For remote computers, Electron uses the same flow as the web app.
-
-For the local machine, Electron starts the embedded machine server, registers
-the local device with the cloud server through `POST /computers/local`, sends
-machine heartbeats, and uses local WebSocket URLs. The local machine does not
-need the cloud gateway for basic local work.
-
-Later, Electron can optionally open an outbound tunnel. That would let the same
-local machine appear in the web app or future mobile app.
-
 ## Data Ownership
 
 The control plane owns product-level state:
@@ -295,9 +277,6 @@ Core rules:
 - Cloud machine-server ports should not be publicly exposed.
 - Gateway tokens should be short-lived and revocable.
 - Machine credentials should be rotatable.
-- Local machine access should be explicit in Electron and opt-in for remote
-  tunneling.
-
 The gateway is the enforcement point for remote access. The machine server is
 the enforcement point for machine-local operations.
 
@@ -315,7 +294,6 @@ The early version can support:
 - machine heartbeat
 - gateway WebSocket proxying to one online machine
 - short-lived computer access sessions
-- Electron local machine selection
 
 Keep the control-plane and gateway code separate inside the package so they can
 split into different services later if traffic, deployment, or regional routing

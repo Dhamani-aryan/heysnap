@@ -1,6 +1,6 @@
 # Distribution And Updates
 
-This repo has four manual GitHub Actions for deployment and releases.
+This repo has three manual GitHub Actions for deployment and releases.
 
 ## Web App Deploy
 
@@ -61,47 +61,6 @@ Required GitHub variables/secrets:
 - `CLOUD_SERVER_INSTANCE_ID`
 - `AWS_CLOUD_SERVER_DEPLOY_ROLE_ARN`
 
-## Desktop App Release
-
-Workflow:
-
-```text
-.github/workflows/release-desktop.yml
-```
-
-Run when a new installable Electron app version should be published.
-
-```sh
-gh workflow run release-desktop.yml --repo ank1015/heysnap --ref main \
-  -f version=0.1.1 \
-  -f channel=stable \
-  -f notes='Release notes'
-```
-
-What it does:
-
-- Builds macOS arm64 on `macos-latest`.
-- Builds Windows x64 on `windows-latest`.
-- Uploads artifacts to S3 under:
-  `desktop/<channel>/<version>/<platform>/`
-- Publishes cloud release manifests through:
-  `POST /admin/releases/desktop`
-
-Runtime update behavior:
-
-- Electron checks `GET /releases/desktop/latest`.
-- If a newer version exists, the app shows the update prompt.
-- In packaged builds, `electron-updater` downloads from the generic feed URL.
-- In dev mode, the update action opens the release download URL.
-
-Required GitHub variables/secrets:
-
-- `AWS_REGION`
-- `DESKTOP_DOWNLOAD_BUCKET`
-- `DESKTOP_DOWNLOAD_BASE_URL`
-- `AWS_DESKTOP_RELEASE_ROLE_ARN`
-- `CLOUD_SERVER_ADMIN_TOKEN`
-
 ## Machine Server Release
 
 Workflow:
@@ -143,10 +102,6 @@ Runtime update behavior:
   per release version before the machine-server restart.
 - If sessions are active, the update is deferred to a later heartbeat.
 
-Electron embeds the machine server in the desktop app. Local desktop
-machine-server changes are delivered by the desktop release workflow, not by
-the host artifact release workflow.
-
 Required GitHub variables/secrets:
 
 - `AWS_REGION`
@@ -185,13 +140,6 @@ Required GitHub variables/secrets:
 - `AWS_MACHINE_IMAGE_BUILD_ROLE_ARN`
 
 ## Current Hosted Release Sources
-
-Desktop:
-
-```text
-GET https://api.heysnap.xyz/releases/desktop/latest?platform=darwin-arm64&channel=stable&currentVersion=...
-GET https://api.heysnap.xyz/releases/desktop/latest?platform=win32-x64&channel=stable&currentVersion=...
-```
 
 Machine server:
 

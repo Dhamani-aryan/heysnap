@@ -28,7 +28,7 @@ The dashboard can:
 - drill into a machine to see provider metadata, capabilities, machine
   identities (with revoke), and recent gateway access sessions; rename, start,
   stop, restart, or delete the machine
-- publish and delete release manifests for desktop and machine-server
+- publish and delete release manifests for machine-server updates
 
 ## Admin Token
 
@@ -76,7 +76,7 @@ curl -X DELETE https://api.heysnap.xyz/admin/computers/<computer-id> \
 ```
 
 For EC2-backed computers, deletion first calls the provisioner terminate path
-and then removes the DB record. Local computer records are removed from the DB.
+and then removes the DB record.
 
 ## Create A Cloud Computer As A User
 
@@ -107,15 +107,6 @@ Deploy web app:
 
 ```sh
 gh workflow run deploy-web.yml --repo ank1015/heysnap --ref main
-```
-
-Release desktop app:
-
-```sh
-gh workflow run release-desktop.yml --repo ank1015/heysnap --ref main \
-  -f version=0.1.1 \
-  -f channel=stable \
-  -f notes='Release notes'
 ```
 
 Release machine server:
