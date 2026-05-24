@@ -1,0 +1,192 @@
+.cloud-workspace {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100dvh;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+}
+
+.cloud-workspace-content {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cloud-workspace .finder-shell {
+  height: 100%;
+}
+
+.cloud-workspace .finder-toolbar {
+  height: 40px;
+  align-items: center;
+  padding: 6px 8px 0;
+}
+
+.cloud-workspace .toolbar-inner {
+  align-items: center;
+}
+
+.cloud-workspace .nav-pill {
+  width: 58px;
+  height: 28px;
+  box-shadow: none;
+}
+
+.cloud-workspace .toolbar-button {
+  width: 29px;
+  height: 28px;
+}
+
+.cloud-workspace .directory-tab {
+  height: 28px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0 8px;
+}
+
+.cloud-workspace .finder-shell,
+.cloud-workspace .finder-toolbar,
+.cloud-workspace .split-left,
+.cloud-workspace .split-resizer,
+.cloud-workspace .split-preview,
+.cloud-workspace .right-prompt-surface,
+.cloud-workspace .right-empty-thread-center,
+.cloud-workspace .right-prompt-composer-wrap,
+.cloud-workspace .agent-thread-scroll,
+.cloud-workspace .finder-body {
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+}
+
+:root.dark .cloud-workspace .finder-shell,
+:root.dark .cloud-workspace .finder-toolbar,
+:root.dark .cloud-workspace .split-left,
+:root.dark .cloud-workspace .split-resizer,
+:root.dark .cloud-workspace .split-preview,
+:root.dark .cloud-workspace .right-prompt-surface,
+:root.dark .cloud-workspace .right-empty-thread-center,
+:root.dark .cloud-workspace .right-prompt-composer-wrap,
+:root.dark .cloud-workspace .agent-thread-scroll,
+:root.dark .cloud-workspace .finder-body {
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+}
+
+.cloud-workspace-state {
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  color: var(--cloud-muted);
+  font-size: 14px;
+}
+
+.cloud-workspace-state p {
+  margin: 0;
+}
+
+.cloud-workspace-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+  pointer-events: auto;
+}
+
+.cloud-workspace-loader-image {
+  display: block;
+  width: min(156px, 36vw);
+  height: auto;
+  object-fit: contain;
+}
+
+.cloud-workspace-loader p {
+  margin: 0;
+  color: var(--cloud-muted);
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.cloud-browser-extension-backdrop {
+  z-index: 14;
+}
+
+.cloud-browser-extension-modal {
+  position: relative;
+  width: min(100%, 500px);
+  justify-items: center;
+  gap: 18px;
+  padding: 26px 24px 24px;
+}
+
+.cloud-browser-extension-title {
+  margin: 0;
+  color: #252629;
+  font-size: 28px;
+  font-weight: 350;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-align: center;
+}
+
+:root.dark .cloud-browser-extension-title {
+  color: #e3e4e6;
+}
+
+.cloud-browser-extension-pointer-stage {
+  position: relative;
+  display: grid;
+  width: min(100%, 260px);
+  height: 126px;
+  place-items: center;
+  overflow: hidden;
+  margin: 4px 0 0;
+}
+
+.cloud-browser-extension-pointer {
+  display: block;
+  width: 62px;
+  height: 62px;
+  filter: drop-shadow(0 12px 18px rgba(59, 131, 246, 0.24));
+  transform-origin: 25% 25%;
+}
+
+.cloud-browser-extension-copy {
+  max-width: 390px;
+  margin: 0;
+  color: var(--cloud-muted);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.cloud-browser-extension-action {
+  min-width: 126px;
+  height: 38px;
+  margin-top: 2px;
+  font-size: 14px;
+  padding: 0 18px;
+  text-decoration: none;
+}
+
+.cloud-browser-extension-modal .cloud-machines-onboarding-close {
+  top: 25px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-browser-extension-pointer {
+    transform: none !important;
+  }
+}
