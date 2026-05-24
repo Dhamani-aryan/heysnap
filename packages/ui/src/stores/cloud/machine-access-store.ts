@@ -2,7 +2,7 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { ComputerAccessSessionResponse } from "../cloud-client";
+import type { ComputerAccessSessionResponse } from "../../cloud/cloud-client";
 
 export interface MachineAccessEntry {
   readonly response: ComputerAccessSessionResponse | null;

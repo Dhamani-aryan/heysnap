@@ -2,7 +2,7 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { CloudComputer } from "../cloud-client";
+import type { CloudComputer } from "../../cloud/cloud-client";
 
 export interface CloudMachinesState {
   readonly computers: readonly CloudComputer[];

@@ -2,7 +2,7 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { CloudUser } from "../cloud-client";
+import type { CloudUser } from "../../cloud/cloud-client";
 
 export type CloudAuthStatus = "checking" | "authenticated" | "unauthenticated";
 
