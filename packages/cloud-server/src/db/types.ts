@@ -1,5 +1,5 @@
 export type ComputerKind = "cloud" | "local";
-export type ReleaseTarget = "desktop" | "machine-server";
+export type ReleaseTarget = "machine-server";
 export type ComputerStatus =
   | "creating"
   | "starting"
