@@ -66,7 +66,7 @@ export interface AdminAccessSession {
   readonly createdAt: string;
 }
 
-export type ReleaseTarget = "desktop" | "machine-server";
+export type ReleaseTarget = "machine-server";
 
 export interface AdminRelease {
   readonly id: string;
