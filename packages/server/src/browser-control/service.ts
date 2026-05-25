@@ -6,6 +6,7 @@ import { basename, dirname, extname } from "node:path";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { ensureWithinRoot, resolveClientPath } from "../filesystem/paths.js";
+import { errorToLog, logger } from "../shared/logger.js";
 import { attachWebSocketUpgradeRoute } from "../websocket/upgrade-router.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -305,6 +306,10 @@ export const createBrowserControlService = (
     const accessSessionId = readHeader(request, "x-heysnap-access-session-id");
 
     if (userId === undefined || accessSessionId === undefined) {
+      logger.warn({
+        event: "browser_control_ws.rejected",
+        reason: "missing_metadata",
+      }, "Rejected browser-control websocket");
       webSocket.close(1008, "Browser-control user metadata is required");
       return;
     }
@@ -356,6 +361,16 @@ export class BrowserControlBroker {
       isReady: false,
       pendingRequestIds: new Set(),
     };
+    const openedAt = Date.now();
+    let messagesIn = 0;
+    let messagesOut = 0;
+
+    logger.info({
+      event: "browser_control_ws.open",
+      connectionId: client.connectionId,
+      userId: client.userId,
+      accessSessionId: client.accessSessionId,
+    }, "Browser-control websocket opened");
 
     let clients = this.clientsByUserId.get(client.userId);
     if (clients === undefined) {
@@ -365,15 +380,44 @@ export class BrowserControlBroker {
     clients.add(client);
 
     webSocket.on("message", (data) => {
+      messagesIn += 1;
       this.options.onActivity?.();
       this.handleClientMessage(client, data);
     });
-    webSocket.on("close", () => {
+    webSocket.on("close", (code, reason) => {
+      logger.info({
+        event: "browser_control_ws.close",
+        connectionId: client.connectionId,
+        userId: client.userId,
+        accessSessionId: client.accessSessionId,
+        clientId: client.clientId,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        ageMs: Date.now() - openedAt,
+        pendingRequestCount: client.pendingRequestIds.size,
+        messagesIn,
+        messagesOut,
+      }, "Browser-control websocket closed");
       this.detachClient(client, "BROWSER_CONTROL_CLIENT_DISCONNECTED", "Browser-control client disconnected.");
     });
-    webSocket.on("error", () => {
+    webSocket.on("error", (error) => {
+      logger.error({
+        event: "browser_control_ws.error",
+        connectionId: client.connectionId,
+        userId: client.userId,
+        accessSessionId: client.accessSessionId,
+        clientId: client.clientId,
+        err: errorToLog(error),
+        ageMs: Date.now() - openedAt,
+      }, "Browser-control websocket errored");
       this.detachClient(client, "BROWSER_CONTROL_CLIENT_DISCONNECTED", "Browser-control client errored.");
     });
+
+    const originalSend = webSocket.send.bind(webSocket);
+    webSocket.send = ((...args: Parameters<WebSocket["send"]>) => {
+      messagesOut += 1;
+      return originalSend(...args);
+    }) as WebSocket["send"];
   }
 
   getStatus(userId: string): BrowserControlStatus {
@@ -395,6 +439,12 @@ export class BrowserControlBroker {
       : this.selectClient(input.targetUserId);
 
     if (client === null) {
+      logger.warn({
+        event: "browser_control_request.no_client",
+        targetUserId: input.targetUserId,
+        command: input.command,
+        clientRequestId: input.clientRequestId,
+      }, "No browser-control client is connected");
       return browserControlError(
         "CHROME_NOT_CONNECTED",
         input.targetUserId === undefined
@@ -436,6 +486,16 @@ export class BrowserControlBroker {
 
       const timeout = setTimeout(() => {
         sendCancel("Browser-control request timed out");
+        logger.warn({
+          event: "browser_control_request.timeout",
+          requestId,
+          connectionId: client.connectionId,
+          userId: client.userId,
+          clientId: client.clientId,
+          command: input.command,
+          timeoutMs,
+          clientRequestId: input.clientRequestId,
+        }, "Browser-control request timed out");
         complete(browserControlError("BROWSER_CONTROL_TIMEOUT", "Browser-control client did not respond before the timeout."));
       }, timeoutMs);
 
@@ -472,6 +532,16 @@ export class BrowserControlBroker {
         attachments: input.attachments?.map(attachmentToMetadata),
         outputs: input.outputs?.map(outputToMetadata),
       }));
+      logger.info({
+        event: "browser_control_request.sent",
+        requestId,
+        connectionId: client.connectionId,
+        userId: client.userId,
+        clientId: client.clientId,
+        command: input.command,
+        timeoutMs,
+        clientRequestId: input.clientRequestId,
+      }, "Browser-control request sent");
     });
   }
 
@@ -479,6 +549,12 @@ export class BrowserControlBroker {
     const message = parseClientMessage(data);
 
     if (message === null) {
+      logger.warn({
+        event: "browser_control_ws.invalid_message",
+        connectionId: client.connectionId,
+        userId: client.userId,
+        clientId: client.clientId,
+      }, "Invalid browser-control websocket message");
       client.webSocket.close(1003, "Invalid browser-control message");
       this.detachClient(client, "BROWSER_CONTROL_PROTOCOL_ERROR", "Browser-control client sent an invalid message.");
       return;
@@ -490,6 +566,14 @@ export class BrowserControlBroker {
       client.clientId = message.clientId;
       client.capabilities = message.capabilities;
       client.isReady = true;
+      logger.info({
+        event: "browser_control_ws.hello",
+        connectionId: client.connectionId,
+        userId: client.userId,
+        accessSessionId: client.accessSessionId,
+        clientId: client.clientId,
+        capabilities: client.capabilities,
+      }, "Browser-control client announced readiness");
       return;
     }
 
@@ -511,10 +595,28 @@ export class BrowserControlBroker {
 
     if (message.ok) {
       const result = finalizeClientResult(pending, message.result);
+      logger.info({
+        event: "browser_control_request.response",
+        requestId: message.requestId,
+        connectionId: client.connectionId,
+        userId: client.userId,
+        clientId: client.clientId,
+        ok: true,
+      }, "Browser-control request completed");
       pending.resolve(result);
       return;
     }
 
+    logger.warn({
+      event: "browser_control_request.response",
+      requestId: message.requestId,
+      connectionId: client.connectionId,
+      userId: client.userId,
+      clientId: client.clientId,
+      ok: false,
+      errorCode: message.error.code,
+      errorMessage: message.error.message,
+    }, "Browser-control request failed");
     pending.resolve({ ok: false, error: normalizeClientError(message.error) });
   }
 
