@@ -26,6 +26,10 @@ import type {
   BrowserWindowTab,
 } from "./browser-types";
 import { isEditableKeyboardTarget } from "../finder/finder-body";
+import {
+  isFilesystemVoiceHotkey,
+  isFilesystemVoiceHotkeyCharacterKey,
+} from "../voice/filesystem-voice-hotkey";
 
 const BROWSER_TOP_PADDING = 8;
 const BROWSER_TAB_BAR_HEIGHT = 36;
@@ -124,6 +128,7 @@ export const BrowserControlPanel = ({
   const screenRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const pendingScrollRef = useRef<BrowserViewportWheelInput | null>(null);
+  const voiceHotkeyChordRef = useRef(false);
   const [addressValue, setAddressValue] = useState("");
   const [isAddressFocused, setIsAddressFocused] = useState(false);
   const [isViewportKeyboardActive, setIsViewportKeyboardActive] = useState(false);
@@ -305,6 +310,20 @@ export const BrowserControlPanel = ({
 
     const handleKeyEvent = (event: KeyboardEvent): void => {
       if (isEditableKeyboardTarget(event.target) || event.isComposing) {
+        return;
+      }
+
+      if (event.type === "keydown" && isFilesystemVoiceHotkey(event)) {
+        voiceHotkeyChordRef.current = true;
+        return;
+      }
+
+      if (
+        voiceHotkeyChordRef.current &&
+        event.type === "keyup" &&
+        isFilesystemVoiceHotkeyCharacterKey(event)
+      ) {
+        voiceHotkeyChordRef.current = false;
         return;
       }
 

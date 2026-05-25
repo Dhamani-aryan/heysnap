@@ -7,6 +7,12 @@ import {
   normalizeSarvamAudioMimeType,
   transcribeSarvamRecording,
 } from "../components/filesystem/voice/sarvam-speech-to-text";
+import {
+  isFilesystemVoiceHotkey,
+  isFilesystemVoiceHotkeyCharacterKey,
+  isFilesystemVoiceHotkeyMessage,
+  isFilesystemVoiceHotkeyReleaseKey,
+} from "../components/filesystem/voice/filesystem-voice-hotkey";
 
 export const appendPromptTranscript = (draft: string, transcript: string): string => {
   const trimmedTranscript = transcript.trim();
@@ -38,6 +44,11 @@ export const useFilesystemVoicePrompt = ({
   const recordingStartedAtRef = useRef(0);
   const shouldTranscribeOnStopRef = useRef(false);
   const hotkeyRecordingRef = useRef(false);
+  const recordingStateRef = useRef(recordingState);
+
+  useEffect(() => {
+    recordingStateRef.current = recordingState;
+  }, [recordingState]);
 
   const discardRecording = useCallback(() => {
     audioChunksRef.current = [];
@@ -142,17 +153,16 @@ export const useFilesystemVoicePrompt = ({
   }, [discardRecording, handleRecordingStopped]);
 
   useEffect(() => {
-    const isRecordingHotkey = (event: KeyboardEvent): boolean =>
-      event.altKey && (event.code === "KeyM" || event.key.toLowerCase() === "m");
-
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.repeat || !isRecordingHotkey(event)) {
+      if (event.repeat || !isFilesystemVoiceHotkey(event)) {
         return;
       }
 
       event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
 
-      if (recordingState !== "idle") {
+      if (recordingStateRef.current !== "idle") {
         return;
       }
 
@@ -163,12 +173,16 @@ export const useFilesystemVoicePrompt = ({
     const handleKeyUp = (event: KeyboardEvent): void => {
       if (
         !hotkeyRecordingRef.current ||
-        (event.code !== "KeyM" && event.key.toLowerCase() !== "m" && event.key !== "Alt")
+        !isFilesystemVoiceHotkeyReleaseKey(event)
       ) {
         return;
       }
 
       event.preventDefault();
+      if (isFilesystemVoiceHotkeyCharacterKey(event)) {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }
       hotkeyRecordingRef.current = false;
       stopRecording();
     };
@@ -182,16 +196,51 @@ export const useFilesystemVoicePrompt = ({
       stopRecording();
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    const handlePreviewHotkeyMessage = (event: MessageEvent): void => {
+      if (!isTrustedFilesystemPreviewMessageSource(event.source) || !isFilesystemVoiceHotkeyMessage(event.data)) {
+        return;
+      }
+
+      const message = event.data;
+
+      if (message.phase === "blur") {
+        if (hotkeyRecordingRef.current) {
+          hotkeyRecordingRef.current = false;
+          stopRecording();
+        }
+        return;
+      }
+
+      if (message.phase === "keydown") {
+        if (message.repeat || !isFilesystemVoiceHotkey(message) || recordingStateRef.current !== "idle") {
+          return;
+        }
+
+        hotkeyRecordingRef.current = true;
+        void startRecording();
+        return;
+      }
+
+      if (!hotkeyRecordingRef.current || !isFilesystemVoiceHotkeyReleaseKey(message)) {
+        return;
+      }
+
+      hotkeyRecordingRef.current = false;
+      stopRecording();
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("keyup", handleKeyUp, true);
     window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("message", handlePreviewHotkeyMessage);
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keyup", handleKeyUp, true);
       window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("message", handlePreviewHotkeyMessage);
     };
-  }, [recordingState, startRecording, stopRecording]);
+  }, [startRecording, stopRecording]);
 
   useEffect(() => () => {
     const recorder = mediaRecorderRef.current;
@@ -211,4 +260,20 @@ export const useFilesystemVoicePrompt = ({
     startRecording,
     stopRecording,
   };
+};
+
+const isTrustedFilesystemPreviewMessageSource = (source: MessageEventSource | null): boolean => {
+  if (source === null || typeof document === "undefined") {
+    return false;
+  }
+
+  const previewFrames = document.querySelectorAll<HTMLIFrameElement>("iframe.heysnap-file-preview-frame");
+
+  for (const frame of previewFrames) {
+    if (frame.contentWindow === source) {
+      return true;
+    }
+  }
+
+  return false;
 };
