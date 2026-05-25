@@ -126,6 +126,7 @@ function CloudAppContent({
     readStoredBoolean(machinesOnboardingStorageKey),
   );
   const [canShowMissingMachine, setCanShowMissingMachine] = useState(false);
+  const [manualSleepComputer, setManualSleepComputer] = useState<CloudComputer | null>(null);
   const [autoStartSuppressedComputerIds, setAutoStartSuppressedComputerIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
@@ -304,11 +305,13 @@ function CloudAppContent({
     }
 
     const computerId = selectedComputerId;
+    setManualSleepComputer(selectedComputer);
     setAutoStartSuppressedComputerIds((current) => new Set(current).add(computerId));
 
     try {
       await stopMachineMutation.mutateAsync(computerId);
     } catch (error) {
+      setManualSleepComputer(null);
       setAutoStartSuppressedComputerIds((current) => {
         const next = new Set(current);
         next.delete(computerId);
@@ -318,7 +321,7 @@ function CloudAppContent({
     }
 
     changeRoute({ view: "machines" });
-  }, [changeRoute, selectedComputerId, stopMachineMutation]);
+  }, [changeRoute, selectedComputer, selectedComputerId, stopMachineMutation]);
 
   const openMachine = (computer: CloudComputer): void => {
     changeRoute({ view: "workspace", computerId: computer.id, threadId: null });
@@ -381,6 +384,10 @@ function CloudAppContent({
   const shouldShowWorkspaceStartup = selectedComputer !== null &&
     selectedComputer.kind !== "local" &&
     selectedComputer.status === "starting";
+  const shouldShowWorkspaceSleep = selectedComputerId !== null &&
+    manualSleepComputer?.id === selectedComputerId &&
+    stopMachineMutation.isPending &&
+    stopMachineMutation.variables === selectedComputerId;
   const shouldShowRouteLoader =
     activeRoute.view === "home" ||
     (user === null && activeRoute.view !== "login") ||
@@ -430,7 +437,18 @@ function CloudAppContent({
       />
     );
   } else if (selectedComputerId !== null) {
-    if (shouldShowWorkspaceStartup && selectedComputer !== null) {
+    if (shouldShowWorkspaceSleep && manualSleepComputer !== null) {
+      screenKey = `remote-workspace-sleeping:${manualSleepComputer.id}`;
+      screenContent = (
+        <main className="cloud-workspace">
+          {renderWorkspaceLoader?.({
+            ariaLabel: "Sleeping machine",
+            computer: manualSleepComputer,
+            label: "Sleeping",
+          }) ?? <div className="cloud-loading" role="status" aria-label="Sleeping machine" />}
+        </main>
+      );
+    } else if (shouldShowWorkspaceStartup && selectedComputer !== null) {
       screenKey = `remote-workspace-starting:${selectedComputer.id}`;
       screenContent = (
         <main className="cloud-workspace">
