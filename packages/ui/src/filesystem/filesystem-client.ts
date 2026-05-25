@@ -49,7 +49,7 @@ export class FilesystemClient {
   private shouldReconnect = false;
 
   constructor(
-    private readonly url: string,
+    private url: string,
     private readonly options: FilesystemClientOptions,
   ) {
     this.subscribedPath = options.initialPath;
@@ -98,6 +98,14 @@ export class FilesystemClient {
   close(): void {
     this.shouldReconnect = false;
     this.disconnect();
+  }
+
+  setUrl(url: string): void {
+    this.url = url;
+
+    if (this.socket === null && this.shouldReconnect) {
+      this.scheduleReconnect();
+    }
   }
 
   private disconnect(): void {
