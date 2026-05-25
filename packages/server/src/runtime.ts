@@ -303,4 +303,5 @@ const closeServer = (server: Server): Promise<void> =>
 
       resolveClose();
     });
+    server.closeIdleConnections();
   });
