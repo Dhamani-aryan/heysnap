@@ -6,6 +6,7 @@ import { GatewayAccessService } from "./gateway/access-sessions.js";
 import { attachGatewayTunnelServer, MachineTunnelRegistry } from "./gateway/tunnel.js";
 import { createComputerProvisioner } from "./provisioning/factory.js";
 import { createApp } from "./server.js";
+import { logger } from "./shared/logger.js";
 
 const config = process.env.NODE_ENV === "production"
   ? getCloudServerConfig()
@@ -20,7 +21,10 @@ const app = createApp({
   provisioner: createComputerProvisioner(config),
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`cloud server listening on http://localhost:${String(info.port)}`);
+  logger.info({
+    event: "cloud_server.start",
+    port: info.port,
+  }, "Cloud server listening");
 });
 
 attachGatewayTunnelServer(server, {

@@ -1,5 +1,6 @@
 import { startMachineTunnelClient } from "./tunnel/client.js";
 import { startServer } from "./runtime.js";
+import { logger } from "./shared/logger.js";
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -9,11 +10,14 @@ const runningServer = await startServer({
   codexBin: process.env.CODEX_BIN,
 });
 
-console.log(`server listening on http://127.0.0.1:${runningServer.port}`);
-console.log(`filesystem root: ${runningServer.filesystemRoot.absolutePath}`);
-console.log(`filesystem preview: ${runningServer.urls.filesystemPreviewBaseUrl}`);
-console.log(`agent api: ${runningServer.urls.agentBaseUrl}`);
-console.log(`capabilities api: ${runningServer.urls.capabilitiesBaseUrl}`);
+logger.info({
+  event: "machine_server.start",
+  port: runningServer.port,
+  filesystemRoot: runningServer.filesystemRoot.absolutePath,
+  filesystemPreviewBaseUrl: runningServer.urls.filesystemPreviewBaseUrl,
+  agentBaseUrl: runningServer.urls.agentBaseUrl,
+  capabilitiesBaseUrl: runningServer.urls.capabilitiesBaseUrl,
+}, "Machine server listening");
 
 if (
   process.env.CLOUD_SERVER_PUBLIC_URL !== undefined &&
