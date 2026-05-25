@@ -11,6 +11,7 @@ export interface CloudServerConfig {
   readonly awsMachineAmiSsmParameter: string;
   readonly awsMachineInstanceProfileName: string | undefined;
   readonly computerProvisioner?: "aws" | "docker";
+  readonly machineIdleSleepSeconds?: number;
   readonly localDockerMachineImage?: string;
   readonly localDockerNetwork?: string;
   readonly localDockerCloudUrl?: string;
@@ -48,6 +49,7 @@ export const getCloudServerConfig = (
     DEFAULT_MACHINE_AMI_SSM_PARAMETER,
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
   computerProvisioner: readComputerProvisioner(env.COMPUTER_PROVISIONER),
+  machineIdleSleepSeconds: parseNonNegativeInteger(env.MACHINE_IDLE_SLEEP_SECONDS, 30 * 60),
   localDockerMachineImage: readOptionalEnv(env, "LOCAL_DOCKER_MACHINE_IMAGE"),
   localDockerNetwork: readOptionalEnv(env, "LOCAL_DOCKER_NETWORK"),
   localDockerCloudUrl: readOptionalEnv(env, "LOCAL_DOCKER_CLOUD_URL"),
@@ -82,6 +84,7 @@ export const getDevelopmentCloudServerConfig = (
   awsMachineAmiSsmParameter: env.AWS_MACHINE_AMI_SSM_PARAMETER?.trim() || DEFAULT_MACHINE_AMI_SSM_PARAMETER,
   awsMachineInstanceProfileName: readOptionalEnv(env, "AWS_MACHINE_INSTANCE_PROFILE_NAME"),
   computerProvisioner: readComputerProvisioner(env.COMPUTER_PROVISIONER),
+  machineIdleSleepSeconds: parseNonNegativeInteger(env.MACHINE_IDLE_SLEEP_SECONDS, 0),
   localDockerMachineImage: readOptionalEnv(env, "LOCAL_DOCKER_MACHINE_IMAGE"),
   localDockerNetwork: readOptionalEnv(env, "LOCAL_DOCKER_NETWORK"),
   localDockerCloudUrl: readOptionalEnv(env, "LOCAL_DOCKER_CLOUD_URL"),
@@ -145,6 +148,20 @@ const parsePositiveInteger = (rawValue: string | undefined, defaultValue: number
 
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`Expected positive integer, received ${rawValue}`);
+  }
+
+  return value;
+};
+
+const parseNonNegativeInteger = (rawValue: string | undefined, defaultValue: number): number => {
+  if (rawValue === undefined || rawValue.trim().length === 0) {
+    return defaultValue;
+  }
+
+  const value = Number.parseInt(rawValue, 10);
+
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Expected non-negative integer, received ${rawValue}`);
   }
 
   return value;
