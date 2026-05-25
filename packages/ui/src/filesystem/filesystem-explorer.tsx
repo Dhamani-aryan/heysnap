@@ -46,6 +46,14 @@ import {
   type WorkspacePanel,
 } from "../components/filesystem";
 import { FilesystemClient, type FilesystemConnectionStatus } from "./filesystem-client";
+import {
+  buildFilesystemExplorerStorageKey,
+  readPersistedFilesystemExplorerState,
+  reconcileFilesystemViewState,
+  writePersistedFilesystemExplorerState,
+  type PersistedFilesystemExplorerState,
+} from "./filesystem-persistence";
+import { normalizeFilesystemConnectionIdentity } from "./filesystem-url";
 import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
 
 export type {
@@ -86,6 +94,7 @@ const getInitialRightSidebarOpen = (): boolean => {
 
 export interface FilesystemExplorerProps {
   readonly websocketUrl?: string;
+  readonly workspacePersistenceKey?: string;
   readonly filesystemPreviewBaseUrl?: string;
   readonly agentBaseUrl?: string;
   readonly feedbackUrl?: string;
@@ -133,6 +142,7 @@ export interface FilesystemExplorerProps {
 
 export function FilesystemExplorer({
   websocketUrl = "ws://localhost:4000/filesystem",
+  workspacePersistenceKey,
   filesystemPreviewBaseUrl,
   agentBaseUrl = "http://localhost:4000/agent",
   feedbackUrl,
@@ -177,6 +187,14 @@ export function FilesystemExplorer({
   onBackToMachines,
   onSleepMachine,
 }: FilesystemExplorerProps): React.ReactElement {
+  const persistenceStorageKey = useMemo(
+    () => workspacePersistenceKey === undefined ? null : buildFilesystemExplorerStorageKey(workspacePersistenceKey),
+    [workspacePersistenceKey],
+  );
+  const filesystemConnectionKey = useMemo(
+    () => normalizeFilesystemConnectionIdentity(websocketUrl),
+    [websocketUrl],
+  );
   const clientRef = useRef<FilesystemClient | null>(null);
   const uploadFilesInputRef = useRef<HTMLInputElement | null>(null);
   const uploadFolderInputRef = useRef<HTMLInputElement | null>(null);
@@ -230,12 +248,23 @@ export function FilesystemExplorer({
   const onFilesystemOpenRef = useRef(onFilesystemOpen);
   const onPathChangeRef = useRef(onPathChange);
   const onInitialPathInvalidRef = useRef(onInitialPathInvalid);
+  const openFileTabsRef = useRef(openFileTabs);
+  const activeFilePathRef = useRef(activeFilePath);
+  const activeLeftPaneSurfaceRef = useRef(activeLeftPaneSurface);
+  const hasRestoredPersistedStateRef = useRef(false);
+  const hasHydratedServerViewStateRef = useRef(false);
 
   useEffect(() => {
     onFilesystemOpenRef.current = onFilesystemOpen;
     onPathChangeRef.current = onPathChange;
     onInitialPathInvalidRef.current = onInitialPathInvalid;
   }, [onFilesystemOpen, onInitialPathInvalid, onPathChange]);
+
+  useEffect(() => {
+    openFileTabsRef.current = openFileTabs;
+    activeFilePathRef.current = activeFilePath;
+    activeLeftPaneSurfaceRef.current = activeLeftPaneSurface;
+  }, [activeFilePath, activeLeftPaneSurface, openFileTabs]);
 
   useEffect(() => {
     window.localStorage.setItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY, isRightSidebarOpen ? "true" : "false");
@@ -285,26 +314,55 @@ export function FilesystemExplorer({
   }, [activeFilePath, activeLeftPaneSurface, openFileTabs]);
 
   useEffect(() => {
+    clientRef.current?.setUrl(websocketUrl);
+  }, [websocketUrl]);
+
+  useEffect(() => {
     const initialPathForConnection = normalizeInitialFilesystemPath(initialPath);
+    const persistedState = readExplorerState(persistenceStorageKey);
+    const initialSubscribedPath = initialPathForConnection ?? persistedState?.currentPath;
     let hasReceivedListing = false;
     let didRetryInitialPath = false;
     const client = new FilesystemClient(websocketUrl, {
-      initialPath: initialPathForConnection,
+      initialPath: initialSubscribedPath,
       onListing: (nextListing) => {
         const isInitialListing = !hasReceivedListing;
         hasReceivedListing = true;
         setListing(nextListing);
         if (isInitialListing) {
-          const initialHistory = createInitialNavigationHistory(nextListing.path);
+          const shouldUsePersistedHistory =
+            initialPathForConnection === undefined &&
+            persistedState !== null &&
+            persistedState.currentPath === nextListing.path &&
+            persistedState.history.length > 0;
+          const initialHistory = shouldUsePersistedHistory
+            ? persistedState.history
+            : createInitialNavigationHistory(nextListing.path);
           setHistory(initialHistory);
-          setHistoryIndex(initialHistory.length - 1);
+          setHistoryIndex(shouldUsePersistedHistory ? persistedState.historyIndex : initialHistory.length - 1);
         }
         onPathChangeRef.current?.(nextListing.path);
       },
       onViewState: (viewState) => {
-        setOpenFileTabs(viewState.openFiles.map(toOpenFileTab));
-        setActiveFilePath(null);
-        setActiveLeftPaneSurface("directory");
+        const shouldHydrateFromServer =
+          !hasHydratedServerViewStateRef.current &&
+          !hasRestoredPersistedStateRef.current &&
+          openFileTabsRef.current.length === 0;
+        const reconciled = reconcileFilesystemViewState({
+          currentOpenFileTabs: openFileTabsRef.current,
+          activeFilePath: activeFilePathRef.current,
+          activeLeftPaneSurface: activeLeftPaneSurfaceRef.current,
+          viewState,
+          shouldHydrateFromServer,
+        });
+
+        hasHydratedServerViewStateRef.current = true;
+        openFileTabsRef.current = reconciled.openFileTabs;
+        activeFilePathRef.current = reconciled.activeFilePath;
+        activeLeftPaneSurfaceRef.current = reconciled.activeLeftPaneSurface;
+        setOpenFileTabs(reconciled.openFileTabs);
+        setActiveFilePath(reconciled.activeFilePath);
+        setActiveLeftPaneSurface(reconciled.activeLeftPaneSurface);
       },
       onLoading: setIsFetching,
       onError: (message) => {
@@ -335,17 +393,22 @@ export function FilesystemExplorer({
       onConnectionStatus: setConnectionStatus,
     });
 
-    setHistory([]);
-    setHistoryIndex(-1);
+    hasRestoredPersistedStateRef.current = persistedState !== null;
+    hasHydratedServerViewStateRef.current = false;
+    openFileTabsRef.current = persistedState?.openFileTabs ?? [];
+    activeFilePathRef.current = persistedState?.activeFilePath ?? null;
+    activeLeftPaneSurfaceRef.current = persistedState?.activeLeftPaneSurface ?? "directory";
+    setHistory(persistedState?.history ?? []);
+    setHistoryIndex(persistedState?.historyIndex ?? -1);
     setSelectedPaths([]);
     setListing(null);
     setListingError(null);
     setIsFetching(true);
     setRenamingPath(null);
     setSelectionAnchorPath(null);
-    setOpenFileTabs([]);
-    setActiveFilePath(null);
-    setActiveLeftPaneSurface("directory");
+    setOpenFileTabs(persistedState?.openFileTabs ?? []);
+    setActiveFilePath(persistedState?.activeFilePath ?? null);
+    setActiveLeftPaneSurface(persistedState?.activeLeftPaneSurface ?? "directory");
     setConnectionStatus("connecting");
     clientRef.current = client;
     client.connect();
@@ -354,7 +417,7 @@ export function FilesystemExplorer({
       client.close();
       clientRef.current = null;
     };
-  }, [initialPath, websocketUrl]);
+  }, [filesystemConnectionKey, initialPath, persistenceStorageKey]);
 
   useEffect(() => {
     const paths = openFileWatchKey.length === 0 ? [] : openFileWatchKey.split("\0");
@@ -363,6 +426,36 @@ export function FilesystemExplorer({
       setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to remember open files."));
     });
   }, [openFileWatchKey]);
+
+  useEffect(() => {
+    if (persistenceStorageKey === null || listing === null) {
+      return;
+    }
+
+    const activePersistedFilePath =
+      activeLeftPaneSurface === "file" &&
+      activeFilePath !== null &&
+      openFileTabs.some((tab) => tab.path === activeFilePath)
+        ? activeFilePath
+        : null;
+
+    writePersistedFilesystemExplorerState(window.localStorage, persistenceStorageKey, {
+      currentPath: listing.path,
+      history,
+      historyIndex,
+      openFileTabs,
+      activeFilePath: activePersistedFilePath,
+      activeLeftPaneSurface: activePersistedFilePath === null ? "directory" : "file",
+    }, HISTORY_LIMIT);
+  }, [
+    activeFilePath,
+    activeLeftPaneSurface,
+    history,
+    historyIndex,
+    listing,
+    openFileTabs,
+    persistenceStorageKey,
+  ]);
 
   const handleLeftPaneRatioChange = useCallback((ratio: number): void => {
     const nextRatio = clampPaneRatio(ratio);
@@ -1162,4 +1255,12 @@ const dispatchToast = (input: {
   readonly description?: string;
 }): void => {
   window.dispatchEvent(new CustomEvent("heysnap:toast", { detail: input }));
+};
+
+const readExplorerState = (storageKey: string | null): PersistedFilesystemExplorerState | null => {
+  if (storageKey === null || typeof window === "undefined") {
+    return null;
+  }
+
+  return readPersistedFilesystemExplorerState(window.localStorage, storageKey, HISTORY_LIMIT);
 };

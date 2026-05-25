@@ -1245,6 +1245,7 @@ export function MachineWorkspace({
         />
         <FilesystemExplorer
           websocketUrl={filesystemWebsocketUrl}
+          workspacePersistenceKey={`filesystem:${computer.id}`}
           filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
           feedbackUrl={feedbackUrl}
           agentBaseUrl={agentBaseUrl}
