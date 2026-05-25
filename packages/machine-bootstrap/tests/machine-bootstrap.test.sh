@@ -125,7 +125,7 @@ JSON
     ;;
   "http://127.0.0.1:4000/status")
     cat <<'JSON'
-{"ok":true,"version":"1.0.0","safeToRestart":true,"activeSessions":{"filesystem":0,"agent":0,"capabilities":0,"total":0}}
+{"ok":true,"version":"1.0.0","safeToRestart":true,"safeToSleep":true,"lastActivityAt":"2026-01-01T00:00:00.000Z","activeSessions":{"filesystem":0,"agent":0,"capabilities":0,"total":0}}
 JSON
     ;;
   "http://127.0.0.1:4000/health")
@@ -240,6 +240,8 @@ test -f "$MACHINE_ROOT/machine-token"
 jq -e '.machineServerVersion == "1.0.0"' "$CAPTURED_HEARTBEAT" >/dev/null
 jq -e '.bootstrapVersion == "0.1.1"' "$CAPTURED_HEARTBEAT" >/dev/null
 jq -e '.safeToRestart == true' "$CAPTURED_HEARTBEAT" >/dev/null
+jq -e '.safeToSleep == true' "$CAPTURED_HEARTBEAT" >/dev/null
+jq -e '.lastActivityAt == "2026-01-01T00:00:00.000Z"' "$CAPTURED_HEARTBEAT" >/dev/null
 jq -e '.activeSessions.total == 0' "$CAPTURED_HEARTBEAT" >/dev/null
 jq -e '.updateState == "failed"' "$CAPTURED_HEARTBEAT" >/dev/null
 
