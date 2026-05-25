@@ -42,11 +42,14 @@ import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
+
+import { readHashParam, writeHashParam } from "../../../_internal/urlHashState";
 import "./webWorkbook.css";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
 const workbookZoomStorageKey = "openxml-web-workbook-zoom";
+const sheetHashParam = "sheet";
 
 const defaultGridTheme = {
   accentColor: "#19736a",
@@ -229,6 +232,23 @@ function getWorkbookTitle(workbook: any, fallbackTitle = "Workbook.xlsx"): strin
     fallbackTitle
   );
 }
+
+const resolveSheetIndexFromHash = (sheets: readonly any[]): number => {
+  const hashSheet = readHashParam(sheetHashParam);
+
+  if (hashSheet === null) {
+    return 0;
+  }
+
+  const index = sheets.findIndex(
+    (sheet, sheetIndex) => sheetHashName(sheet, sheetIndex) === hashSheet,
+  );
+
+  return index === -1 ? 0 : index;
+};
+
+const sheetHashName = (sheet: any, index: number): string =>
+  String(sheet?.name || `Sheet ${index + 1}`);
 
 function createEmptyGridSelection(): any {
   return {
@@ -2705,6 +2725,7 @@ export function WebWorkbook({
   const [visibleRegion, setVisibleRegion] = useState<any>(null);
   const [imageCache, setImageCache] = useState<Record<string, any>>({});
   const imageLoadRef = useRef<Set<string>>(new Set<string>());
+  const skipNextSheetHashWriteRef = useRef(false);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const sheets = getWorkbookSheets(workbook);
@@ -2733,6 +2754,10 @@ export function WebWorkbook({
         .sort()
         .join("|"),
     [gridData],
+  );
+  const sheetsKey = useMemo(
+    () => sheets.map((sheet: any, index: number) => sheetHashName(sheet, index)).join("\u0000"),
+    [sheets],
   );
   const workbookTitle = getWorkbookTitle(workbook, title);
   const formulaBarValue = selectedCell ? getFormulaBarText(selectedCell) : formulaValue;
@@ -2787,8 +2812,28 @@ export function WebWorkbook({
   }, [zoom]);
 
   useEffect(() => {
-    setSelectedSheetIndex(0);
-  }, [workbook]);
+    const nextIndex = resolveSheetIndexFromHash(sheets);
+    const sheet = sheets[nextIndex];
+    skipNextSheetHashWriteRef.current = true;
+    setSelectedSheetIndex(nextIndex);
+
+    if (sheet !== undefined) {
+      writeHashParam(sheetHashParam, sheetHashName(sheet, nextIndex));
+    }
+  }, [sheetsKey, workbook]);
+
+  useEffect(() => {
+    if (skipNextSheetHashWriteRef.current) {
+      skipNextSheetHashWriteRef.current = false;
+      return;
+    }
+
+    if (selectedSheet === undefined) {
+      return;
+    }
+
+    writeHashParam(sheetHashParam, sheetHashName(selectedSheet, selectedSheetIndex));
+  }, [selectedSheet, selectedSheetIndex]);
 
   useEffect(() => {
     setSelectedCell(null);
