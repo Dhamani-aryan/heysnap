@@ -9,6 +9,7 @@ AWS_REGION=ap-south-1
 AWS_EC2_INSTANCE_TYPE=t3.large
 AWS_EC2_ROOT_VOLUME_GB=80
 AWS_MACHINE_AMI_SSM_PARAMETER=/ank1015/machine-images/stable/ami-id
+MACHINE_IDLE_SLEEP_SECONDS=1800
 ```
 
 The provisioner resolves the machine AMI from `AWS_MACHINE_AMI_SSM_PARAMETER`.
@@ -59,6 +60,9 @@ Current v1 behavior:
   - `POST /computers/:computerId/stop`
   - `POST /computers/:computerId/restart`
   - `DELETE /computers/:computerId`
+- cloud machines are automatically stopped after `MACHINE_IDLE_SLEEP_SECONDS`
+  seconds without machine activity, when the machine reports `safeToSleep`.
+  Set `MACHINE_IDLE_SLEEP_SECONDS=0` to disable auto-sleep.
 
 Machine-server releases are published by `release-machine-server.yml`. The
 workflow uploads a tarball to S3 and publishes a release manifest containing
