@@ -12,6 +12,10 @@ import {
   useCloudRuntime,
   useOptionalCloudRuntime,
 } from "../../../cloud/cloud-runtime";
+import {
+  CLIENT_DIAGNOSTIC_EVENT,
+  type ClientDiagnosticLog,
+} from "../../../cloud/client-diagnostics";
 import { LoginScreen, MyMachinesScreen, RemoteMachineCreateScreen } from "../screens";
 import {
   useBootstrapAuth,
@@ -154,6 +158,7 @@ function CloudAppContent({
     changeRoute({ view: "login" }, { replace: true });
   }, [changeRoute]);
   const user = useCloudAuthStore((state) => state.user);
+  const token = useCloudAuthStore((state) => state.token);
   const authState = useCloudAuthStore((state) => state.status);
   const computers = useCloudComputers();
   const selectedComputer = useCloudMachinesStore((state) =>
@@ -183,6 +188,71 @@ function CloudAppContent({
   useBootstrapAuth({
     onAuthFailure: routeToLogin,
   });
+
+  useEffect(() => {
+    if (authState !== "authenticated" || token === null) {
+      return;
+    }
+
+    const pendingLogs: ClientDiagnosticLog[] = [];
+    let flushTimer: number | null = null;
+    let isFlushing = false;
+
+    const flush = (): void => {
+      flushTimer = null;
+
+      if (isFlushing || pendingLogs.length === 0) {
+        return;
+      }
+
+      isFlushing = true;
+      const batch = pendingLogs.splice(0, 25);
+
+      void client.sendClientDiagnostics(token, { logs: batch })
+        .catch(() => {
+          pendingLogs.unshift(...batch.slice(-25));
+        })
+        .finally(() => {
+          isFlushing = false;
+          if (pendingLogs.length > 0 && flushTimer === null) {
+            flushTimer = window.setTimeout(flush, 2500);
+          }
+        });
+    };
+
+    const scheduleFlush = (): void => {
+      if (flushTimer !== null) {
+        return;
+      }
+
+      flushTimer = window.setTimeout(flush, pendingLogs.length >= 10 ? 100 : 1000);
+    };
+
+    const handleDiagnosticLog = (event: Event): void => {
+      const diagnostic = event as CustomEvent<ClientDiagnosticLog>;
+
+      if (diagnostic.detail === undefined) {
+        return;
+      }
+
+      pendingLogs.push(diagnostic.detail);
+
+      if (pendingLogs.length > 200) {
+        pendingLogs.splice(0, pendingLogs.length - 200);
+      }
+
+      scheduleFlush();
+    };
+
+    window.addEventListener(CLIENT_DIAGNOSTIC_EVENT, handleDiagnosticLog);
+
+    return () => {
+      window.removeEventListener(CLIENT_DIAGNOSTIC_EVENT, handleDiagnosticLog);
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+      }
+    };
+  }, [authState, client, token]);
 
   useEffect(() => {
     setHasSeenMachinesOnboarding(readStoredBoolean(machinesOnboardingStorageKey));
