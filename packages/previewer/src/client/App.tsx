@@ -3,9 +3,11 @@ import type { Dispatch } from "react";
 
 import type { PreviewItem, PreviewServerMessage } from "../protocol";
 import { Previewer, type PreviewTheme } from "./Previewer";
+import { installFilesystemVoiceHotkeyRelay } from "./voiceHotkeyRelay";
 
 type PreviewSlot = {
-  readonly key: string;
+  readonly documentKey: string;
+  readonly versionKey: string;
   readonly item: PreviewItem;
 };
 
@@ -39,6 +41,11 @@ export function App(): React.ReactElement {
   const query = usePreviewQuery();
   const [buffer, dispatchBuffer] = useReducer(previewBufferReducer, emptyPreviewBuffer);
   const [status, setStatus] = useState<"idle" | "connecting" | "open" | "closed">("idle");
+
+  useEffect(() => {
+    const cleanup = installFilesystemVoiceHotkeyRelay(window);
+    return () => cleanup?.();
+  }, []);
 
   useEffect(() => {
     if (query.path === null || query.path.length === 0) {
@@ -178,7 +185,14 @@ const queuePreviewItem = (
   item: PreviewItem,
   dispatchBuffer: Dispatch<PreviewBufferAction>,
 ): void => {
-  dispatchBuffer({ type: "queue", slot: { key: previewItemKey(item), item } });
+  dispatchBuffer({
+    type: "queue",
+    slot: {
+      documentKey: previewItemDocumentKey(item),
+      versionKey: previewItemVersionKey(item),
+      item,
+    },
+  });
 };
 
 const previewBufferReducer = (
@@ -189,8 +203,16 @@ const previewBufferReducer = (
     case "reset":
       return emptyPreviewBuffer;
     case "queue":
-      if (state.visibleSlot?.key === action.slot.key) {
+      if (state.visibleSlot?.versionKey === action.slot.versionKey) {
         return { visibleSlot: state.visibleSlot, pendingSlot: null, error: null };
+      }
+
+      if (state.visibleSlot?.documentKey === action.slot.documentKey) {
+        return {
+          visibleSlot: action.slot,
+          pendingSlot: null,
+          error: null,
+        };
       }
 
       return {
@@ -199,7 +221,7 @@ const previewBufferReducer = (
         error: state.visibleSlot === null ? null : state.error,
       };
     case "ready":
-      if (state.pendingSlot?.key !== action.key) {
+      if (state.pendingSlot?.versionKey !== action.key) {
         return state;
       }
 
@@ -209,7 +231,7 @@ const previewBufferReducer = (
         error: null,
       };
     case "previewError":
-      if (state.pendingSlot?.key !== action.key) {
+      if (state.pendingSlot?.versionKey !== action.key) {
         return state;
       }
 
@@ -246,7 +268,7 @@ const PreviewBuffer = ({
     ) : null}
     {pendingSlot !== null ? (
       <div
-        key={pendingSlot.key}
+        key={pendingSlot.versionKey}
         className={
           visibleSlot === null
             ? "preview-buffer-pane preview-buffer-pane-pending preview-buffer-pane-initial"
@@ -257,15 +279,27 @@ const PreviewBuffer = ({
         <Previewer
           item={pendingSlot.item}
           theme={theme}
-          onReady={() => onReady(pendingSlot.key)}
-          onError={(previewError) => onError(pendingSlot.key, previewError)}
+          onReady={() => onReady(pendingSlot.versionKey)}
+          onError={(previewError) => onError(pendingSlot.versionKey, previewError)}
         />
       </div>
     ) : null}
   </div>
 );
 
-const previewItemKey = (item: PreviewItem): string => {
+const previewItemDocumentKey = (item: PreviewItem): string => {
+  if (item.kind === "file") {
+    return ["file", item.file.path, item.file.mime].join(":");
+  }
+
+  if (item.kind === "workbook") {
+    return ["workbook", item.data.path].join(":");
+  }
+
+  return ["html", item.data.path].join(":");
+};
+
+const previewItemVersionKey = (item: PreviewItem): string => {
   if (item.kind === "file") {
     const { file } = item;
     return ["file", file.path, String(file.mtime), String(file.size), file.mime].join(":");
