@@ -12,7 +12,7 @@ import { HeySnapHtmlViewer } from "./components/viewers/HeySnapHtmlViewer";
 import { HeySnapImageViewer } from "./components/viewers/HeySnapImageViewer";
 import { HeySnapMarkdownViewer } from "./components/viewers/HeySnapMarkdownViewer";
 import { HeySnapPdfViewer } from "./components/viewers/HeySnapPdfViewer";
-import { HeySnapPPTViewer } from "./components/viewers/HeySnapPPTViewer";
+import { HeySnapPPTViewer2 } from "./components/viewers/HeySnapPPTViewer2";
 import { HeySnapVideoViewer } from "./components/viewers/HeySnapVideoViewer";
 import { HeySnapXlsxViewer } from "./components/viewers/HeySnapXlsxViewer";
 
@@ -59,9 +59,11 @@ const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingm
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-const PPT_SERVER_URL =
-  import.meta.env.VITE_PPT_SERVER_URL ||
-  "http://13.126.207.124/Kd5QihM3zhwV2WztLXAnBc6n07Goa6O3mByrs-rqWjU/ppt";
+const APRYSE_LICENSE_KEY =
+  import.meta.env.VITE_APRYSE_LICENSE_KEY ||
+  "demo:1779706095669:63187a52030000000065b902b995af262c1b7e2b5c56aa901fd7282a7d";
+const APRYSE_WEBVIEWER_PATH =
+  import.meta.env.VITE_APRYSE_WEBVIEWER_PATH || "lib/webviewer";
 
 type PreviewerCallbacks = {
   readonly onReady?: () => void;
@@ -214,16 +216,16 @@ const PptPreview = ({
   const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
 
   return (
-    <HeySnapPPTViewer
+    <HeySnapPPTViewer2
       src={bytes}
-      serverUrl={PPT_SERVER_URL}
+      licenseKey={APRYSE_LICENSE_KEY}
+      webViewerPath={APRYSE_WEBVIEWER_PATH}
       documentName={file.name}
       onReady={onReady}
       onError={onError}
       headerBackground={theme.headerBackground}
       headerForeground={theme.headerForeground}
       bodyBackground={theme.bodyBackground}
-      sidebarBackground={theme.sidebarBackground}
     />
   );
 };
