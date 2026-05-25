@@ -1,5 +1,6 @@
+import { NextResponse } from "next/server";
+
 const SARVAM_API_BASE_URL = "https://api.sarvam.ai";
-const SARVAM_SHORT_AUDIO_MAX_SECONDS = 30;
 const SARVAM_STT_MODEL = "saaras:v3";
 const SARVAM_STT_MODE = "translit";
 const SARVAM_BATCH_POLL_INTERVAL_MS = 2_000;
@@ -43,183 +44,45 @@ type SarvamDownloadLinksResponse = {
   readonly download_urls: Record<string, SarvamSignedUrlDetails>;
 };
 
-export const getPreferredRecordingMimeType = (): string | undefined => {
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
-    return undefined;
+export const POST = async (request: Request): Promise<NextResponse> => {
+  const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY?.trim();
+
+  if (apiKey === undefined || apiKey.length === 0) {
+    return NextResponse.json({ error: "NEXT_PUBLIC_SARVAM_API_KEY is not set." }, { status: 500 });
   }
 
-  return [
-    "audio/ogg;codecs=opus",
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-  ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
-};
+  try {
+    const formData = await request.formData();
+    const audioFile = formData.get("file");
 
-export const normalizeSarvamAudioMimeType = (mimeType: string): string => {
-  const normalizedMimeType = mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
-
-  if (normalizedMimeType === "audio/webm" || normalizedMimeType === "video/webm") {
-    return "audio/webm";
-  }
-
-  if (normalizedMimeType === "audio/ogg" || normalizedMimeType === "audio/opus") {
-    return normalizedMimeType;
-  }
-
-  if (normalizedMimeType === "audio/mp4" || normalizedMimeType === "audio/x-m4a") {
-    return normalizedMimeType;
-  }
-
-  if (normalizedMimeType === "audio/wav" || normalizedMimeType === "audio/x-wav" || normalizedMimeType === "audio/wave") {
-    return normalizedMimeType;
-  }
-
-  if (normalizedMimeType === "audio/mpeg" || normalizedMimeType === "audio/mp3") {
-    return normalizedMimeType;
-  }
-
-  return "audio/webm";
-};
-
-export const transcribeSarvamRecording = async ({
-  apiKey,
-  audioBlob,
-  durationSeconds,
-}: {
-  readonly apiKey?: string;
-  readonly audioBlob: Blob;
-  readonly durationSeconds: number;
-}): Promise<unknown> => {
-  if (audioBlob.size === 0) {
-    console.warn("Sarvam STT skipped because the recording was empty.");
-    return null;
-  }
-
-  const fileName = createSarvamAudioFileName(audioBlob.type);
-  const shouldUseShortAudioApi = durationSeconds < SARVAM_SHORT_AUDIO_MAX_SECONDS;
-
-  if (shouldUseShortAudioApi) {
-    if (apiKey === undefined || apiKey.length === 0) {
-      console.warn("Sarvam STT skipped because NEXT_PUBLIC_SARVAM_API_KEY is not set.");
-      return null;
+    if (!(audioFile instanceof File) || audioFile.size === 0) {
+      return NextResponse.json({ error: "A non-empty audio file is required." }, { status: 400 });
     }
 
-    return transcribeShortSarvamAudio({ apiKey, audioBlob, fileName });
+    const fileName = sanitizeSarvamAudioFileName(audioFile.name, audioFile.type);
+    const result = await transcribeBatchSarvamAudio({
+      apiKey,
+      audioFile,
+      fileName,
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("Sarvam batch STT proxy failed.", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Sarvam batch speech-to-text failed." },
+      { status: 502 },
+    );
   }
-
-  return transcribeBatchSarvamAudio({ apiKey, audioBlob, fileName });
-};
-
-export const extractSarvamTranscript = (result: unknown): string | null => {
-  if (typeof result === "string") {
-    const trimmed = result.trim();
-    return trimmed.length === 0 ? null : trimmed;
-  }
-
-  if (Array.isArray(result)) {
-    const joined = result
-      .map((item) => extractSarvamTranscript(item))
-      .filter((transcript): transcript is string => transcript !== null)
-      .join("\n")
-      .trim();
-
-    return joined.length === 0 ? null : joined;
-  }
-
-  if (typeof result !== "object" || result === null) {
-    return null;
-  }
-
-  const record = result as Record<string, unknown>;
-
-  if (typeof record["transcript"] === "string") {
-    const transcript = record["transcript"].trim();
-    return transcript.length === 0 ? null : transcript;
-  }
-
-  if ("output" in record) {
-    return extractSarvamTranscript(record["output"]);
-  }
-
-  if (Array.isArray(record["transcripts"])) {
-    return extractSarvamTranscript(record["transcripts"]);
-  }
-
-  return null;
-};
-
-const transcribeShortSarvamAudio = async ({
-  apiKey,
-  audioBlob,
-  fileName,
-}: {
-  readonly apiKey: string;
-  readonly audioBlob: Blob;
-  readonly fileName: string;
-}): Promise<unknown> => {
-  const formData = new FormData();
-  formData.set("model", SARVAM_STT_MODEL);
-  formData.set("mode", SARVAM_STT_MODE);
-  formData.set("file", audioBlob, fileName);
-
-  const response = await fetch(`${SARVAM_API_BASE_URL}/speech-to-text`, {
-    method: "POST",
-    headers: {
-      "api-subscription-key": apiKey,
-    },
-    body: formData,
-  });
-
-  return readSarvamJsonResponse(response);
 };
 
 const transcribeBatchSarvamAudio = async ({
   apiKey,
-  audioBlob,
-  fileName,
-}: {
-  readonly apiKey?: string;
-  readonly audioBlob: Blob;
-  readonly fileName: string;
-}): Promise<unknown> => {
-  if (typeof window !== "undefined") {
-    return transcribeBatchSarvamAudioViaProxy({ audioBlob, fileName });
-  }
-
-  if (apiKey === undefined || apiKey.length === 0) {
-    console.warn("Sarvam batch STT skipped because NEXT_PUBLIC_SARVAM_API_KEY is not set.");
-    return null;
-  }
-
-  return transcribeBatchSarvamAudioDirect({ apiKey, audioBlob, fileName });
-};
-
-const transcribeBatchSarvamAudioViaProxy = async ({
-  audioBlob,
-  fileName,
-}: {
-  readonly audioBlob: Blob;
-  readonly fileName: string;
-}): Promise<unknown> => {
-  const formData = new FormData();
-  formData.set("file", audioBlob, fileName);
-
-  const response = await fetch("/api/sarvam/speech-to-text/batch", {
-    method: "POST",
-    body: formData,
-  });
-
-  return readSarvamJsonResponse(response);
-};
-
-const transcribeBatchSarvamAudioDirect = async ({
-  apiKey,
-  audioBlob,
+  audioFile,
   fileName,
 }: {
   readonly apiKey: string;
-  readonly audioBlob: Blob;
+  readonly audioFile: File;
   readonly fileName: string;
 }): Promise<unknown> => {
   const initResponse = await sarvamJsonFetch<SarvamBatchInitResponse>("/speech-to-text/job/v1", apiKey, {
@@ -246,13 +109,13 @@ const transcribeBatchSarvamAudioDirect = async ({
   const uploadUrl = getSarvamSignedUrl(uploadLinksResponse.upload_urls, fileName);
   const uploadHeaders = createSarvamUploadHeaders(
     uploadUrl.file_metadata,
-    audioBlob.type,
+    audioFile.type,
     uploadLinksResponse.storage_container_type,
   );
   const uploadResponse = await fetch(uploadUrl.file_url, {
     method: "PUT",
     headers: uploadHeaders,
-    body: audioBlob,
+    body: audioFile,
   });
 
   if (!uploadResponse.ok) {
@@ -423,9 +286,13 @@ const getSarvamOutputFileNames = (status: SarvamBatchStatusResponse): string[] =
   return outputFileNames;
 };
 
-const createSarvamAudioFileName = (mimeType: string): string => {
-  const extension = getAudioFileExtension(mimeType);
-  return `heysnap-recording-${Date.now()}.${extension}`;
+const sanitizeSarvamAudioFileName = (fileName: string, mimeType: string): string => {
+  const trimmedFileName = fileName.trim();
+  const safeFileName = trimmedFileName.length === 0
+    ? `heysnap-recording.${getAudioFileExtension(mimeType)}`
+    : trimmedFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "-");
+
+  return safeFileName.includes(".") ? safeFileName : `${safeFileName}.${getAudioFileExtension(mimeType)}`;
 };
 
 const getAudioFileExtension = (mimeType: string): string => {
@@ -451,5 +318,5 @@ const getAudioFileExtension = (mimeType: string): string => {
 };
 
 const wait = (durationMs: number): Promise<void> => new Promise((resolve) => {
-  window.setTimeout(resolve, durationMs);
+  setTimeout(resolve, durationMs);
 });
