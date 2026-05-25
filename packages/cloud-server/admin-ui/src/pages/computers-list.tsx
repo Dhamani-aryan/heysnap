@@ -135,7 +135,7 @@ export const ComputersListPage = () => {
     <>
       <PageHeader
         title="Machines"
-        description="All cloud (EC2) and local (desktop) machines registered with the control plane."
+        description="All machines registered with the control plane."
         actions={
           <Button variant="outline" size="sm" onClick={computers.reload} disabled={computers.loading} className="gap-2">
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
@@ -217,7 +217,7 @@ export const ComputersListPage = () => {
                 filtered.map((computer) => {
                   const provider =
                     readProviderField(computer.providerMetadata, "provider") ||
-                    (computer.kind === "cloud" ? "aws-ec2" : "electron-local");
+                    (computer.kind === "cloud" ? "aws-ec2" : "local");
                   const instanceId = readProviderField(computer.providerMetadata, "instanceId");
 
                   return (

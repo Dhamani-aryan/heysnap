@@ -8,7 +8,7 @@ This is a Hono server backed by Postgres through Drizzle. It is deployed at
 ## Responsibilities
 
 - User auth with admin-created users and opaque bearer sessions.
-- Computer inventory for cloud and local machines.
+- Computer inventory for cloud machines.
 - EC2 provisioning and lifecycle operations for cloud machines.
 - Optional Docker machine provisioning for local development.
 - Machine registration, heartbeat, and release update checks.
@@ -16,7 +16,7 @@ This is a Hono server backed by Postgres through Drizzle. It is deployed at
 - Outbound machine tunnel registry and gateway WebSocket proxying.
 - Short-lived computer access sessions for gateway routes.
 - Admin dashboard and admin APIs.
-- Release manifests for desktop and machine-server updates.
+- Release manifests for machine-server updates.
 
 ## Local Commands
 
@@ -59,7 +59,6 @@ For the full local Docker machine workflow, use the root commands documented in
 - `HTTP /firecrawl/*`
 - `GET /admin/ai-usage`
 - `GET /admin/ai-usage/summary`
-- `GET /releases/desktop/latest`
 - `GET /releases/machine-server/latest`
 
 ## Admin

@@ -1,0 +1,322 @@
+import { NextResponse } from "next/server";
+
+const SARVAM_API_BASE_URL = "https://api.sarvam.ai";
+const SARVAM_STT_MODEL = "saaras:v3";
+const SARVAM_STT_MODE = "translit";
+const SARVAM_BATCH_POLL_INTERVAL_MS = 2_000;
+const SARVAM_BATCH_TIMEOUT_MS = 20 * 60 * 1_000;
+
+type SarvamJobState = "Accepted" | "Pending" | "Running" | "Completed" | "Failed";
+
+type SarvamSignedUrlDetails = {
+  readonly file_url: string;
+  readonly file_metadata?: Record<string, unknown> | null;
+};
+
+type SarvamTaskFileDetails = {
+  readonly file_name: string;
+  readonly file_id: string;
+};
+
+type SarvamTaskDetail = {
+  readonly outputs?: SarvamTaskFileDetails[];
+  readonly state?: string;
+  readonly error_message?: string | null;
+};
+
+type SarvamBatchStatusResponse = {
+  readonly job_state: SarvamJobState;
+  readonly job_id: string;
+  readonly job_details?: SarvamTaskDetail[];
+  readonly error_message?: string;
+};
+
+type SarvamBatchInitResponse = {
+  readonly job_id: string;
+};
+
+type SarvamUploadLinksResponse = {
+  readonly upload_urls: Record<string, SarvamSignedUrlDetails>;
+  readonly storage_container_type?: string;
+};
+
+type SarvamDownloadLinksResponse = {
+  readonly download_urls: Record<string, SarvamSignedUrlDetails>;
+};
+
+export const POST = async (request: Request): Promise<NextResponse> => {
+  const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY?.trim();
+
+  if (apiKey === undefined || apiKey.length === 0) {
+    return NextResponse.json({ error: "NEXT_PUBLIC_SARVAM_API_KEY is not set." }, { status: 500 });
+  }
+
+  try {
+    const formData = await request.formData();
+    const audioFile = formData.get("file");
+
+    if (!(audioFile instanceof File) || audioFile.size === 0) {
+      return NextResponse.json({ error: "A non-empty audio file is required." }, { status: 400 });
+    }
+
+    const fileName = sanitizeSarvamAudioFileName(audioFile.name, audioFile.type);
+    const result = await transcribeBatchSarvamAudio({
+      apiKey,
+      audioFile,
+      fileName,
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("Sarvam batch STT proxy failed.", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Sarvam batch speech-to-text failed." },
+      { status: 502 },
+    );
+  }
+};
+
+const transcribeBatchSarvamAudio = async ({
+  apiKey,
+  audioFile,
+  fileName,
+}: {
+  readonly apiKey: string;
+  readonly audioFile: File;
+  readonly fileName: string;
+}): Promise<unknown> => {
+  const initResponse = await sarvamJsonFetch<SarvamBatchInitResponse>("/speech-to-text/job/v1", apiKey, {
+    method: "POST",
+    body: JSON.stringify({
+      job_parameters: {
+        model: SARVAM_STT_MODEL,
+        mode: SARVAM_STT_MODE,
+      },
+    }),
+  });
+  const jobId = initResponse.job_id;
+  const uploadLinksResponse = await sarvamJsonFetch<SarvamUploadLinksResponse>(
+    "/speech-to-text/job/v1/upload-files",
+    apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        job_id: jobId,
+        files: [fileName],
+      }),
+    },
+  );
+  const uploadUrl = getSarvamSignedUrl(uploadLinksResponse.upload_urls, fileName);
+  const uploadHeaders = createSarvamUploadHeaders(
+    uploadUrl.file_metadata,
+    audioFile.type,
+    uploadLinksResponse.storage_container_type,
+  );
+  const uploadResponse = await fetch(uploadUrl.file_url, {
+    method: "PUT",
+    headers: uploadHeaders,
+    body: audioFile,
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Sarvam batch upload failed with ${uploadResponse.status}: ${await uploadResponse.text()}`);
+  }
+
+  await sarvamJsonFetch(`/speech-to-text/job/v1/${encodeURIComponent(jobId)}/start`, apiKey, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+
+  const status = await waitForSarvamBatchJob(apiKey, jobId);
+  const outputFileNames = getSarvamOutputFileNames(status);
+  const downloadLinksResponse = await sarvamJsonFetch<SarvamDownloadLinksResponse>(
+    "/speech-to-text/job/v1/download-files",
+    apiKey,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        job_id: jobId,
+        files: outputFileNames,
+      }),
+    },
+  );
+
+  return Promise.all(outputFileNames.map(async (outputFileName) => {
+    const downloadUrl = getSarvamSignedUrl(downloadLinksResponse.download_urls, outputFileName);
+    const response = await fetch(downloadUrl.file_url);
+
+    if (!response.ok) {
+      throw new Error(`Sarvam batch download failed with ${response.status}: ${await response.text()}`);
+    }
+
+    return {
+      fileName: outputFileName,
+      output: await readPossiblyJsonResponse(response),
+    };
+  }));
+};
+
+const waitForSarvamBatchJob = async (
+  apiKey: string,
+  jobId: string,
+): Promise<SarvamBatchStatusResponse> => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < SARVAM_BATCH_TIMEOUT_MS) {
+    const status = await sarvamJsonFetch<SarvamBatchStatusResponse>(
+      `/speech-to-text/job/v1/${encodeURIComponent(jobId)}/status`,
+      apiKey,
+      { method: "GET" },
+    );
+
+    if (status.job_state === "Completed") {
+      return status;
+    }
+
+    if (status.job_state === "Failed") {
+      throw new Error(status.error_message || "Sarvam batch speech-to-text job failed.");
+    }
+
+    await wait(SARVAM_BATCH_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Timed out waiting for Sarvam batch speech-to-text job.");
+};
+
+const sarvamJsonFetch = async <ResponseBody,>(
+  path: string,
+  apiKey: string,
+  init: RequestInit,
+): Promise<ResponseBody> => {
+  const response = await fetch(`${SARVAM_API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "api-subscription-key": apiKey,
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
+  });
+
+  return readSarvamJsonResponse(response) as Promise<ResponseBody>;
+};
+
+const readSarvamJsonResponse = async (response: Response): Promise<unknown> => {
+  const body = await readPossiblyJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(`Sarvam API failed with ${response.status}: ${formatSarvamResponseBody(body)}`);
+  }
+
+  return body;
+};
+
+const readPossiblyJsonResponse = async (response: Response): Promise<unknown> => {
+  const text = await response.text();
+
+  if (text.length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+};
+
+const formatSarvamResponseBody = (body: unknown): string => {
+  if (typeof body === "string") {
+    return body;
+  }
+
+  return JSON.stringify(body);
+};
+
+const getSarvamSignedUrl = (
+  urls: Record<string, SarvamSignedUrlDetails>,
+  fileName: string,
+): SarvamSignedUrlDetails => {
+  const url = urls[fileName] ?? Object.values(urls)[0];
+
+  if (url === undefined) {
+    throw new Error(`Sarvam did not return a signed URL for ${fileName}.`);
+  }
+
+  return url;
+};
+
+const createSarvamUploadHeaders = (
+  metadata: Record<string, unknown> | null | undefined,
+  contentType: string,
+  storageContainerType: string | undefined,
+): Headers => {
+  const headers = new Headers();
+
+  if (metadata !== null && metadata !== undefined) {
+    for (const [key, value] of Object.entries(metadata)) {
+      if (value !== null && value !== undefined) {
+        headers.set(key, String(value));
+      }
+    }
+  }
+
+  if (!headers.has("Content-Type") && contentType.length > 0) {
+    headers.set("Content-Type", contentType);
+  }
+
+  if (storageContainerType?.toLowerCase().startsWith("azure") === true && !headers.has("x-ms-blob-type")) {
+    headers.set("x-ms-blob-type", "BlockBlob");
+  }
+
+  return headers;
+};
+
+const getSarvamOutputFileNames = (status: SarvamBatchStatusResponse): string[] => {
+  const outputFileNames = status.job_details
+    ?.filter((detail) => detail.state === undefined || detail.state === "Success")
+    .flatMap((detail) => detail.outputs ?? [])
+    .map((output) => output.file_name)
+    .filter((fileName) => fileName.length > 0) ?? [];
+
+  if (outputFileNames.length === 0) {
+    const failedDetail = status.job_details?.find((detail) => detail.error_message !== null && detail.error_message !== undefined);
+    throw new Error(failedDetail?.error_message ?? "Sarvam batch job completed without an output file.");
+  }
+
+  return outputFileNames;
+};
+
+const sanitizeSarvamAudioFileName = (fileName: string, mimeType: string): string => {
+  const trimmedFileName = fileName.trim();
+  const safeFileName = trimmedFileName.length === 0
+    ? `heysnap-recording.${getAudioFileExtension(mimeType)}`
+    : trimmedFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "-");
+
+  return safeFileName.includes(".") ? safeFileName : `${safeFileName}.${getAudioFileExtension(mimeType)}`;
+};
+
+const getAudioFileExtension = (mimeType: string): string => {
+  const normalizedMimeType = mimeType.toLowerCase();
+
+  if (normalizedMimeType.includes("ogg")) {
+    return "ogg";
+  }
+
+  if (normalizedMimeType.includes("mp4")) {
+    return "m4a";
+  }
+
+  if (normalizedMimeType.includes("mpeg") || normalizedMimeType.includes("mp3")) {
+    return "mp3";
+  }
+
+  if (normalizedMimeType.includes("wav")) {
+    return "wav";
+  }
+
+  return "webm";
+};
+
+const wait = (durationMs: number): Promise<void> => new Promise((resolve) => {
+  setTimeout(resolve, durationMs);
+});

@@ -1,4 +1,4 @@
-import { getAssistantMarkdown, getTextContent } from "./agent-store";
+import { getAssistantMarkdown, getTextContent } from "../stores/agent/agent-store";
 import type { AgentMessage, AgentTranscriptMessage } from "./types";
 
 export type TimelineRow =

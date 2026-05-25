@@ -5,23 +5,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useStore } from "zustand";
 
 import { CloudClient } from "./cloud-client";
-import { createCloudAuthStore, type CloudAuthState, type CloudAuthStore } from "./state/auth-store";
+import { createCloudAuthStore, type CloudAuthState, type CloudAuthStore } from "../stores/cloud/auth-store";
 import {
   createBrowserWindowStore,
   type BrowserWindowState,
   type BrowserWindowStore,
-} from "./state/browser-window-store";
+} from "../stores/cloud/browser-window-store";
 import {
   createCloudMachinesStore,
   type CloudMachinesState,
   type CloudMachinesStore,
-} from "./state/machines-store";
+} from "../stores/cloud/machines-store";
 import {
   createMachineAccessStore,
   type MachineAccessState,
   type MachineAccessStore,
-} from "./state/machine-access-store";
-import { browserCloudSessionStorage, type CloudSessionStorage } from "./state/cloud-storage";
+} from "../stores/cloud/machine-access-store";
+import { browserCloudSessionStorage, type CloudSessionStorage } from "../stores/cloud/cloud-storage";
 
 export interface CloudRuntimeProviderProps {
   readonly children: React.ReactNode;

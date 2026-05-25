@@ -15,15 +15,12 @@ Next.js app for the hosted browser product.
 - Uses gateway WebSocket URLs for filesystem and agent sessions.
 - Deployed through AWS Amplify via `.github/workflows/deploy-web.yml`.
 
-### `apps/desktop`
+### `apps/mobile`
 
-Electron app for desktop users.
+Expo app for mobile users.
 
-- Renders the same shared `CloudApp` from `packages/ui`.
-- Supports the same hosted cloud-machine workflow as `apps/web`.
-- Opens workspaces through hosted gateway access sessions.
-- Checks desktop app updates with `electron-updater` and cloud release manifests.
-- Released through `.github/workflows/release-desktop.yml`.
+- Uses the cloud API and gateway sessions for machine access.
+- Shares product concepts with the hosted browser product.
 
 ## Packages
 
@@ -58,7 +55,7 @@ Hosted Hono server.
 - EC2 provisioning and lifecycle operations.
 - Machine registration, heartbeat, and update checks.
 - Gateway tunnel and WebSocket proxying.
-- Release manifests for desktop and machine-server updates.
+- Release manifests for machine-server updates.
 - Admin dashboard at `/admin-dashboard`.
 - Deployed through `.github/workflows/deploy-cloud-server.yml`.
 
@@ -71,5 +68,5 @@ pnpm typecheck
 pnpm build
 ```
 
-`pnpm dev` starts only `apps/web` and `apps/desktop`. The machine runtime and
-hosted backend services run separately when needed.
+`pnpm dev` starts `apps/web`. The machine runtime and hosted backend services
+run separately when needed.

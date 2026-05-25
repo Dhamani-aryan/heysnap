@@ -614,8 +614,8 @@
             <article class="previewer-card">
               <h2>Overview</h2>
               <p class="previewer-card-copy">
-                The machine server that runs on every HeySnap computer &mdash;
-                cloud VM or Electron desktop &mdash; exposing one consistent
+                The machine server that runs on every HeySnap cloud computer,
+                exposing one consistent
                 HTTP and WebSocket surface for filesystem, file preview, agent
                 threads, and user-side browser control.
               </p>
@@ -675,25 +675,22 @@
               one port. The UI never sees more than this one surface.
             </p>
             <p>
-              The package is deliberately <strong>host-shape agnostic</strong>.
-              On a desktop, Electron imports the package and calls
-              <code>startServer()</code> in-process so the local machine looks
-              like any other. On a cloud VM, the same code runs as a Node
-              process behind an outbound tunnel to the HeySnap gateway. The
-              protocols on the wire are identical in both modes &mdash; same
-              routes, same WebSocket frames, same <code>/status</code> &mdash;
-              so the selected machine can flip from local to remote without
-              the UI knowing the difference.
+              The package is deliberately <strong>host-shape agnostic</strong>
+              inside cloud environments. On a cloud VM, the code runs as a
+              Node process behind an outbound tunnel to the HeySnap gateway.
+              The protocols on the wire are identical across provisioned
+              machines &mdash; same routes, same WebSocket frames, same
+              <code>/status</code> &mdash; so the selected machine can change
+              without the UI knowing the difference.
             </p>
             <p>
               Bundling everything into one process pays for itself in
               <strong>restart discipline</strong>. The server counts active
               sessions across every subsystem and reports a single
               <code>safeToRestart</code> flag; cloud supervisors gate updates
-              on it, and Electron uses the same shape for a clean in-process
-              shutdown. The entry points are small: <code>src/index.ts</code>
-              is the CLI for the cloud case; <code>src/runtime.ts</code>
-              exposes <code>startServer</code> for the embedded case.
+              on it before restarting the host artifact. The runtime entry
+              points stay small: <code>src/index.ts</code> is the CLI and
+              <code>src/runtime.ts</code> exposes <code>startServer</code>.
             </p>
           </div>
 
@@ -731,7 +728,7 @@
           </div>
 
           <figure class="srv-diagram">
-            <svg viewBox="0 0 940 560" role="img" aria-label="Server architecture overview: HeySnap UI talks to one machine-server surface, which can be embedded in Electron locally or run as a process on a cloud VM reached through an outbound tunnel.">
+            <svg viewBox="0 0 940 560" role="img" aria-label="Server architecture overview: HeySnap UI talks to one machine-server surface running as a process on a cloud VM reached through an outbound tunnel.">
               <defs>
                 <marker id="srv-s1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0,0 L10,5 L0,10 z" fill="#F54E00" />
@@ -811,8 +808,8 @@
               <!-- Two host badges at the bottom -->
               <g font-family="Geist, sans-serif">
                 <rect x="100" y="448" width="320" height="84" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
-                <text x="120" y="476" font-size="15" font-weight="600" fill="#26251e">Electron desktop</text>
-                <text x="120" y="498" font-size="12.5" fill="#787771">embeds the package &middot; calls startServer()</text>
+                <text x="120" y="476" font-size="15" font-weight="600" fill="#26251e">Development host</text>
+                <text x="120" y="498" font-size="12.5" fill="#787771">can call startServer() for local checks</text>
                 <text x="120" y="516" font-family="Geist Mono, monospace" font-size="11.5" fill="#5b5a52">src/runtime.ts</text>
 
                 <rect x="520" y="448" width="320" height="84" rx="10" fill="#ffffff" stroke="rgba(38,37,30,0.16)" />
@@ -822,10 +819,9 @@
               </g>
             </svg>
             <figcaption class="srv-diagram-caption">
-              One machine-server package, two host shapes. The protocols on
-              the wire stay identical, so the UI never has to know whether
-              it&rsquo;s talking to a local Electron embed or a cloud VM
-              behind a tunnel.
+              One machine-server package, one protocol surface. The UI talks
+              through the gateway and does not need host-specific protocol
+              branches.
             </figcaption>
           </figure>
         </section>
@@ -2315,7 +2311,7 @@
             </p>
             <p>
               Pass <code>{ seedThreads: true }</code> to pre-populate four
-              realistic threads (desktop plan, Finder UI, agent harness
+              realistic threads (chat plan, Finder UI, agent harness
               design, summarize notes) with full message and activity
               content. These serve as static fixture data for UI rendering
               tests without needing a live Codex process.
@@ -2744,8 +2740,8 @@
               On startup, <code>initialize()</code> tries the chosen paths, and if
               <code>mkdir</code> fails with <code>EACCES</code>/<code>EPERM</code> <em>and</em> no
               path was explicitly overridden, falls back to the user-writable layout. This is what
-              makes the Electron app survive being installed without root: a cloud-style layout
-              would fail at <code>/opt/ank1015</code>, so it silently retries under
+              keeps local development usable without root: a cloud-style layout
+              can fail at <code>/opt/ank1015</code>, so it silently retries under
               <code>$HOME/.ank1015</code>.
             </p>
           </div>
@@ -3141,7 +3137,7 @@
 
           <div class="srv-prose">
             <p>
-              In cloud mode the machine server doesn't listen on a public port. The Electron UI
+              In cloud mode the machine server doesn't listen on a public port. The web UI
               talks to it through the cloud gateway, and the gateway needs a way to reach a server
               that lives on a private network behind NAT. The tunnel solves that: at startup the
               server dials <em>out</em> over a single WebSocket to
@@ -3153,8 +3149,8 @@
               The whole tunnel lives in one file &mdash; <code>tunnel/client.ts</code> &mdash; and is
               wired up at the very end of <code>index.ts</code>. It only starts when all three env
               vars are present (<code>CLOUD_SERVER_PUBLIC_URL</code>,
-              <code>ANK1015_COMPUTER_ID</code>, <code>ANK1015_MACHINE_TOKEN_FILE</code>); the
-              Electron build runs without them and so without a tunnel.
+              <code>ANK1015_COMPUTER_ID</code>, <code>ANK1015_MACHINE_TOKEN_FILE</code>); local
+              development runs without them and so without a tunnel.
             </p>
           </div>
 
@@ -3168,7 +3164,7 @@
 
               <rect x="40" y="40" width="220" height="240" rx="14" fill="#fffaf0" stroke="#26251e" stroke-width="1.5" />
               <text x="150" y="68" text-anchor="middle" font-size="11" font-weight="600" letter-spacing="0.12em" fill="#6b6855">UI</text>
-              <text x="150" y="92" text-anchor="middle" font-size="14" font-weight="600" fill="#26251e">Electron app</text>
+              <text x="150" y="92" text-anchor="middle" font-size="14" font-weight="600" fill="#26251e">Web app</text>
               <text x="150" y="112" text-anchor="middle" font-size="11.5" fill="#6b6855">browser session</text>
               <rect x="64" y="140" width="172" height="34" rx="8" fill="#f3ecd6" stroke="#26251e" stroke-width="1" />
               <text x="150" y="161" text-anchor="middle" font-size="11.5" fill="#26251e">https://cloud / wss://cloud</text>
@@ -3238,7 +3234,7 @@
               <p>
                 <code>CLOUD_SERVER_PUBLIC_URL</code> + <code>ANK1015_COMPUTER_ID</code> +
                 <code>ANK1015_MACHINE_TOKEN_FILE</code>. Missing any one of them and the tunnel
-                never starts; the Electron build relies on this to stay purely local.
+                never starts; local development relies on this to stay purely local.
               </p>
               <div class="srv-file-tags">
                 <span class="srv-tag">env</span>
@@ -4016,7 +4012,7 @@
               <p>
                 If cloud-style paths fail with <code>EACCES</code>/<code>EPERM</code> <em>and</em>
                 no path was explicitly overridden, <code>initialize()</code> retries under
-                <code>$HOME/.ank1015</code>. This is what lets the Electron build run on a laptop
+                <code>$HOME/.ank1015</code>. This is what lets local development run on a laptop
                 without ever being root, but it also means a misconfigured cloud VM can silently
                 land in the wrong place &mdash; check <code>state.updatedAt</code> path if
                 debugging.
@@ -4192,8 +4188,8 @@
           <div class="srv-callout">
             <div class="srv-callout-label">If you remember one thing from this doc</div>
             <p>
-              The machine server is the same code running in two very different deployments. Cloud
-              vs Electron is decided by environment variables, not by branches in the source. Most
+              The machine server is the same code running in different environments. Cloud
+              vs local development is decided by environment variables, not by branches in the source. Most
               of the subtlety in the codebase &mdash; the path fallback, the trust boundary, the
               tunnel, the safeToRestart counter &mdash; exists to keep both deployments correct
               without forcing either one to know about the other.

@@ -5,12 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useStore } from "zustand";
 
 import type { AgentRunHandle } from "./agent-client";
-import { createAgentChatStore, type AgentChatState, type AgentChatStore } from "./agent-store";
+import { createAgentChatStore, type AgentChatState, type AgentChatStore } from "../stores/agent/agent-store";
 import {
   createAgentThreadListStore,
   type AgentThreadListState,
   type AgentThreadListStore,
-} from "./agent-thread-list-store";
+} from "../stores/agent/agent-thread-list-store";
 
 export interface AgentRuntimeProviderProps {
   readonly agentBaseUrl: string;

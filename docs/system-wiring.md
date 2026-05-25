@@ -10,16 +10,14 @@ apps/web
   -> packages/cloud-server at https://api.heysnap.xyz
   -> gateway WebSockets for remote machines
 
-apps/desktop
+apps/mobile
   -> packages/ui
   -> packages/cloud-server at https://api.heysnap.xyz
   -> gateway WebSockets for remote machines
-  -> embedded packages/server runtime for the local machine
 
 packages/server
   -> runs on cloud VMs
-  -> is embedded by Electron for the local machine
-  -> exposes the same filesystem and agent WebSocket protocols everywhere
+  -> exposes filesystem and agent WebSocket protocols
 ```
 
 ## Auth Flow
@@ -36,15 +34,14 @@ User
   -> calls protected cloud APIs with Authorization: Bearer <token>
 ```
 
-Browser and Electron renderer both use bearer tokens. Cookies exist on the
-cloud server, but the current UI path uses bearer auth as the primary path.
+Browser and mobile clients use bearer tokens. Cookies exist on the cloud
+server, but the current UI path uses bearer auth as the primary path.
 
 ## Machine Inventory
 
 All machines are `computers` owned by a user.
 
 - `kind: "cloud"`: AWS EC2 VM provisioned by the cloud server.
-- `kind: "local"`: user's desktop machine registered by Electron main.
 
 Users see machines through:
 
@@ -80,13 +77,6 @@ UI
 
 The gateway verifies the access token, checks the selected computer, and routes
 traffic through the machine's outbound tunnel.
-
-## Desktop App Flow
-
-Electron renders the same hosted cloud-machine UI as the web app. It does not
-embed `packages/server`, register the local device, or open direct
-`127.0.0.1` workspace URLs. Workspace traffic goes through hosted gateway
-access sessions.
 
 ## Machine Server Protocols
 

@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import type { BaseViewerProps } from "../../types";
+import { readHashParam, writeHashParam } from "../../_internal/urlHashState";
 import {
   useResolvedPPTSource,
   type HeySnapPPTSrc,
@@ -125,6 +126,7 @@ const DEFAULTS = {
 const SLIDE_PADDING = 20;
 const WHEEL_FLUSH_MS = 90;
 const WHEEL_PIXELS_PER_SLIDE = 320;
+const slideHashParam = "slide";
 
 /**
  * Image-stack PPTX viewer.
@@ -245,6 +247,7 @@ export function HeySnapPPTViewer({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const wheelAccumulatorRef = useRef(0);
   const wheelTimerRef = useRef<number | null>(null);
+  const skipNextSlideHashWriteRef = useRef(false);
 
   const applyZoom = (next: number) => {
     // This viewer uses wheel/arrow input for slide navigation, not panning.
@@ -285,10 +288,26 @@ export function HeySnapPPTViewer({
 
   useEffect(() => {
     if (!manifest) return;
-    setActiveIndex(1);
+    const nextIndex = resolveSlideIndexFromHash(manifest.slideCount);
+    skipNextSlideHashWriteRef.current = true;
+    setActiveIndex(nextIndex);
+    writeHashParam(slideHashParam, String(nextIndex));
     setZoom(1);
     wheelAccumulatorRef.current = 0;
   }, [manifest]);
+
+  useEffect(() => {
+    if (!manifest) {
+      return;
+    }
+
+    if (skipNextSlideHashWriteRef.current) {
+      skipNextSlideHashWriteRef.current = false;
+      return;
+    }
+
+    writeHashParam(slideHashParam, String(activeIndex));
+  }, [activeIndex, manifest]);
 
   useEffect(() => {
     return () => {
@@ -720,3 +739,14 @@ const preloadImage = (url: string): Promise<void> =>
     image.onerror = () => resolve();
     image.src = url;
   });
+
+const resolveSlideIndexFromHash = (slideCount: number): number => {
+  const rawSlide = readHashParam(slideHashParam);
+  const slide = rawSlide === null ? 1 : Number(rawSlide);
+
+  if (!Number.isFinite(slide)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.min(slideCount, Math.trunc(slide)));
+};

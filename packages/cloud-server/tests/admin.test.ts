@@ -721,13 +721,12 @@ describe("admin AI usage analytics", () => {
 describe("admin release management", () => {
   it("deletes a release manifest", async () => {
     const { app } = createTestApp();
-    const created = await app.request("/admin/releases/desktop", {
+    const created = await app.request("/admin/releases/machine-server", {
       method: "POST",
       body: JSON.stringify({
         channel: "stable",
-        platform: "darwin-arm64",
         version: "0.1.0",
-        downloadUrl: "https://downloads.example.com/app.dmg",
+        downloadUrl: "https://downloads.example.com/machine-server.tar.gz",
       }),
       headers: adminHeaders(),
     });

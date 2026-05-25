@@ -1,7 +1,7 @@
 import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const computerKindEnum = pgEnum("computer_kind", ["cloud", "local"]);
-export const releaseTargetEnum = pgEnum("release_target", ["desktop", "machine-server"]);
+export const releaseTargetEnum = pgEnum("release_target", ["machine-server"]);
 export const feedbackReportStatusEnum = pgEnum("feedback_report_status", ["pending", "complete", "comment_only"]);
 export const computerStatusEnum = pgEnum("computer_status", [
   "creating",

@@ -12,7 +12,6 @@ owns filesystem, agent, and capabilities.
 Host:
   cloud-server dev server        http://localhost:4100
   web dev server                 http://localhost:3000
-  desktop dev app                Electron
   artifact publisher             pnpm dev:local:release
 
 Docker:
@@ -56,17 +55,10 @@ create a container with `COMPUTER_PROVISIONER=docker`, pass it the bootstrap
 identity/config contract, and the container will install the latest
 `machine-server` release from the `local` channel.
 
-Desktop development uses the local cloud URL by default:
-
-```sh
-pnpm dev:local:desktop
-```
-
-To point web or desktop dev at hosted instead:
+To point web dev at hosted instead:
 
 ```sh
 pnpm --filter @ank1015-app/web dev:hosted
-pnpm --filter @ank1015-app/desktop dev:hosted
 ```
 
 ## Local Release Loop

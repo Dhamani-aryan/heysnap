@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.2",
   "scripts": {
-    "dev": "pnpm --parallel --filter @ank1015-app/web --filter @ank1015-app/desktop dev",
+    "dev": "pnpm --filter @ank1015-app/web dev",
     "dev:server": "pnpm --filter @ank1015-app/server dev",
     "dev:cloud-server": "pnpm --filter @ank1015-app/cloud-server dev",
     "dev:local": "node scripts/local-dev/start.mjs",
@@ -12,7 +12,6 @@
     "dev:local:cloud": "node scripts/local-dev/cloud.mjs",
     "dev:local:release": "node scripts/local-dev/release-machine-server.mjs",
     "dev:local:web": "pnpm --filter @ank1015-app/web dev",
-    "dev:local:desktop": "pnpm --filter @ank1015-app/desktop dev",
     "dev:local:admin": "pnpm --filter @ank1015-app/cloud-server-admin-ui dev",
     "dev:local:logs": "node scripts/local-dev/machine-logs.mjs",
     "dev:local:shell": "node scripts/local-dev/machine-shell.mjs",

@@ -91,6 +91,29 @@ export const buildFilesystemPreviewerUrl = (
   return url.toString();
 };
 
+export const isSameFilesystemPreviewerDocumentUrl = (leftUrl: string, rightUrl: string): boolean => {
+  try {
+    return normalizeFilesystemPreviewerDocumentUrl(leftUrl) === normalizeFilesystemPreviewerDocumentUrl(rightUrl);
+  } catch {
+    return leftUrl === rightUrl;
+  }
+};
+
+export const normalizeFilesystemPreviewerDocumentUrl = (rawUrl: string): string => {
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
+    ? window.location.href
+    : "http://localhost";
+  const url = new URL(rawUrl, baseUrl);
+
+  url.searchParams.delete("accessToken");
+  url.searchParams.delete("token");
+  url.searchParams.delete("v");
+  sortSearchParams(url);
+  url.hash = "";
+
+  return url.toString();
+};
+
 export const isGatewayFilesystemWebsocketUrl = (filesystemWebsocketUrl: string): boolean => {
   try {
     const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string"
@@ -100,5 +123,18 @@ export const isGatewayFilesystemWebsocketUrl = (filesystemWebsocketUrl: string):
     return /^\/gateway\/computers\/[^/]+\/filesystem\/?$/u.test(url.pathname);
   } catch {
     return false;
+  }
+};
+
+const sortSearchParams = (url: URL): void => {
+  const entries = Array.from(url.searchParams.entries())
+    .sort(([leftName, leftValue], [rightName, rightValue]) =>
+      leftName === rightName ? leftValue.localeCompare(rightValue) : leftName.localeCompare(rightName)
+    );
+
+  url.search = "";
+
+  for (const [name, value] of entries) {
+    url.searchParams.append(name, value);
   }
 };

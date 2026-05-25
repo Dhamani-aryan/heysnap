@@ -107,7 +107,6 @@ const HtmlPreview = ({
 
   return (
     <HeySnapHtmlViewer
-      key={`${data.path}:${String(data.mtime)}`}
       src={src}
       documentName={data.name}
       codeTheme={theme.codeTheme}
@@ -170,7 +169,6 @@ const PdfPreview = ({
 
   return (
     <HeySnapPdfViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={bytes}
       onReady={onReady}
       onError={onError}
@@ -194,7 +192,6 @@ const DocxPreview = ({
 
   return (
     <HeySnapDocxViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={bytes}
       documentName={file.name}
       onReady={onReady}
@@ -218,7 +215,6 @@ const PptPreview = ({
 
   return (
     <HeySnapPPTViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={bytes}
       serverUrl={PPT_SERVER_URL}
       documentName={file.name}
@@ -247,7 +243,6 @@ const CodePreview = ({
 
   return (
     <HeySnapCodeViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={src}
       documentName={file.name}
       theme={theme.codeTheme}
@@ -275,7 +270,6 @@ const MarkdownPreview = ({
 
   return (
     <HeySnapMarkdownViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={src}
       assetBaseUrl={file.assetBaseUrl}
       documentName={file.name}
@@ -307,7 +301,6 @@ const XlsxPreview = ({
   return (
     <div className={`${theme.xlsxClassName} preview-xlsx-shell`}>
       <HeySnapXlsxViewer
-        key={`${data.path}:${String(data.mtime)}`}
         workbook={data.workbook}
         title={data.name}
         darkBgColor={VIEWER_THEMES.dark.bodyBackground}
@@ -334,7 +327,6 @@ const ImagePreview = ({
 
   return (
     <HeySnapImageViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={src}
       documentName={file.name}
       headerBackground={theme.headerBackground}
@@ -358,7 +350,6 @@ const VideoPreview = ({
 
   return (
     <HeySnapVideoViewer
-      key={`${file.path}:${String(file.mtime)}`}
       src={src}
       documentName={file.name}
       headerBackground={theme.headerBackground}
@@ -382,7 +373,6 @@ const AudioPreview = ({
 
   return (
     <HeySnapAudioPlayer
-      key={`${file.path}:${String(file.mtime)}`}
       src={src}
       documentName={file.name}
       headerBackground={theme.headerBackground}

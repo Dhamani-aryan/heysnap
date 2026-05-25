@@ -44,21 +44,22 @@ export interface ResolvedMarkdownSource {
 interface State {
   resolved: ResolvedMarkdownSource | null;
   error: Error | null;
-  /** Increments on every `src` change so callers can key off it. */
+  /** Increments on every `src` change so callers can react to fresh content. */
   version: number;
 }
 
 /**
  * Normalizes the polymorphic `src` into `{ text, name }`. Fetches URLs,
  * decodes buffers, and unwraps `MarkdownContent`. `version` bumps on every
- * `src` change so consumers can reset their child state on document swap.
+ * `src` change without clearing the previous source while the new content
+ * resolves.
  */
 export function useResolvedMarkdownSource(src: HeySnapMarkdownSrc): State {
   const [state, setState] = useState<State>({ resolved: null, error: null, version: 0 });
 
   useEffect(() => {
     let cancelled = false;
-    setState((prev) => ({ resolved: null, error: null, version: prev.version + 1 }));
+    setState((prev) => ({ ...prev, error: null, version: prev.version + 1 }));
 
     (async () => {
       try {

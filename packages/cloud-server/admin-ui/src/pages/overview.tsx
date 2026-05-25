@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Cloud, Cpu, DollarSign, Laptop, RefreshCw, Server, Sparkles, Users as UsersIcon } from "lucide-react";
+import { Activity, AlertTriangle, Cloud, Cpu, DollarSign, RefreshCw, Server, Sparkles, Users as UsersIcon } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 
@@ -210,7 +210,7 @@ export const OverviewPage = () => {
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div>
                   <CardTitle>Recent machines</CardTitle>
-                  <CardDescription>Latest cloud and local computers.</CardDescription>
+                  <CardDescription>Latest registered computers.</CardDescription>
                 </div>
                 <Button asChild variant="ghost" size="sm">
                   <Link to="/computers">View all</Link>
@@ -279,7 +279,7 @@ export const OverviewPage = () => {
               <CardTitle className="flex items-center gap-2">
                 <Cpu className="h-4 w-4" /> Latest releases
               </CardTitle>
-              <CardDescription>Manifests served to desktop and machine-server clients.</CardDescription>
+              <CardDescription>Manifests served to machine-server hosts.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               {overview.loading ? (
@@ -303,7 +303,7 @@ export const OverviewPage = () => {
                       <TableRow key={release.id}>
                         <TableCell>
                           <Badge variant="outline" className="gap-1 font-medium">
-                            {release.target === "desktop" ? <Laptop className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+                            <Cloud className="h-3 w-3" />
                             {release.target}
                           </Badge>
                         </TableCell>

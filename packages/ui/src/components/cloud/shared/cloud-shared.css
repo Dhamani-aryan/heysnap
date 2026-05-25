@@ -1,0 +1,300 @@
+:root {
+  color-scheme: light;
+  --font-geist-sans:
+    "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-geist-mono:
+    "Geist Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  --foreground: #111111;
+  --home-border: #e5e5e5;
+  --home-input: #ffffff;
+  --accent: #f5f5f5;
+  --cloud-bg: #ffffff;
+  --cloud-surface: #ffffff;
+  --cloud-surface-muted: #f5f5f5;
+  --cloud-border: #e5e5e5;
+  --cloud-border-strong: #d7d7d7;
+  --cloud-text: #1f1f1f;
+  --cloud-input-text: rgba(0, 0, 0, 0.82);
+  --cloud-muted: rgba(0, 0, 0, 0.52);
+  --cloud-danger: #b42318;
+  --cloud-danger-bg: rgba(180, 35, 24, 0.08);
+  --cloud-accent: #111111;
+  --cloud-accent-strong: #000000;
+  --cloud-accent-soft: #f5f5f5;
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --foreground: #f5f5f5;
+  --home-border: #2e2e2e;
+  --home-input: #151515;
+  --accent: #1a1a1a;
+  --cloud-bg: #0f0f11;
+  --cloud-surface: #0f0f11;
+  --cloud-surface-muted: #121214;
+  --cloud-border: #242428;
+  --cloud-border-strong: #3b3b42;
+  --cloud-text: #ffffff;
+  --cloud-input-text: rgba(255, 255, 255, 0.74);
+  --cloud-muted: rgba(255, 255, 255, 0.62);
+  --cloud-danger: #ffb4ab;
+  --cloud-danger-bg: rgba(255, 180, 171, 0.1);
+  --cloud-accent: #f5f5f5;
+  --cloud-accent-strong: #ffffff;
+  --cloud-accent-soft: #1a1a1a;
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+.cloud-auth-shell,
+.cloud-shell {
+  width: 100%;
+  min-height: 100dvh;
+  background: var(--cloud-bg);
+  color: var(--cloud-text);
+}
+
+.cloud-screen-transition {
+  width: 100%;
+  min-height: 100dvh;
+  background: var(--cloud-bg);
+}
+
+.cloud-auth-error,
+.cloud-machines-error {
+  border: 1px solid rgba(180, 35, 24, 0.22);
+  border-radius: 8px;
+  background: var(--cloud-danger-bg);
+  color: var(--cloud-danger);
+  font-size: 13px;
+}
+
+.cloud-primary-button,
+.cloud-local-onboarding-button,
+.cloud-text-button,
+.cloud-icon-button,
+.cloud-machine-row {
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.cloud-primary-button,
+.cloud-local-onboarding-button {
+  display: flex;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  background: var(--cloud-accent);
+  border-radius: 999px;
+  color: var(--cloud-bg);
+  font-weight: 400;
+  padding: 0 14px;
+}
+
+.cloud-primary-button:not(:disabled):hover,
+.cloud-local-onboarding-button:not(:disabled):hover {
+  background: var(--cloud-accent-strong);
+}
+
+.cloud-primary-button:disabled,
+.cloud-local-onboarding-button:disabled,
+.cloud-icon-button:disabled,
+.cloud-machine-row:disabled,
+.cloud-text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cloud-loading,
+.cloud-empty-state {
+  color: var(--cloud-muted);
+  font-size: 14px;
+}
+
+.cloud-loading {
+  align-self: center;
+  justify-self: center;
+}
+
+.cloud-topbar {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  background: var(--cloud-bg);
+  padding: 12px;
+}
+
+.cloud-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-icon-button,
+.cloud-text-button {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cloud-border);
+  background: var(--cloud-surface);
+}
+
+.cloud-icon-button {
+  width: 36px;
+}
+
+.cloud-text-button {
+  gap: 7px;
+  padding: 0 12px;
+  font-weight: 650;
+}
+
+.cloud-icon-button:not(:disabled):hover,
+.cloud-text-button:not(:disabled):hover {
+  border-color: var(--cloud-border-strong);
+  background: var(--cloud-surface-muted);
+}
+
+.cloud-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.16);
+  padding: 18px;
+  animation: cloud-modal-backdrop-enter 180ms ease-out both;
+}
+
+:root.dark .cloud-modal-backdrop {
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.cloud-modal {
+  display: grid;
+  width: min(100%, 380px);
+  gap: 16px;
+  border: 1px solid var(--cloud-border);
+  border-radius: 8px;
+  background: var(--cloud-surface);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.14);
+  padding: 18px;
+  animation: cloud-modal-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes cloud-modal-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cloud-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-modal-backdrop,
+  .cloud-modal {
+    animation: none;
+  }
+}
+
+:root.dark .cloud-modal {
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+}
+
+.cloud-modal h2 {
+  margin: 0;
+  color: var(--cloud-text);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.cloud-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.theme-toggle:hover {
+  background: #f5f5f5;
+  color: #111111;
+}
+
+:root.dark .theme-toggle {
+  color: #a3a3a3;
+}
+
+:root.dark .theme-toggle:hover {
+  background: #1a1a1a;
+  color: #f5f5f5;
+}
+
+@media (max-width: 640px) {
+  .cloud-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cloud-topbar-actions {
+    width: 100%;
+  }
+
+  .cloud-text-button {
+    flex: 1;
+  }
+}

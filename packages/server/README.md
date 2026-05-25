@@ -2,9 +2,8 @@
 
 Machine server for each HeySnap computer.
 
-This server runs on cloud VMs and is embedded by Electron for the local machine.
-It exposes the same filesystem and agent protocols everywhere, so the shared UI
-does not need to know whether a selected machine is local or remote.
+This server runs on cloud VMs. It exposes the filesystem and agent protocols
+used by cloud machines.
 
 ## Responsibilities
 
@@ -70,6 +69,3 @@ machine-server release manifest, and updates the cloud-server provisioning
 defaults for stable releases. Existing VM supervisors download, verify, run
 release migrations as root once per release version, and restart only when
 `/status.safeToRestart` is true.
-
-The Electron local machine embeds this package directly, so local desktop
-machine-server changes ship through the desktop app release.

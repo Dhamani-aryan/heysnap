@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  buildFilesystemPreviewerUrl,
+  deriveFilesystemPreviewBaseUrl,
+  isSameFilesystemPreviewerDocumentUrl,
+  resolveFilesystemPreviewBaseUrl,
+} from "../../src/filesystem/file-preview";
+
+describe("standalone file preview urls", () => {
+  it("derives the local preview base URL from the filesystem websocket URL", () => {
+    expect(deriveFilesystemPreviewBaseUrl("ws://127.0.0.1:4000/filesystem")).toBe("http://127.0.0.1:4000/preview");
+    expect(deriveFilesystemPreviewBaseUrl("wss://machine.example.com/filesystem?accessToken=token")).toBe(
+      "https://machine.example.com/preview?accessToken=token",
+    );
+  });
+
+  it("does not synthesize gateway preview routes when the access session did not provide one", () => {
+    expect(
+      resolveFilesystemPreviewBaseUrl("wss://api.example.com/gateway/computers/cmp_123/filesystem?accessToken=token"),
+    ).toBeNull();
+    expect(
+      resolveFilesystemPreviewBaseUrl(
+        "wss://api.example.com/gateway/computers/cmp_123/filesystem?accessToken=token",
+        "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=token",
+      ),
+    ).toBe("https://api.example.com/gateway/computers/cmp_123/preview?accessToken=token");
+  });
+
+  it("builds iframe URLs without dropping existing access tokens", () => {
+    const url = new URL(buildFilesystemPreviewerUrl(
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=token",
+      "Reports/Budget Sheet.xlsx",
+    ));
+
+    expect(url.pathname).toBe("/gateway/computers/cmp_123/preview");
+    expect(url.searchParams.get("accessToken")).toBe("token");
+    expect(url.searchParams.get("path")).toBe("Reports/Budget Sheet.xlsx");
+    expect(url.searchParams.get("chrome")).toBe("0");
+    expect(url.searchParams.has("v")).toBe(false);
+  });
+
+  it("compares preview document URLs without token-only differences", () => {
+    expect(isSameFilesystemPreviewerDocumentUrl(
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=first&path=src/app.tsx&chrome=0",
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=second&path=src/app.tsx&chrome=0",
+    )).toBe(true);
+
+    expect(isSameFilesystemPreviewerDocumentUrl(
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=first&path=src/app.tsx&chrome=0",
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=first&path=src/other.tsx&chrome=0",
+    )).toBe(false);
+  });
+});

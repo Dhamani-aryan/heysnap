@@ -1,4 +1,4 @@
-import { Cloud, Laptop, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Cloud, Plus, RefreshCw, Trash2 } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -38,11 +38,10 @@ export const ReleasesPage = () => {
   const releases = useAdminQuery(() =>
     adminApi.getOverview().then((data) => data.releases),
   );
-  const [target, setTarget] = React.useState<ReleaseTarget | null>(null);
+  const [publishOpen, setPublishOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<AdminRelease | null>(null);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
 
-  const desktop = (releases.data ?? []).filter((release) => release.target === "desktop");
   const machineServer = (releases.data ?? []).filter((release) => release.target === "machine-server");
 
   const handleDeleteConfirm = async () => {
@@ -66,7 +65,7 @@ export const ReleasesPage = () => {
     <>
       <PageHeader
         title="Releases"
-        description="Release manifests served to desktop installers and machine-server hosts."
+        description="Release manifests served to machine-server hosts."
         actions={
           <Button variant="outline" size="sm" onClick={releases.reload} disabled={releases.loading} className="gap-2">
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
@@ -77,36 +76,23 @@ export const ReleasesPage = () => {
       {releases.error !== null ? (
         <ErrorState message={releases.error} onRetry={releases.reload} />
       ) : (
-        <>
-          <ReleaseCard
-            title="Desktop"
-            description="Electron desktop installers checked at /releases/desktop/latest."
-            icon={<Laptop className="h-4 w-4" />}
-            target="desktop"
-            releases={desktop}
-            loading={releases.loading}
-            onPublish={() => setTarget("desktop")}
-            onDelete={(release) => setDeleteTarget(release)}
-          />
-
-          <ReleaseCard
-            title="Machine server"
-            description="Machine-server host artifacts checked at /releases/machine-server/latest."
-            icon={<Cloud className="h-4 w-4" />}
-            target="machine-server"
-            releases={machineServer}
-            loading={releases.loading}
-            onPublish={() => setTarget("machine-server")}
-            onDelete={(release) => setDeleteTarget(release)}
-          />
-        </>
+        <ReleaseCard
+          title="Machine server"
+          description="Machine-server host artifacts checked at /releases/machine-server/latest."
+          icon={<Cloud className="h-4 w-4" />}
+          target="machine-server"
+          releases={machineServer}
+          loading={releases.loading}
+          onPublish={() => setPublishOpen(true)}
+          onDelete={(release) => setDeleteTarget(release)}
+        />
       )}
 
       <PublishDialog
-        target={target}
-        onClose={() => setTarget(null)}
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
         onPublished={() => {
-          setTarget(null);
+          setPublishOpen(false);
           releases.reload();
         }}
       />
@@ -231,7 +217,6 @@ const ReleaseCard = ({
 
 interface ReleaseFormState {
   channel: string;
-  platform: string;
   version: string;
   downloadUrl: string;
   sha256: string;
@@ -239,9 +224,8 @@ interface ReleaseFormState {
   notes: string;
 }
 
-const emptyForm = (target: ReleaseTarget): ReleaseFormState => ({
+const emptyForm = (): ReleaseFormState => ({
   channel: "stable",
-  platform: target === "desktop" ? "darwin-arm64" : "default",
   version: "",
   downloadUrl: "",
   sha256: "",
@@ -250,49 +234,36 @@ const emptyForm = (target: ReleaseTarget): ReleaseFormState => ({
 });
 
 const PublishDialog = ({
-  target,
+  open,
   onClose,
   onPublished,
 }: {
-  readonly target: ReleaseTarget | null;
+  readonly open: boolean;
   readonly onClose: () => void;
   readonly onPublished: () => void;
 }) => {
-  const [form, setForm] = React.useState<ReleaseFormState>(() => emptyForm(target ?? "desktop"));
+  const [form, setForm] = React.useState<ReleaseFormState>(() => emptyForm());
   const [submitting, setSubmitting] = React.useState(false);
 
   React.useEffect(() => {
-    if (target !== null) {
-      setForm(emptyForm(target));
+    if (open) {
+      setForm(emptyForm());
       setSubmitting(false);
     }
-  }, [target]);
+  }, [open]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (target === null) {
-      return;
-    }
     setSubmitting(true);
     try {
-      if (target === "desktop") {
-        await adminApi.upsertDesktopRelease({
-          channel: form.channel.trim(),
-          platform: form.platform.trim(),
-          version: form.version.trim(),
-          downloadUrl: form.downloadUrl.trim(),
-          notes: form.notes.trim().length > 0 ? form.notes : null,
-        });
-      } else {
-        await adminApi.upsertMachineServerRelease({
-          channel: form.channel.trim(),
-          version: form.version.trim(),
-          downloadUrl: form.downloadUrl.trim(),
-          dockerImage: form.dockerImage.trim().length > 0 ? form.dockerImage.trim() : null,
-          metadata: { sha256: form.sha256.trim() },
-          notes: form.notes.trim().length > 0 ? form.notes : null,
-        });
-      }
+      await adminApi.upsertMachineServerRelease({
+        channel: form.channel.trim(),
+        version: form.version.trim(),
+        downloadUrl: form.downloadUrl.trim(),
+        dockerImage: form.dockerImage.trim().length > 0 ? form.dockerImage.trim() : null,
+        metadata: { sha256: form.sha256.trim() },
+        notes: form.notes.trim().length > 0 ? form.notes : null,
+      });
       toast.success("Release published");
       onPublished();
     } catch (cause) {
@@ -303,10 +274,10 @@ const PublishDialog = ({
   };
 
   return (
-    <Dialog open={target !== null} onOpenChange={(next) => !next && !submitting && onClose()}>
+    <Dialog open={open} onOpenChange={(next) => !next && !submitting && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Publish {target} release</DialogTitle>
+          <DialogTitle>Publish machine-server release</DialogTitle>
           <DialogDescription>
             Releases are upserted by (target, channel, platform). Publishing again replaces the existing manifest.
           </DialogDescription>
@@ -337,71 +308,39 @@ const PublishDialog = ({
             </div>
           </div>
 
-          {target === "desktop" && (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="release-platform">Platform</Label>
-                <Input
-                  id="release-platform"
-                  value={form.platform}
-                  onChange={(event) => setForm({ ...form, platform: event.target.value })}
-                  placeholder="darwin-arm64"
-                  required
-                  disabled={submitting}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="release-download">Download URL</Label>
-                <Input
-                  id="release-download"
-                  value={form.downloadUrl}
-                  onChange={(event) => setForm({ ...form, downloadUrl: event.target.value })}
-                  placeholder="https://downloads.heysnap.xyz/HeySnap-0.1.0-arm64.dmg"
-                  type="url"
-                  required
-                  disabled={submitting}
-                />
-              </div>
-            </>
-          )}
-
-          {target === "machine-server" && (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="release-download">Download URL</Label>
-                <Input
-                  id="release-download"
-                  value={form.downloadUrl}
-                  onChange={(event) => setForm({ ...form, downloadUrl: event.target.value })}
-                  placeholder="https://downloads.heysnap.xyz/machine-server/0.1.0/linux-x64.tar.gz"
-                  type="url"
-                  required
-                  disabled={submitting}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="release-sha256">SHA256</Label>
-                <Input
-                  id="release-sha256"
-                  value={form.sha256}
-                  onChange={(event) => setForm({ ...form, sha256: event.target.value })}
-                  placeholder="artifact checksum"
-                  required
-                  disabled={submitting}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="release-image">Docker image</Label>
-                <Input
-                  id="release-image"
-                  value={form.dockerImage}
-                  onChange={(event) => setForm({ ...form, dockerImage: event.target.value })}
-                  placeholder="optional legacy image"
-                  disabled={submitting}
-                />
-              </div>
-            </>
-          )}
+          <div className="grid gap-2">
+            <Label htmlFor="release-download">Download URL</Label>
+            <Input
+              id="release-download"
+              value={form.downloadUrl}
+              onChange={(event) => setForm({ ...form, downloadUrl: event.target.value })}
+              placeholder="https://downloads.heysnap.xyz/machine-server/0.1.0/linux-x64.tar.gz"
+              type="url"
+              required
+              disabled={submitting}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="release-sha256">SHA256</Label>
+            <Input
+              id="release-sha256"
+              value={form.sha256}
+              onChange={(event) => setForm({ ...form, sha256: event.target.value })}
+              placeholder="artifact checksum"
+              required
+              disabled={submitting}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="release-image">Docker image</Label>
+            <Input
+              id="release-image"
+              value={form.dockerImage}
+              onChange={(event) => setForm({ ...form, dockerImage: event.target.value })}
+              placeholder="optional legacy image"
+              disabled={submitting}
+            />
+          </div>
 
           <div className="grid gap-2">
             <Label htmlFor="release-notes">Notes</Label>

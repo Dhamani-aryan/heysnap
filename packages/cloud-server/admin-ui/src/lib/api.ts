@@ -183,18 +183,6 @@ export const adminApi = {
       `/admin/computers/${encodeURIComponent(computerId)}/identities/${encodeURIComponent(identityId)}/revoke`,
       { method: "POST" },
     ),
-  upsertDesktopRelease: (input: {
-    readonly channel: string;
-    readonly platform: string;
-    readonly version: string;
-    readonly downloadUrl: string;
-    readonly signatureUrl?: string | null;
-    readonly notes?: string | null;
-  }) =>
-    request<{ readonly release: AdminRelease }>("/admin/releases/desktop", {
-      method: "POST",
-      body: input,
-    }),
   upsertMachineServerRelease: (input: {
     readonly channel: string;
     readonly version: string;
