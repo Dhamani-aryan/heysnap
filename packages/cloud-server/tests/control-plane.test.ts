@@ -959,14 +959,112 @@ describe("cloud server machine registration", () => {
     });
     expect(badHeartbeat.status).toBe(401);
   });
+
+  it("auto-sleeps idle cloud machines after the configured idle timeout", async () => {
+    const { app, provisioner } = createTestApp({
+      config: { machineIdleSleepSeconds: 1 },
+    });
+    const auth = await registerUser(app, "idle-user@example.com");
+    const computer = await createComputer(app, auth.token, "Idle VM");
+    const bootstrapToken = provisioner.bootstrapTokens.get(computer.id);
+    const registration = await app.request("/machines/register", {
+      method: "POST",
+      body: JSON.stringify({ computerId: computer.id, bootstrapToken }),
+      headers: { "content-type": "application/json" },
+    });
+    const registered = await registration.json() as {
+      readonly machine: { readonly token: string };
+    };
+    const lastActivityAt = new Date(Date.now() - 2_000).toISOString();
+
+    const heartbeat = await app.request("/machines/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({
+        status: "idle",
+        safeToRestart: false,
+        safeToSleep: true,
+        lastActivityAt,
+        activeSessions: { filesystem: 1, agent: 0, total: 1 },
+      }),
+      headers: {
+        authorization: `Bearer ${registered.machine.token}`,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(heartbeat.status).toBe(200);
+    expect(provisioner.actions).toEqual(["provision", "stop"]);
+    expect(await heartbeat.json()).toMatchObject({
+      computer: {
+        status: "sleeping",
+        machineHealth: {
+          safeToSleep: true,
+          lastActivityAt,
+          autoSleep: {
+            status: "requested",
+            reason: "idle_timeout",
+            thresholdSeconds: 1,
+          },
+        },
+      },
+    });
+  });
+
+  it("keeps active machine heartbeats awake even after the idle timeout", async () => {
+    const { app, provisioner } = createTestApp({
+      config: { machineIdleSleepSeconds: 1 },
+    });
+    const auth = await registerUser(app, "active-user@example.com");
+    const computer = await createComputer(app, auth.token, "Active VM");
+    const bootstrapToken = provisioner.bootstrapTokens.get(computer.id);
+    const registration = await app.request("/machines/register", {
+      method: "POST",
+      body: JSON.stringify({ computerId: computer.id, bootstrapToken }),
+      headers: { "content-type": "application/json" },
+    });
+    const registered = await registration.json() as {
+      readonly machine: { readonly token: string };
+    };
+
+    const heartbeat = await app.request("/machines/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({
+        status: "online",
+        safeToSleep: false,
+        lastActivityAt: new Date(Date.now() - 2_000).toISOString(),
+        activeSessions: { agent: 1, total: 1 },
+      }),
+      headers: {
+        authorization: `Bearer ${registered.machine.token}`,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(heartbeat.status).toBe(200);
+    expect(provisioner.actions).toEqual(["provision"]);
+    expect(await heartbeat.json()).toMatchObject({
+      computer: {
+        status: "online",
+        machineHealth: {
+          safeToSleep: false,
+        },
+      },
+    });
+  });
 });
 
 const createTestApp = (options: {
+  readonly config?: Partial<CloudServerConfig>;
   readonly tunnelRegistry?: TunnelStatusRegistry;
 } = {}) => {
   const store = new InMemoryCloudStore();
   const provisioner = new FakeProvisioner();
-  const app = createApp({ config, store, provisioner, tunnelRegistry: options.tunnelRegistry });
+  const app = createApp({
+    config: { ...config, ...options.config },
+    store,
+    provisioner,
+    tunnelRegistry: options.tunnelRegistry,
+  });
 
   return { app, store, provisioner };
 };

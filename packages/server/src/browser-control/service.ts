@@ -37,6 +37,7 @@ export interface BrowserControlService {
 
 export interface BrowserControlServiceOptions {
   readonly filesystemRootPath?: string;
+  readonly onActivity?: () => void;
 }
 
 export interface BrowserControlStatus {
@@ -296,7 +297,7 @@ type BrowserControlClientMessage =
 export const createBrowserControlService = (
   options: BrowserControlServiceOptions = {},
 ): BrowserControlService => {
-  const broker = new BrowserControlBroker();
+  const broker = new BrowserControlBroker({ onActivity: options.onActivity });
   const socketServer = new WebSocketServer({ noServer: true });
 
   socketServer.on("connection", (webSocket, request) => {
@@ -326,9 +327,15 @@ export const attachBrowserControlWebSocketServer = (
   attachWebSocketUpgradeRoute(server, "/browser-control", service.socketServer);
 };
 
+export interface BrowserControlBrokerOptions {
+  readonly onActivity?: () => void;
+}
+
 export class BrowserControlBroker {
   private readonly clientsByUserId = new Map<string, Set<BrowserControlClient>>();
   private readonly pendingRequests = new Map<string, PendingBrowserControlRequest>();
+
+  constructor(private readonly options: BrowserControlBrokerOptions = {}) {}
 
   attachClient(
     webSocket: WebSocket,
@@ -337,6 +344,7 @@ export class BrowserControlBroker {
       readonly accessSessionId: string;
     },
   ): void {
+    this.options.onActivity?.();
     const client: BrowserControlClient = {
       connectionId: randomUUID(),
       userId: input.userId,
@@ -357,6 +365,7 @@ export class BrowserControlBroker {
     clients.add(client);
 
     webSocket.on("message", (data) => {
+      this.options.onActivity?.();
       this.handleClientMessage(client, data);
     });
     webSocket.on("close", () => {
@@ -380,6 +389,7 @@ export class BrowserControlBroker {
     input: BrowserControlBrokerInput,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<BrowserControlCliResult> {
+    this.options.onActivity?.();
     const client = input.targetUserId === undefined
       ? this.selectLatestClient()
       : this.selectClient(input.targetUserId);

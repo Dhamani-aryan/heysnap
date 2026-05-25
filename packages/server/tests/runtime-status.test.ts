@@ -25,14 +25,17 @@ describe("machine server runtime status", () => {
     expect(await response.json()).toMatchObject({
       ok: true,
       version: "development",
+      lastActivityAt: expect.any(String),
       activeSessions: {
         filesystem: 0,
         agent: 0,
         total: 0,
       },
       safeToRestart: true,
+      safeToSleep: true,
     });
     expect(server.getStatus().safeToRestart).toBe(true);
+    expect(server.getStatus().safeToSleep).toBe(true);
   });
 
   it("marks the server unsafe to restart while websocket sessions are active", async () => {
@@ -46,6 +49,7 @@ describe("machine server runtime status", () => {
           total: 1,
         },
         safeToRestart: false,
+        safeToSleep: true,
       });
     } finally {
       socket.close();

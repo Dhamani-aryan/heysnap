@@ -20,6 +20,7 @@ export interface FilesystemWebSocketOptions {
   readonly root: FilesystemRoot;
   readonly trashFunction?: TrashFunction;
   readonly debounceMs?: number;
+  readonly onActivity?: () => void;
 }
 
 export const attachFilesystemWebSocketServer = (
@@ -34,6 +35,7 @@ export const attachFilesystemWebSocketServer = (
   attachWebSocketUpgradeRoute(server, "/filesystem", socketServer);
 
   socketServer.on("connection", (webSocket, request) => {
+    options.onActivity?.();
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
     const initialPath = requestUrl.searchParams.get("path") ?? undefined;
     const showHidden = parseBoolean(requestUrl.searchParams.get("showHidden"));
@@ -114,6 +116,7 @@ class FilesystemSocketSession {
   }
 
   private async handleRawMessage(data: WebSocket.RawData): Promise<void> {
+    this.options.onActivity?.();
     let message: FilesystemClientMessage;
 
     try {

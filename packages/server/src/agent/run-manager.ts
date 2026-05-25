@@ -16,6 +16,7 @@ const RECENT_RUN_TTL_MS = 10 * 60 * 1000;
 
 export interface AgentRunManagerOptions {
   readonly harness: IAgentHarness;
+  readonly onActivity?: () => void;
 }
 
 export interface StartAgentRunInput {
@@ -87,6 +88,7 @@ export class AgentRunManager {
   constructor(private readonly options: AgentRunManagerOptions) {}
 
   startRun(input: StartAgentRunInput): AgentRunRecord {
+    this.options.onActivity?.();
     this.pruneCompletedRuns();
 
     if (input.edit !== undefined) {
@@ -291,11 +293,13 @@ export class AgentRunManager {
 
       record.status = "completed";
       record.completedAt = Date.now();
+      this.options.onActivity?.();
       record.subscribers.clear();
     } catch (error) {
       const agentError = toAgentError(error);
       record.status = "failed";
       record.completedAt = Date.now();
+      this.options.onActivity?.();
       this.appendEnvelope(record, {
         type: "error",
         data: { code: agentError.code, message: agentError.message },

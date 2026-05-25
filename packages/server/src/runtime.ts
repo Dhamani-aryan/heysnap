@@ -66,6 +66,7 @@ export interface RunningServer {
 export interface MachineServerStatus {
   readonly ok: true;
   readonly version: string;
+  readonly lastActivityAt: string;
   readonly activeSessions: {
     readonly filesystem: number;
     readonly filesystemPreview: number;
@@ -74,6 +75,7 @@ export interface MachineServerStatus {
     readonly total: number;
   };
   readonly safeToRestart: boolean;
+  readonly safeToSleep: boolean;
 }
 
 export const startServer = async (options: StartServerOptions = {}): Promise<RunningServer> => {
@@ -81,6 +83,10 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const host = options.host ?? "127.0.0.1";
   const requestedPort = options.port ?? 4000;
   const version = options.version?.trim() || process.env.MACHINE_SERVER_VERSION?.trim() || "development";
+  let lastActivityAt = new Date();
+  const markActivity = (): void => {
+    lastActivityAt = new Date();
+  };
   await ensureCodexUserConfig();
   const capabilities = new AgentCapabilitiesService();
   await capabilities.initialize();
@@ -88,11 +94,12 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     filesystemRoot: filesystemRoot.absolutePath,
     codexBin: options.codexBin ?? process.env.CODEX_BIN ?? capabilities.getCodexBin(),
   });
-  const agentHttpService = createAgentHttpService({ harness: agentHarness });
+  const agentHttpService = createAgentHttpService({ harness: agentHarness, onActivity: markActivity });
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
   const feedbackHttpService = createFeedbackHttpService({ version });
   const browserControlService = createBrowserControlService({
     filesystemRootPath: filesystemRoot.absolutePath,
+    onActivity: markActivity,
   });
   const filesystemPreviewService = createPreviewService({
     ...options.filesystemPreviewer,
@@ -102,6 +109,11 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   });
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
+    const isStatusRequest = requestUrl.pathname === "/health" || requestUrl.pathname === "/status";
+
+    if (!isStatusRequest) {
+      markActivity();
+    }
 
     if (requestUrl.pathname.startsWith("/browser-control")) {
       void browserControlService.handleRequest(request, response);
@@ -186,9 +198,14 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
 
   const filesystemSocketServer = attachFilesystemWebSocketServer(server, {
     root: filesystemRoot,
+    onActivity: markActivity,
   });
   attachBrowserControlWebSocketServer(server, browserControlService);
   const filesystemPreviewSocketServer = new WebSocketServer({ noServer: true });
+  filesystemPreviewSocketServer.on("connection", (webSocket) => {
+    markActivity();
+    webSocket.on("message", markActivity);
+  });
   bindPreviewWebSocketServer(filesystemPreviewSocketServer, filesystemPreviewService);
   attachWebSocketUpgradeRoute(server, filesystemPreviewService.websocketPath, filesystemPreviewSocketServer);
 
@@ -204,10 +221,12 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
     const browserControl = browserControlService.socketServer.clients.size;
     const agent = agentHttpService.runManager.getActiveRunCount();
     const total = filesystem + filesystemPreview + browserControl + agent;
+    const safeToSleep = agent === 0 && browserControl === 0;
 
     return {
       ok: true,
       version,
+      lastActivityAt: lastActivityAt.toISOString(),
       activeSessions: {
         filesystem,
         filesystemPreview,
@@ -216,6 +235,7 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
         total,
       },
       safeToRestart: total === 0,
+      safeToSleep,
     };
   };
 

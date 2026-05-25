@@ -50,19 +50,23 @@ register_machine() {
 }
 
 send_heartbeat() {
-  local machine_token status_json machine_server_version safe_to_restart machine_status update_state last_update_error body
+  local machine_token status_json machine_server_version safe_to_restart safe_to_sleep last_activity_at machine_status update_state last_update_error body
   machine_token="$(cat "$ANK1015_MACHINE_TOKEN_FILE")"
   status_json="$(machine_status)"
   machine_server_version="${MACHINE_SERVER_VERSION:-}"
   safe_to_restart="true"
+  safe_to_sleep="true"
+  last_activity_at=""
 
   if [ -n "$status_json" ]; then
     machine_server_version="$(printf '%s' "$status_json" | jq -r '.version // env.MACHINE_SERVER_VERSION // ""')"
     safe_to_restart="$(printf '%s' "$status_json" | jq -r '.safeToRestart // true')"
+    safe_to_sleep="$(printf '%s' "$status_json" | jq -r '.safeToSleep // .safeToRestart // true')"
+    last_activity_at="$(printf '%s' "$status_json" | jq -r '.lastActivityAt // ""')"
   fi
 
   machine_status="idle"
-  if [ "$safe_to_restart" != "true" ]; then
+  if [ "$safe_to_sleep" != "true" ]; then
     machine_status="online"
   fi
 
@@ -74,13 +78,17 @@ send_heartbeat() {
     --arg bootstrapVersion "$ANK1015_MACHINE_BOOTSTRAP_VERSION" \
     --arg updateState "$update_state" \
     --arg lastUpdateError "$last_update_error" \
+    --arg lastActivityAt "$last_activity_at" \
     --argjson safeToRestart "$safe_to_restart" \
+    --argjson safeToSleep "$safe_to_sleep" \
     --argjson statusJson "${status_json:-null}" \
     '{
       status: $status,
       machineServerVersion: $machineServerVersion,
       bootstrapVersion: $bootstrapVersion,
       safeToRestart: $safeToRestart,
+      safeToSleep: $safeToSleep,
+      lastActivityAt: (if $lastActivityAt == "" then null else $lastActivityAt end),
       activeSessions: ($statusJson.activeSessions // {}),
       updateState: $updateState,
       lastUpdateError: (if $lastUpdateError == "" then null else $lastUpdateError end),

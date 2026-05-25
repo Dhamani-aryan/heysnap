@@ -4,7 +4,7 @@ import { Hono } from "hono";
 
 import { createOpaqueToken, hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
-import type { CloudStore, ComputerStatus } from "../db/types.js";
+import type { CloudStore, ComputerRecord, ComputerStatus } from "../db/types.js";
 import { serializeFeedbackReport } from "../feedback/serialization.js";
 import {
   buildFeedbackArchiveStorageKey,
@@ -19,11 +19,13 @@ import {
 import { badRequest, forbidden, notFound, unauthorized } from "../shared/errors.js";
 import { serializeComputer } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
+import type { ComputerProvisioner } from "../provisioning/types.js";
 
 export const createMachineRoutes = (
   store: CloudStore,
   config: CloudServerConfig,
   feedbackArchiveStorage: FeedbackArchiveStorage,
+  provisioner: ComputerProvisioner,
 ): Hono => {
   const app = new Hono();
 
@@ -89,15 +91,22 @@ export const createMachineRoutes = (
     const bootstrapVersion = stringField(body, "bootstrapVersion", { maxLength: 120 }) ?? null;
     const now = new Date();
     await store.touchMachineIdentity({ identityId: machine.id, lastUsedAt: now });
+    const existingComputer = await store.getComputerById(machine.computerId);
+
+    if (existingComputer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    const machineHealth = buildMachineHealth(body, {
+      machineServerVersion: machineServerVersion ?? null,
+      bootstrapVersion,
+      reportedAt: now,
+    }, existingComputer.machineHealth);
     const computer = await store.updateComputerById({
       computerId: machine.computerId,
-      status,
+      status: existingComputer.status === "sleeping" ? "sleeping" : status,
       capabilities,
-      machineHealth: buildMachineHealth(body, {
-        machineServerVersion: machineServerVersion ?? null,
-        bootstrapVersion,
-        reportedAt: now,
-      }),
+      machineHealth,
       machineServerVersion,
       lastHeartbeatAt: now,
     });
@@ -111,7 +120,16 @@ export const createMachineRoutes = (
       currentVersion: machineServerVersion ?? computer.machineServerVersion,
     });
 
-    return context.json({ computer: serializeComputer(computer), update });
+    const autoSleptComputer = await maybeAutoSleepIdleComputer({
+      store,
+      provisioner,
+      config,
+      computer,
+      machineHealth,
+      now,
+    });
+
+    return context.json({ computer: serializeComputer(autoSleptComputer ?? computer), update });
   });
 
   app.get("/update-check", async (context) => {
@@ -254,7 +272,9 @@ const buildMachineHealth = (
     readonly bootstrapVersion: string | null;
     readonly reportedAt: Date;
   },
+  previousHealth?: unknown,
 ): Record<string, unknown> => {
+  const previous = readObject(previousHealth) ?? {};
   const machineServerVersion = stringField(body, "machineServerVersion", { maxLength: 120 }) ??
     fallback.machineServerVersion;
   const bootstrapVersion = stringField(body, "bootstrapVersion", { maxLength: 120 }) ??
@@ -266,14 +286,28 @@ const buildMachineHealth = (
     ? body["lastUpdateError"]
     : body["lastUpdateError"] === null ? null : undefined;
   const safeToRestart = typeof body["safeToRestart"] === "boolean" ? body["safeToRestart"] : undefined;
+  const safeToSleep = typeof body["safeToSleep"] === "boolean" ? body["safeToSleep"] : undefined;
+  const lastActivityAt = typeof body["lastActivityAt"] === "string" && body["lastActivityAt"].trim().length <= 120
+    ? body["lastActivityAt"].trim()
+    : undefined;
   const activeSessions = readActiveSessions(body["activeSessions"]);
+  const heartbeatSafeToSleep = isMachineSafeToSleep({
+    safeToSleep,
+    safeToRestart,
+    activeSessions,
+  });
+  const previousIdleSince = typeof previous["idleSince"] === "string" ? previous["idleSince"] : undefined;
+  const idleSince = heartbeatSafeToSleep ? previousIdleSince ?? fallback.reportedAt.toISOString() : undefined;
 
   return {
     reportedAt: fallback.reportedAt.toISOString(),
     ...(machineServerVersion !== null ? { machineServerVersion } : {}),
     ...(bootstrapVersion !== null ? { bootstrapVersion } : {}),
     ...(safeToRestart !== undefined ? { safeToRestart } : {}),
+    ...(safeToSleep !== undefined ? { safeToSleep } : {}),
+    ...(lastActivityAt !== undefined ? { lastActivityAt } : {}),
     ...(activeSessions !== undefined ? { activeSessions } : {}),
+    ...(idleSince !== undefined ? { idleSince } : {}),
     ...(updateState !== undefined ? { updateState } : {}),
     ...(lastUpdateError !== undefined ? { lastUpdateError } : {}),
   };
@@ -293,6 +327,116 @@ const readObject = (value: unknown): Record<string, unknown> | undefined => {
   }
 
   return value as Record<string, unknown>;
+};
+
+const maybeAutoSleepIdleComputer = async (
+  input: {
+    readonly store: CloudStore;
+    readonly provisioner: ComputerProvisioner;
+    readonly config: CloudServerConfig;
+    readonly computer: ComputerRecord;
+    readonly machineHealth: Record<string, unknown>;
+    readonly now: Date;
+  },
+) => {
+  const idleSleepSeconds = input.config.machineIdleSleepSeconds ?? 0;
+
+  if (
+    idleSleepSeconds <= 0 ||
+    input.computer.kind !== "cloud" ||
+    !["online", "idle"].includes(input.computer.status) ||
+    !isMachineSafeToSleep(input.machineHealth)
+  ) {
+    return null;
+  }
+
+  const idleReference = readIsoDate(input.machineHealth["lastActivityAt"]) ??
+    readIsoDate(input.machineHealth["idleSince"]);
+
+  if (idleReference === null) {
+    return null;
+  }
+
+  const idleMs = input.now.getTime() - idleReference.getTime();
+
+  if (idleMs < idleSleepSeconds * 1000) {
+    return null;
+  }
+
+  const idleSeconds = Math.max(0, Math.floor(idleMs / 1000));
+  const autoSleep = {
+    status: "requested",
+    reason: "idle_timeout",
+    requestedAt: input.now.toISOString(),
+    idleSeconds,
+    thresholdSeconds: idleSleepSeconds,
+  };
+
+  try {
+    const providerMetadata = await input.provisioner.stopComputer(input.computer);
+    return await input.store.updateComputerById({
+      computerId: input.computer.id,
+      status: "sleeping",
+      providerMetadata,
+      machineHealth: {
+        ...input.machineHealth,
+        autoSleep,
+      },
+    });
+  } catch (error) {
+    const failedAutoSleep = {
+      ...autoSleep,
+      status: "failed",
+      error: error instanceof Error ? error.message : "Failed to stop idle computer",
+    };
+    console.error(`Failed to auto-sleep computer ${input.computer.id}`, error);
+    await input.store.updateComputerById({
+      computerId: input.computer.id,
+      machineHealth: {
+        ...input.machineHealth,
+        autoSleep: failedAutoSleep,
+      },
+    });
+    return null;
+  }
+};
+
+const isMachineSafeToSleep = (health: {
+  readonly safeToSleep?: unknown;
+  readonly safeToRestart?: unknown;
+  readonly activeSessions?: unknown;
+}): boolean => {
+  if (typeof health.safeToSleep === "boolean") {
+    return health.safeToSleep;
+  }
+
+  if (health.safeToRestart !== true) {
+    return false;
+  }
+
+  const activeTotal = readActiveSessionTotal(health.activeSessions);
+  return activeTotal === undefined || activeTotal === 0;
+};
+
+const readActiveSessionTotal = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+
+  const activeSessions = readObject(value);
+  const total = activeSessions?.["total"];
+
+  return typeof total === "number" && Number.isFinite(total) && total >= 0 ? total : undefined;
+};
+
+const readIsoDate = (value: unknown): Date | null => {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  return Number.isFinite(date.getTime()) ? date : null;
 };
 
 const buildMachineServerUpdate = async (

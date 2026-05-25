@@ -112,7 +112,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.all("/gateway/computers/:computerId/agent/*", async (context) => {
     return await proxyGatewayAgentHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
-  app.route("/machines", createMachineRoutes(options.store, options.config, feedbackArchiveStorage));
+  app.route("/machines", createMachineRoutes(options.store, options.config, feedbackArchiveStorage, provisioner));
   app.route("/llm", createAiGatewayRoutes(options.store, options.config));
   app.route("/firecrawl", createFirecrawlGatewayRoutes(options.store, options.config));
   app.route("/releases", createReleaseRoutes(options.store));

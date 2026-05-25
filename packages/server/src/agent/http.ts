@@ -32,8 +32,11 @@ export interface AgentHttpService {
   readonly handleRequest: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>;
 }
 
-export const createAgentHttpService = (options: { readonly harness: IAgentHarness }): AgentHttpService => {
-  const runManager = new AgentRunManager({ harness: options.harness });
+export const createAgentHttpService = (options: {
+  readonly harness: IAgentHarness;
+  readonly onActivity?: () => void;
+}): AgentHttpService => {
+  const runManager = new AgentRunManager({ harness: options.harness, onActivity: options.onActivity });
 
   return {
     runManager,
