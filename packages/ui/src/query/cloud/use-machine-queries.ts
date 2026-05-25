@@ -20,6 +20,8 @@ import { isAuthFailure, useClearCloudSession } from "./use-cloud-session";
 
 export const MACHINES_REFRESH_INTERVAL_MS = 5000;
 export const SELECTED_MACHINE_STARTUP_POLL_INTERVAL_MS = 2000;
+export const START_MACHINE_TRANSITION_RETRY_DELAY_MS = 2000;
+export const START_MACHINE_TRANSITION_RETRY_LIMIT = 30;
 
 export interface MachineWorkspaceSessionState {
   readonly accessSession: ComputerAccessSessionResponse | null;
@@ -119,17 +121,34 @@ export const useStartMachineMutation = () => {
       machinesStore.getState().markStartRequested(computerId);
       return client.startComputer(token, computerId);
     },
+    retry: (failureCount, error) => shouldRetryStartMachine(failureCount, error),
+    retryDelay: START_MACHINE_TRANSITION_RETRY_DELAY_MS,
     onSuccess: (response) => {
       machinesStore.getState().upsertComputer(response.computer);
       void queryClient.invalidateQueries({ queryKey: cloudQueryKeys.computers() });
     },
     onError: (error, computerId) => {
+      machinesStore.getState().markStartFinished(computerId);
+
       if (isAuthFailure(error)) {
         clearSession();
         return;
       }
+
+      void queryClient.invalidateQueries({ queryKey: cloudQueryKeys.computers() });
     },
   });
+};
+
+export const shouldRetryStartMachine = (failureCount: number, error: unknown): boolean =>
+  failureCount < START_MACHINE_TRANSITION_RETRY_LIMIT && isStartInstanceStateTransitioningError(error);
+
+export const isStartInstanceStateTransitioningError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  return (error as { readonly code?: unknown }).code === "INSTANCE_STATE_TRANSITIONING";
 };
 
 export const useStopMachineMutation = () => {
