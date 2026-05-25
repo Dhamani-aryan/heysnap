@@ -1,7 +1,8 @@
-import { memo, type ReactElement } from "react";
+import { memo, useEffect, useState, type ReactElement } from "react";
 
 import {
   buildFilesystemPreviewerUrl,
+  isSameFilesystemPreviewerDocumentUrl,
   resolveFilesystemPreviewBaseUrl,
 } from "../../../filesystem/file-preview";
 import type { OpenFileTab } from "../finder/finder-types";
@@ -16,8 +17,27 @@ const FileViewer = ({
   readonly websocketUrl: string;
 }): ReactElement => {
   const previewBaseUrl = resolveFilesystemPreviewBaseUrl(websocketUrl, filesystemPreviewBaseUrl);
+  const nextPreviewUrl = previewBaseUrl === null ? null : buildFilesystemPreviewerUrl(previewBaseUrl, file.path);
+  const [previewUrl, setPreviewUrl] = useState(nextPreviewUrl);
 
-  if (previewBaseUrl === null) {
+  useEffect(() => {
+    setPreviewUrl((currentPreviewUrl) => {
+      if (nextPreviewUrl === null) {
+        return null;
+      }
+
+      if (
+        currentPreviewUrl !== null &&
+        isSameFilesystemPreviewerDocumentUrl(currentPreviewUrl, nextPreviewUrl)
+      ) {
+        return currentPreviewUrl;
+      }
+
+      return nextPreviewUrl;
+    });
+  }, [nextPreviewUrl]);
+
+  if (previewUrl === null) {
     return (
       <section className="heysnap-document-viewer" aria-label={file.name}>
         <DocumentViewerState
@@ -32,7 +52,7 @@ const FileViewer = ({
     <section className="heysnap-document-viewer" aria-label={file.name}>
       <iframe
         className="heysnap-file-preview-frame"
-        src={buildFilesystemPreviewerUrl(previewBaseUrl, file.path)}
+        src={previewUrl}
         title={file.name}
       />
     </section>

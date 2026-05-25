@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFilesystemPreviewerUrl,
   deriveFilesystemPreviewBaseUrl,
+  isSameFilesystemPreviewerDocumentUrl,
   resolveFilesystemPreviewBaseUrl,
 } from "../../src/filesystem/file-preview";
 
@@ -37,5 +38,17 @@ describe("standalone file preview urls", () => {
     expect(url.searchParams.get("path")).toBe("Reports/Budget Sheet.xlsx");
     expect(url.searchParams.get("chrome")).toBe("0");
     expect(url.searchParams.has("v")).toBe(false);
+  });
+
+  it("compares preview document URLs without token-only differences", () => {
+    expect(isSameFilesystemPreviewerDocumentUrl(
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=first&path=src/app.tsx&chrome=0",
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=second&path=src/app.tsx&chrome=0",
+    )).toBe(true);
+
+    expect(isSameFilesystemPreviewerDocumentUrl(
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=first&path=src/app.tsx&chrome=0",
+      "https://api.example.com/gateway/computers/cmp_123/preview?accessToken=first&path=src/other.tsx&chrome=0",
+    )).toBe(false);
   });
 });
