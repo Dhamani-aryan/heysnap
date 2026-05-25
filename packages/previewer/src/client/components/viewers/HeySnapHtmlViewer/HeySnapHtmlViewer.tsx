@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 
 import type { BaseViewerProps } from "../../types";
 import { HeySnapCodeViewer } from "../HeySnapCodeViewer";
+import { installFilesystemVoiceHotkeyRelay } from "../../../voiceHotkeyRelay";
 import {
   clampFontSize,
   CodeFontSizeControls,
@@ -109,14 +110,23 @@ export function HeySnapHtmlViewer({
   const currentMode: HtmlViewMode = isControlled ? controlledMode : uncontrolledMode;
   const [fontSize, setFontSize] = useState<number>(() => DEFAULTS.fontSize);
   const [previewError, setPreviewError] = useState<Error | null>(null);
+  const [iframeSrc, setIframeSrc] = useState(src);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
+  const nestedHotkeyCleanupRef = useRef<(() => void) | null>(null);
   onReadyRef.current = onReady;
   onErrorRef.current = onError;
 
   useEffect(() => {
+    setIframeSrc((currentSrc) => buildReloadSrcPreservingPreviewLocation(src, currentSrc, iframeRef.current));
     setPreviewError(null);
   }, [src]);
+
+  useEffect(() => () => {
+    nestedHotkeyCleanupRef.current?.();
+    nestedHotkeyCleanupRef.current = null;
+  }, []);
 
   const handleModeChange = (next: HtmlViewMode) => {
     if (!isControlled) setUncontrolledMode(next);
@@ -222,10 +232,16 @@ export function HeySnapHtmlViewer({
       }}
     >
       <iframe
-        key={src}
+        ref={iframeRef}
         title={title || "HTML preview"}
-        src={src}
-        onLoad={() => window.requestAnimationFrame(() => onReadyRef.current?.())}
+        src={iframeSrc}
+        onLoad={(event) => {
+          nestedHotkeyCleanupRef.current?.();
+          nestedHotkeyCleanupRef.current = event.currentTarget.contentWindow === null
+            ? null
+            : installFilesystemVoiceHotkeyRelay(event.currentTarget.contentWindow);
+          window.requestAnimationFrame(() => onReadyRef.current?.());
+        }}
         onError={() => {
           const error = new Error(`Failed to load HTML preview: ${title}`);
           setPreviewError(error);
@@ -242,3 +258,55 @@ export function HeySnapHtmlViewer({
     </div>,
   );
 }
+
+const buildReloadSrcPreservingPreviewLocation = (
+  nextSrc: string,
+  fallbackCurrentSrc: string,
+  iframe: HTMLIFrameElement | null,
+): string => {
+  try {
+    const nextUrl = new URL(nextSrc, window.location.href);
+    const currentUrl = currentPreviewUrl(iframe, fallbackCurrentSrc);
+    const previewRoot = htmlPreviewRoot(nextUrl);
+
+    if (
+      currentUrl === null ||
+      previewRoot === null ||
+      currentUrl.origin !== nextUrl.origin ||
+      !currentUrl.pathname.startsWith(previewRoot)
+    ) {
+      return nextUrl.toString();
+    }
+
+    const nextVersion = nextUrl.searchParams.get("v");
+
+    if (nextVersion !== null) {
+      currentUrl.searchParams.set("v", nextVersion);
+    }
+
+    return currentUrl.toString();
+  } catch {
+    return nextSrc;
+  }
+};
+
+const currentPreviewUrl = (
+  iframe: HTMLIFrameElement | null,
+  fallbackCurrentSrc: string,
+): URL | null => {
+  try {
+    const href = iframe?.contentWindow?.location.href;
+    return href === undefined ? new URL(fallbackCurrentSrc, window.location.href) : new URL(href);
+  } catch {
+    try {
+      return new URL(fallbackCurrentSrc, window.location.href);
+    } catch {
+      return null;
+    }
+  }
+};
+
+const htmlPreviewRoot = (url: URL): string | null => {
+  const match = /^(.*\/api\/html-preview\/[^/]+\/)/u.exec(url.pathname);
+  return match?.[1] ?? null;
+};

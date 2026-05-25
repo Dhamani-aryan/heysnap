@@ -450,9 +450,10 @@ export function HeySnapCodeViewer({
     );
   }
 
-  // The Editor `key` is bumped on every `src` change so Monaco starts fresh
-  // — fold state, viewState, undo history all reset, matching what consumers
-  // expect when they swap documents.
+  // Keep the Monaco instance mounted across live source updates. The parent
+  // preview app remounts this viewer for a different document; within the
+  // same document, preserving the editor keeps scroll, folds, and local UI
+  // state stable while the value changes underneath.
   return renderShell(
     "ready",
     <div
@@ -466,7 +467,6 @@ export function HeySnapCodeViewer({
       }}
     >
       <Editor
-        key={version}
         value={resolved.text}
         language={resolvedLanguage}
         theme={theme}

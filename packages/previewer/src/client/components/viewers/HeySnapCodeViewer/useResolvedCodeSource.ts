@@ -24,22 +24,22 @@ export interface ResolvedCodeSource {
 interface State {
   resolved: ResolvedCodeSource | null;
   error: Error | null;
-  /** Increments on every `src` change so callers can use it as a remount key. */
+  /** Increments on every `src` change so callers can react to fresh content. */
   version: number;
 }
 
 /**
  * Normalizes the polymorphic `src` prop into `{ text, name, language }`.
  * Fetches URLs, decodes buffers, and infers the language from the filename
- * extension. `version` bumps on every `src` change so the caller can key the
- * editor off it and start fresh on document swap.
+ * extension. `version` bumps on every `src` change without clearing the
+ * previous source while the new content resolves.
  */
 export function useResolvedCodeSource(src: HeySnapCodeSrc): State {
   const [state, setState] = useState<State>({ resolved: null, error: null, version: 0 });
 
   useEffect(() => {
     let cancelled = false;
-    setState((prev) => ({ resolved: null, error: null, version: prev.version + 1 }));
+    setState((prev) => ({ ...prev, error: null, version: prev.version + 1 }));
 
     (async () => {
       try {

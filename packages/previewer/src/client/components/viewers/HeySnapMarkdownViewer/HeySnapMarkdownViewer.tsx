@@ -316,6 +316,10 @@ export function HeySnapMarkdownViewer({
     () => ({ ...createDefaultComponents(assetBaseUrl), ...components }),
     [assetBaseUrl, components],
   );
+  const codeSource = useMemo(
+    () => (resolved === null ? null : makeMarkdownFile(resolved.text, resolved.name)),
+    [resolved],
+  );
 
   // ── Render ──────────────────────────────────────────────────────────
   const title = documentName || resolved?.name || "";
@@ -412,7 +416,7 @@ export function HeySnapMarkdownViewer({
   // download button, and we don't want two stacked toolbars. We wrap the
   // text in a synthetic .md File so the code viewer's language inference
   // picks up `markdown`.
-  if (currentMode === "code") {
+  if (currentMode === "code" && codeSource !== null) {
     return renderShell(
       "ready",
       <div
@@ -426,10 +430,7 @@ export function HeySnapMarkdownViewer({
         }}
       >
         <HeySnapCodeViewer
-          // Bump on src changes so the editor starts fresh — matches the
-          // remount behavior the code viewer applies internally.
-          key={version}
-          src={makeMarkdownFile(resolved.text, resolved.name)}
+          src={codeSource}
           language="markdown"
           showHeader={false}
           // Honour the consumer's body background here too so the inner
