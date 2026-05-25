@@ -24,6 +24,7 @@ import type {
 import { serializeAdminFeedbackReport } from "../feedback/serialization.js";
 import type { FeedbackArchiveStorage } from "../feedback/storage.js";
 import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
+import { toStartComputerError } from "../provisioning/errors.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
 import {
   serializeReleaseManifest,
@@ -32,6 +33,7 @@ import {
 } from "../releases/routes.js";
 import type { AppVariables } from "../shared/context.js";
 import { badRequest, notFound, unauthorized } from "../shared/errors.js";
+import { clearSleepMachineHealth } from "../shared/machine-health.js";
 import { serializeComputer, serializeUser } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
 
@@ -474,11 +476,19 @@ export const createAdminRoutes = (
 
   app.post("/computers/:computerId/start", async (context) => {
     const computer = await readComputer(store, context.req.param("computerId"));
-    const providerMetadata = await provisioner.startComputer(computer);
+    let providerMetadata: Record<string, unknown>;
+
+    try {
+      providerMetadata = await provisioner.startComputer(computer);
+    } catch (error) {
+      throw toStartComputerError(error);
+    }
+
     const updated = await store.updateComputerById({
       computerId: computer.id,
       status: "starting",
       providerMetadata,
+      machineHealth: clearSleepMachineHealth(computer.machineHealth),
     });
 
     return context.json({
@@ -513,6 +523,7 @@ export const createAdminRoutes = (
       computerId: computer.id,
       status: "starting",
       providerMetadata,
+      machineHealth: clearSleepMachineHealth(computer.machineHealth),
     });
 
     return context.json({
