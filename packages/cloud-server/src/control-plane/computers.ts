@@ -18,6 +18,7 @@ import {
 } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
 import { requireAuth } from "../auth/middleware.js";
+import { logger } from "../shared/logger.js";
 
 export const createComputerRoutes = (
   store: CloudStore,
@@ -188,6 +189,15 @@ export const createComputerRoutes = (
       userId: user.id,
       computerId: computer.id,
     });
+    logger.info({
+      event: "cloud.access_session.created",
+      userId: user.id,
+      computerId: computer.id,
+      accessSessionId: result.accessSession.id,
+      expiresAt: result.accessSession.expiresAt.toISOString(),
+      tunnelConnected: tunnelRegistry.isConnected(computer.id),
+      computerStatus: computer.status,
+    }, "Created computer access session");
 
     return context.json({
       accessSession: serializeComputerAccessSession(result.accessSession, result.token),
