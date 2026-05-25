@@ -471,6 +471,62 @@ describe("cloud server computer inventory", () => {
     expect(provisioner.actions).toEqual(["provision", "start", "stop", "restart"]);
   });
 
+  it("clears stale sleep health when starting a sleeping computer", async () => {
+    const { app, store } = createTestApp();
+    const owner = await registerUser(app, "sleep-health-owner@example.com");
+    const computer = await createComputer(app, owner.token, "Sleep Health VM");
+    await store.updateComputerForUser({
+      userId: owner.userId,
+      computerId: computer.id,
+      status: "sleeping",
+      machineHealth: {
+        idleSince: "2026-05-25T11:58:00.000Z",
+        lastActivityAt: "2026-05-25T11:58:00.000Z",
+        autoSleep: {
+          status: "requested",
+          reason: "idle_timeout",
+        },
+        machineServerVersion: "0.4.17",
+        safeToRestart: true,
+      },
+    });
+
+    const start = await app.request(`/computers/${computer.id}/start`, {
+      method: "POST",
+      headers: authHeaders(owner.token),
+    });
+
+    expect(start.status).toBe(200);
+    const body = await start.json() as ComputerResponse;
+    expect(body.computer.status).toBe("starting");
+    expect(body.computer.machineHealth).toEqual({
+      machineServerVersion: "0.4.17",
+      safeToRestart: true,
+    });
+  });
+
+  it("returns a retryable conflict when AWS is still finishing a state transition", async () => {
+    const { app, provisioner } = createTestApp();
+    const owner = await registerUser(app, "transition-owner@example.com");
+    const computer = await createComputer(app, owner.token, "Transition VM");
+    provisioner.startError = Object.assign(new Error("instance is stopping"), {
+      Code: "IncorrectInstanceState",
+    });
+
+    const start = await app.request(`/computers/${computer.id}/start`, {
+      method: "POST",
+      headers: authHeaders(owner.token),
+    });
+
+    expect(start.status).toBe(409);
+    expect(await start.json()).toMatchObject({
+      error: {
+        code: "INSTANCE_STATE_TRANSITIONING",
+        message: "Machine is still finishing sleep. Retrying shortly.",
+      },
+    });
+  });
+
 });
 
 describe("cloud server computer access sessions", () => {
@@ -1051,6 +1107,68 @@ describe("cloud server machine registration", () => {
       },
     });
   });
+
+  it("does not immediately auto-sleep a machine after wake clears stale idle health", async () => {
+    const { app, provisioner, store } = createTestApp({
+      config: { machineIdleSleepSeconds: 1 },
+    });
+    const auth = await registerUser(app, "wake-idle-user@example.com");
+    const computer = await createComputer(app, auth.token, "Wake Idle VM");
+    const bootstrapToken = provisioner.bootstrapTokens.get(computer.id);
+    const registration = await app.request("/machines/register", {
+      method: "POST",
+      body: JSON.stringify({ computerId: computer.id, bootstrapToken }),
+      headers: { "content-type": "application/json" },
+    });
+    const registered = await registration.json() as {
+      readonly machine: { readonly token: string };
+    };
+    await store.updateComputerForUser({
+      userId: auth.userId,
+      computerId: computer.id,
+      status: "sleeping",
+      machineHealth: {
+        idleSince: new Date(Date.now() - 60_000).toISOString(),
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        autoSleep: {
+          status: "requested",
+          reason: "idle_timeout",
+        },
+        safeToRestart: true,
+      },
+    });
+
+    const start = await app.request(`/computers/${computer.id}/start`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    expect(start.status).toBe(200);
+
+    const heartbeat = await app.request("/machines/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({
+        status: "idle",
+        safeToRestart: true,
+        activeSessions: 0,
+      }),
+      headers: {
+        authorization: `Bearer ${registered.machine.token}`,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(heartbeat.status).toBe(200);
+    expect(provisioner.actions).toEqual(["provision", "start"]);
+    expect(await heartbeat.json()).toMatchObject({
+      computer: {
+        status: "idle",
+        machineHealth: {
+          safeToRestart: true,
+          activeSessions: 0,
+        },
+      },
+    });
+  });
 });
 
 const createTestApp = (options: {
@@ -1156,6 +1274,7 @@ interface ComputerResponse {
     readonly status: string;
     readonly providerMetadata: unknown;
     readonly capabilities: unknown;
+    readonly machineHealth?: unknown;
     readonly machineServerVersion: string | null;
     readonly tunnelConnected: boolean;
   };
@@ -1181,6 +1300,7 @@ interface AccessSessionResponse {
 class FakeProvisioner implements ComputerProvisioner {
   readonly actions: string[] = [];
   readonly bootstrapTokens = new Map<string, string>();
+  startError: unknown = null;
 
   async provisionComputer(input: {
     readonly computer: ComputerRecord;
@@ -1202,6 +1322,10 @@ class FakeProvisioner implements ComputerProvisioner {
   }
 
   async startComputer(computer: ComputerRecord) {
+    if (this.startError !== null) {
+      throw this.startError;
+    }
+
     this.actions.push("start");
     return { ...(computer.providerMetadata as Record<string, unknown>), lastAction: "start" };
   }

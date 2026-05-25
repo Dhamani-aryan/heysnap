@@ -6,10 +6,12 @@ import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerRecord } from "../db/types.js";
 import type { GatewayAccessService } from "../gateway/access-sessions.js";
 import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
+import { toStartComputerError } from "../provisioning/errors.js";
 import { getDev8gbPreset } from "../provisioning/presets.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
 import type { AppVariables } from "../shared/context.js";
 import { conflict, HttpError, notFound } from "../shared/errors.js";
+import { clearSleepMachineHealth } from "../shared/machine-health.js";
 import {
   serializeComputer,
   serializeComputerAccessSession,
@@ -131,12 +133,20 @@ export const createComputerRoutes = (
   app.post("/:computerId/start", async (context) => {
     const user = context.get("currentUser");
     const computer = await readOwnedComputer(store, user.id, context.req.param("computerId"));
-    const providerMetadata = await provisioner.startComputer(computer);
+    let providerMetadata: Record<string, unknown>;
+
+    try {
+      providerMetadata = await provisioner.startComputer(computer);
+    } catch (error) {
+      throw toStartComputerError(error);
+    }
+
     const updated = await store.updateComputerForUser({
       userId: user.id,
       computerId: computer.id,
       status: "starting",
       providerMetadata,
+      machineHealth: clearSleepMachineHealth(computer.machineHealth),
     });
 
     return context.json({ computer: serializeUserComputer(updated ?? computer, tunnelRegistry) });
@@ -165,6 +175,7 @@ export const createComputerRoutes = (
       computerId: computer.id,
       status: "starting",
       providerMetadata,
+      machineHealth: clearSleepMachineHealth(computer.machineHealth),
     });
 
     return context.json({ computer: serializeUserComputer(updated ?? computer, tunnelRegistry) });
