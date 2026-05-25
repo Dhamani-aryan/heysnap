@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { watch, type FSWatcher } from "chokidar";
 
+import { errorToLog, logger } from "../shared/logger.js";
 import { FilesystemError, toFilesystemError } from "./errors.js";
 import { FilesystemService, type TrashFunction } from "./service.js";
 import { resolveClientPath, toClientPath } from "./paths.js";
@@ -72,6 +74,8 @@ interface MutableFilesystemViewState {
 }
 
 class FilesystemSocketSession {
+  private readonly sessionId = randomUUID();
+  private readonly openedAt = Date.now();
   private readonly service: FilesystemService;
   private readonly debounceMs: number;
   private activePath = "";
@@ -79,6 +83,8 @@ class FilesystemSocketSession {
   private watcher: FSWatcher | null = null;
   private watchTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private messagesIn = 0;
+  private messagesOut = 0;
 
   constructor(
     private readonly webSocket: WebSocket,
@@ -93,6 +99,13 @@ class FilesystemSocketSession {
   }
 
   async start(): Promise<void> {
+    logger.info({
+      event: "filesystem_ws.open",
+      sessionId: this.sessionId,
+      rootName: this.options.root.name,
+      initialPath: this.options.initialPath,
+      showHidden: this.showHidden,
+    }, "Filesystem websocket opened");
     const initialViewState = await this.readViewState();
     this.send({
       type: "hello",
@@ -102,12 +115,31 @@ class FilesystemSocketSession {
     });
 
     this.webSocket.on("message", (data) => {
+      this.messagesIn += 1;
       void this.handleRawMessage(data);
     });
-    this.webSocket.on("close", () => {
+    this.webSocket.on("close", (code, reason) => {
+      logger.info({
+        event: "filesystem_ws.close",
+        sessionId: this.sessionId,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        ageMs: Date.now() - this.openedAt,
+        activePath: this.activePath,
+        showHidden: this.showHidden,
+        messagesIn: this.messagesIn,
+        messagesOut: this.messagesOut,
+      }, "Filesystem websocket closed");
       void this.close();
     });
-    this.webSocket.on("error", () => {
+    this.webSocket.on("error", (error) => {
+      logger.error({
+        event: "filesystem_ws.error",
+        sessionId: this.sessionId,
+        err: errorToLog(error),
+        ageMs: Date.now() - this.openedAt,
+        activePath: this.activePath,
+      }, "Filesystem websocket errored");
       void this.close();
     });
 
@@ -123,6 +155,12 @@ class FilesystemSocketSession {
       message = parseClientMessage(data);
     } catch (error) {
       const filesystemError = toFilesystemError(error);
+      logger.warn({
+        event: "filesystem_ws.invalid_message",
+        sessionId: this.sessionId,
+        code: filesystemError.code,
+        message: filesystemError.message,
+      }, "Invalid filesystem websocket message");
       this.sendError(undefined, filesystemError.code, filesystemError.message);
       return;
     }
@@ -300,6 +338,7 @@ class FilesystemSocketSession {
 
   private send(message: FilesystemServerMessage): void {
     if (this.webSocket.readyState === WebSocket.OPEN) {
+      this.messagesOut += 1;
       this.webSocket.send(JSON.stringify(message));
     }
   }
