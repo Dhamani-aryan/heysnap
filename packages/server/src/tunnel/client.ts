@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 
 import { WebSocket, type RawData } from "ws";
+
+import { errorToLog, logger, sanitizeUrlPath } from "../shared/logger.js";
 
 export interface MachineTunnelClientOptions {
   readonly cloudServerPublicUrl: string;
@@ -21,6 +24,10 @@ class MachineTunnelClient {
   private readonly httpAbortControllers = new Map<string, AbortController>();
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private cloudTunnelId: string | null = null;
+  private cloudTunnelOpenedAt = 0;
+  private cloudMessagesIn = 0;
+  private cloudMessagesOut = 0;
 
   constructor(private readonly options: MachineTunnelClientOptions) {}
 
@@ -33,6 +40,11 @@ class MachineTunnelClient {
       return;
     }
 
+    logger.info({
+      event: "machine_tunnel_client.reconnect_scheduled",
+      computerId: this.options.computerId,
+      delayMs,
+    }, "Machine tunnel reconnect scheduled");
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       void this.connect();
@@ -47,10 +59,27 @@ class MachineTunnelClient {
     const token = await this.readToken();
 
     if (token === null) {
+      logger.warn({
+        event: "machine_tunnel_client.token_missing",
+        computerId: this.options.computerId,
+        tokenFile: this.options.tokenFile,
+      }, "Machine tunnel token is missing");
       this.connectSoon(this.options.reconnectMs ?? 5000);
       return;
     }
 
+    const cloudTunnelId = randomUUID();
+    this.cloudTunnelId = cloudTunnelId;
+    this.cloudTunnelOpenedAt = Date.now();
+    this.cloudMessagesIn = 0;
+    this.cloudMessagesOut = 0;
+    logger.info({
+      event: "machine_tunnel_client.connect_start",
+      computerId: this.options.computerId,
+      cloudTunnelId,
+      url: sanitizeUrlPath(buildTunnelUrl(this.options.cloudServerPublicUrl)),
+      localPort: this.options.localPort,
+    }, "Machine tunnel connecting");
     const webSocket = new WebSocket(buildTunnelUrl(this.options.cloudServerPublicUrl), {
       headers: {
         authorization: `Bearer ${token}`,
@@ -59,18 +88,40 @@ class MachineTunnelClient {
     this.cloudWebSocket = webSocket;
 
     webSocket.on("open", () => {
-      console.log(`machine tunnel connected for ${this.options.computerId}`);
+      logger.info({
+        event: "machine_tunnel_client.open",
+        computerId: this.options.computerId,
+        cloudTunnelId,
+      }, "Machine tunnel connected");
     });
     webSocket.on("message", (data) => {
+      this.cloudMessagesIn += 1;
       this.handleCloudMessage(data);
     });
-    webSocket.on("close", () => {
+    webSocket.on("close", (code, reason) => {
+      logger.warn({
+        event: "machine_tunnel_client.close",
+        computerId: this.options.computerId,
+        cloudTunnelId,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        ageMs: Date.now() - this.cloudTunnelOpenedAt,
+        localConnectionCount: this.localConnections.size,
+        httpRequestCount: this.httpAbortControllers.size,
+        messagesIn: this.cloudMessagesIn,
+        messagesOut: this.cloudMessagesOut,
+      }, "Machine tunnel closed");
       this.closeLocalConnections(1011, "Cloud tunnel closed");
       this.cloudWebSocket = null;
       this.connectSoon(this.options.reconnectMs ?? 5000);
     });
     webSocket.on("error", (error) => {
-      console.error("machine tunnel error", error);
+      logger.error({
+        event: "machine_tunnel_client.error",
+        computerId: this.options.computerId,
+        cloudTunnelId,
+        err: errorToLog(error),
+      }, "Machine tunnel error");
       webSocket.close();
     });
   }
@@ -107,6 +158,7 @@ class MachineTunnelClient {
         }
 
         if (localConnection.opened && localConnection.webSocket.readyState === WebSocket.OPEN) {
+          localConnection.messagesOut += 1;
           localConnection.webSocket.send(tunnelPayloadToRawData(message));
         } else {
           localConnection.pendingData.push(message);
@@ -206,19 +258,41 @@ class MachineTunnelClient {
     const localConnection: LocalTunnelConnection = {
       webSocket: localWebSocket,
       opened: false,
+      openedAt: Date.now(),
+      path,
+      messagesIn: 0,
+      messagesOut: 0,
       pendingData: [],
     };
 
     this.localConnections.set(connectionId, localConnection);
+    logger.info({
+      event: "machine_tunnel_client.local_ws.connect_start",
+      computerId: this.options.computerId,
+      cloudTunnelId: this.cloudTunnelId,
+      connectionId,
+      path: sanitizeUrlPath(path),
+      userId: metadata?.userId,
+      accessSessionId: metadata?.accessSessionId,
+    }, "Opening local websocket for tunneled gateway connection");
     localWebSocket.on("open", () => {
       localConnection.opened = true;
+      logger.info({
+        event: "machine_tunnel_client.local_ws.open",
+        computerId: this.options.computerId,
+        cloudTunnelId: this.cloudTunnelId,
+        connectionId,
+        path: sanitizeUrlPath(path),
+      }, "Local websocket opened");
       this.sendToCloud({ type: "openResult", connectionId, ok: true });
 
       for (const message of localConnection.pendingData.splice(0)) {
+        localConnection.messagesOut += 1;
         localWebSocket.send(tunnelPayloadToRawData(message));
       }
     });
     localWebSocket.on("message", (data, isBinary) => {
+      localConnection.messagesIn += 1;
       this.sendToCloud({
         type: "data",
         connectionId,
@@ -227,6 +301,18 @@ class MachineTunnelClient {
     });
     localWebSocket.on("close", (code, reason) => {
       this.localConnections.delete(connectionId);
+      logger.info({
+        event: "machine_tunnel_client.local_ws.close",
+        computerId: this.options.computerId,
+        cloudTunnelId: this.cloudTunnelId,
+        connectionId,
+        path: sanitizeUrlPath(path),
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        ageMs: Date.now() - localConnection.openedAt,
+        messagesIn: localConnection.messagesIn,
+        messagesOut: localConnection.messagesOut,
+      }, "Local websocket closed");
       this.sendToCloud({
         type: "close",
         connectionId,
@@ -236,6 +322,15 @@ class MachineTunnelClient {
     });
     localWebSocket.on("error", (error) => {
       this.localConnections.delete(connectionId);
+      logger.error({
+        event: "machine_tunnel_client.local_ws.error",
+        computerId: this.options.computerId,
+        cloudTunnelId: this.cloudTunnelId,
+        connectionId,
+        path: sanitizeUrlPath(path),
+        err: errorToLog(error),
+        ageMs: Date.now() - localConnection.openedAt,
+      }, "Local websocket error");
 
       if (!localConnection.opened) {
         this.sendToCloud({
@@ -250,6 +345,7 @@ class MachineTunnelClient {
 
   private sendToCloud(message: MachineTunnelMessage): void {
     if (this.cloudWebSocket?.readyState === WebSocket.OPEN) {
+      this.cloudMessagesOut += 1;
       this.cloudWebSocket.send(JSON.stringify(message));
     }
   }
@@ -266,6 +362,10 @@ class MachineTunnelClient {
 interface LocalTunnelConnection {
   readonly webSocket: WebSocket;
   opened: boolean;
+  readonly openedAt: number;
+  readonly path: string;
+  messagesIn: number;
+  messagesOut: number;
   readonly pendingData: Extract<CloudTunnelMessage, { readonly type: "data" }>[];
 }
 
