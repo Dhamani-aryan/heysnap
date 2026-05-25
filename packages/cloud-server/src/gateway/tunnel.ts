@@ -8,6 +8,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerAccessSessionRecord, MachineIdentityRecord } from "../db/types.js";
+import { errorToLog, logger, sanitizeUrlPath } from "../shared/logger.js";
 import type { GatewayAccessService } from "./access-sessions.js";
 
 export type GatewayRoute = "filesystem" | "browser-control" | "preview";
@@ -64,7 +65,18 @@ export class MachineTunnelRegistry {
   private readonly tunnels = new Map<string, MachineTunnel>();
 
   set(computerId: string, tunnel: MachineTunnel): void {
-    this.tunnels.get(computerId)?.close(1012, "Replaced by a newer tunnel");
+    const previous = this.tunnels.get(computerId);
+
+    if (previous !== undefined) {
+      logger.warn({
+        event: "machine_tunnel.replaced",
+        computerId,
+        previousTunnelId: previous.tunnelId,
+        nextTunnelId: tunnel.tunnelId,
+      }, "Machine tunnel replaced by a newer tunnel");
+      previous.close(1012, "Replaced by a newer tunnel");
+    }
+
     this.tunnels.set(computerId, tunnel);
   }
 
@@ -135,7 +147,11 @@ export const attachGatewayTunnelServer = (
           });
         })
         .catch((error) => {
-          console.error(error);
+          logger.error({
+            event: "machine_tunnel.upgrade_error",
+            err: errorToLog(error),
+            path: sanitizeUrlPath(request.url),
+          }, "Tunnel authentication failed");
           rejectUpgrade(socket, 500, "Tunnel authentication failed");
         });
       return;
@@ -144,6 +160,11 @@ export const attachGatewayTunnelServer = (
     const routeMatch = matchGatewayRoute(requestUrl.pathname);
 
     if (routeMatch === null) {
+      logger.warn({
+        event: "gateway_ws.upgrade_rejected",
+        reason: "unknown_route",
+        path: sanitizeUrlPath(request.url),
+      }, "Rejected gateway websocket upgrade");
       rejectUpgrade(socket, 404, "Unknown WebSocket route");
       return;
     }
@@ -157,6 +178,13 @@ export const attachGatewayTunnelServer = (
     )
       .then((accessSession) => {
         if (accessSession === null) {
+          logger.warn({
+            event: "gateway_ws.upgrade_rejected",
+            reason: "invalid_access_token",
+            computerId: routeMatch.computerId,
+            route: routeMatch.route,
+            path: sanitizeUrlPath(request.url),
+          }, "Rejected gateway websocket upgrade");
           rejectUpgrade(socket, 401, "Invalid gateway access token");
           return;
         }
@@ -164,6 +192,15 @@ export const attachGatewayTunnelServer = (
         const tunnel = registry.get(routeMatch.computerId);
 
         if (tunnel === undefined) {
+          logger.warn({
+            event: "gateway_ws.upgrade_rejected",
+            reason: "machine_tunnel_not_connected",
+            computerId: routeMatch.computerId,
+            route: routeMatch.route,
+            accessSessionId: accessSession.id,
+            userId: accessSession.userId,
+            path: sanitizeUrlPath(request.url),
+          }, "Rejected gateway websocket upgrade");
           rejectUpgrade(socket, 503, "Machine tunnel is not connected");
           return;
         }
@@ -181,7 +218,13 @@ export const attachGatewayTunnelServer = (
         });
       })
       .catch((error) => {
-        console.error(error);
+        logger.error({
+          event: "gateway_ws.upgrade_error",
+          err: errorToLog(error),
+          computerId: routeMatch.computerId,
+          route: routeMatch.route,
+          path: sanitizeUrlPath(request.url),
+        }, "Gateway websocket upgrade failed");
         rejectUpgrade(socket, 500, "Gateway upgrade failed");
       });
   });
@@ -190,26 +233,58 @@ export const attachGatewayTunnelServer = (
 };
 
 export class MachineTunnel {
+  readonly tunnelId = randomUUID();
   private readonly gatewayConnections = new Map<string, WebSocket>();
+  private readonly gatewayConnectionStats = new Map<string, GatewayConnectionStats>();
   private readonly pendingHttpRequests = new Map<string, PendingHttpRequest>();
   private readonly pendingHttpStreams = new Map<string, PendingHttpStream>();
   private readonly activeHttpStreams = new Map<string, ActiveHttpStream>();
+  private readonly openedAt = Date.now();
+  private messagesFromMachine = 0;
+  private messagesToMachine = 0;
 
   constructor(
     readonly computerId: string,
     private readonly machineWebSocket: WebSocket,
     private readonly registry: MachineTunnelRegistry,
   ) {
+    logger.info({
+      event: "machine_tunnel.open",
+      computerId: this.computerId,
+      tunnelId: this.tunnelId,
+    }, "Machine tunnel opened");
     this.machineWebSocket.on("message", (data) => {
+      this.messagesFromMachine += 1;
       this.handleMachineMessage(data);
     });
-    this.machineWebSocket.on("close", () => {
+    this.machineWebSocket.on("close", (code, reason) => {
+      logger.warn({
+        event: "machine_tunnel.close",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        ageMs: Date.now() - this.openedAt,
+        gatewayConnectionCount: this.gatewayConnections.size,
+        pendingHttpRequestCount: this.pendingHttpRequests.size,
+        pendingHttpStreamCount: this.pendingHttpStreams.size,
+        activeHttpStreamCount: this.activeHttpStreams.size,
+        messagesFromMachine: this.messagesFromMachine,
+        messagesToMachine: this.messagesToMachine,
+      }, "Machine tunnel closed");
       this.closeGatewayConnections(1011, "Machine tunnel closed");
       this.rejectPendingHttpRequests(new Error("Machine tunnel closed"));
       this.rejectHttpStreams(new Error("Machine tunnel closed"));
       this.registry.delete(this.computerId, this);
     });
-    this.machineWebSocket.on("error", () => {
+    this.machineWebSocket.on("error", (error) => {
+      logger.error({
+        event: "machine_tunnel.error",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        err: errorToLog(error),
+        ageMs: Date.now() - this.openedAt,
+      }, "Machine tunnel errored");
       this.closeGatewayConnections(1011, "Machine tunnel errored");
       this.rejectPendingHttpRequests(new Error("Machine tunnel errored"));
       this.rejectHttpStreams(new Error("Machine tunnel errored"));
@@ -226,9 +301,27 @@ export class MachineTunnel {
     },
   ): void {
     const connectionId = randomUUID();
+    const stats: GatewayConnectionStats = {
+      openedAt: Date.now(),
+      route: input.route,
+      messagesFromGateway: 0,
+      messagesToGateway: 0,
+    };
     this.gatewayConnections.set(connectionId, gatewayWebSocket);
+    this.gatewayConnectionStats.set(connectionId, stats);
+    logger.info({
+      event: "gateway_ws.open",
+      computerId: this.computerId,
+      tunnelId: this.tunnelId,
+      gatewayConnectionId: connectionId,
+      route: input.route,
+      path: sanitizeUrlPath(input.targetPath),
+      userId: input.metadata?.userId,
+      accessSessionId: input.metadata?.accessSessionId,
+    }, "Gateway websocket opened");
 
     gatewayWebSocket.on("message", (data, isBinary) => {
+      stats.messagesFromGateway += 1;
       this.sendToMachine({
         type: "data",
         connectionId,
@@ -237,6 +330,19 @@ export class MachineTunnel {
     });
     gatewayWebSocket.on("close", (code, reason) => {
       this.gatewayConnections.delete(connectionId);
+      this.gatewayConnectionStats.delete(connectionId);
+      logger.info({
+        event: "gateway_ws.close",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        gatewayConnectionId: connectionId,
+        route: input.route,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        ageMs: Date.now() - stats.openedAt,
+        messagesFromGateway: stats.messagesFromGateway,
+        messagesToGateway: stats.messagesToGateway,
+      }, "Gateway websocket closed");
       this.sendToMachine({
         type: "close",
         connectionId,
@@ -244,8 +350,18 @@ export class MachineTunnel {
         reason: reason.toString("utf8"),
       });
     });
-    gatewayWebSocket.on("error", () => {
+    gatewayWebSocket.on("error", (error) => {
       this.gatewayConnections.delete(connectionId);
+      this.gatewayConnectionStats.delete(connectionId);
+      logger.error({
+        event: "gateway_ws.error",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        gatewayConnectionId: connectionId,
+        route: input.route,
+        err: errorToLog(error),
+        ageMs: Date.now() - stats.openedAt,
+      }, "Gateway websocket errored");
       this.sendToMachine({
         type: "close",
         connectionId,
@@ -351,10 +467,15 @@ export class MachineTunnel {
         if (!message.ok) {
           gatewayWebSocket.close(1011, message.error ?? "Machine failed to open route");
           this.gatewayConnections.delete(message.connectionId);
+          this.gatewayConnectionStats.delete(message.connectionId);
         }
         break;
       case "data":
         if (gatewayWebSocket.readyState === WebSocket.OPEN) {
+          const stats = this.gatewayConnectionStats.get(message.connectionId);
+          if (stats !== undefined) {
+            stats.messagesToGateway += 1;
+          }
           gatewayWebSocket.send(tunnelPayloadToRawData(message));
         }
         break;
@@ -364,12 +485,14 @@ export class MachineTunnel {
           message.reason ?? "Machine closed route",
         );
         this.gatewayConnections.delete(message.connectionId);
+        this.gatewayConnectionStats.delete(message.connectionId);
         break;
     }
   }
 
   private sendToMachine(message: CloudTunnelMessage): void {
     if (this.machineWebSocket.readyState === WebSocket.OPEN) {
+      this.messagesToMachine += 1;
       this.machineWebSocket.send(JSON.stringify(message));
     }
   }
@@ -380,6 +503,7 @@ export class MachineTunnel {
     }
 
     this.gatewayConnections.clear();
+    this.gatewayConnectionStats.clear();
   }
 
   private resolveHttpResponse(message: MachineHttpResponseMessage): void {
@@ -499,6 +623,13 @@ interface PendingHttpStream {
 
 interface ActiveHttpStream {
   readonly controller: ReadableStreamDefaultController<Uint8Array>;
+}
+
+interface GatewayConnectionStats {
+  readonly openedAt: number;
+  readonly route: GatewayRoute;
+  messagesFromGateway: number;
+  messagesToGateway: number;
 }
 
 type CloudTunnelMessage =

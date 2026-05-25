@@ -5,6 +5,11 @@ import type {
   FilesystemUploadFile,
   FilesystemViewState,
 } from "./types";
+import {
+  emitClientDiagnostic,
+  normalizeDiagnosticUrl,
+  readDiagnosticComputerId,
+} from "../cloud/client-diagnostics";
 
 export type FilesystemConnectionStatus = "connecting" | "alive" | "closed";
 
@@ -47,6 +52,9 @@ export class FilesystemClient {
   private openFilePaths: string[] = [];
   private readonly openWaiters: OpenWaiter[] = [];
   private shouldReconnect = false;
+  private socketOpenedAt = 0;
+  private messagesIn = 0;
+  private messagesOut = 0;
 
   constructor(
     private url: string,
@@ -65,27 +73,61 @@ export class FilesystemClient {
 
   private openSocket(): void {
     this.options.onConnectionStatus?.("connecting");
-    const socket = new WebSocket(this.getSocketUrl());
+    const socketUrl = this.getSocketUrl();
+    const computerId = readDiagnosticComputerId(socketUrl);
+    emitClientDiagnostic("filesystem_ws.connect_start", {
+      computerId,
+      url: normalizeDiagnosticUrl(socketUrl),
+      subscribedPath: this.subscribedPath,
+    }, { source: "filesystem-client", message: "Filesystem websocket connecting" });
+    const socket = new WebSocket(socketUrl);
     this.socket = socket;
+    this.socketOpenedAt = Date.now();
+    this.messagesIn = 0;
+    this.messagesOut = 0;
 
     socket.addEventListener("open", () => {
+      emitClientDiagnostic("filesystem_ws.open", {
+        computerId,
+        url: normalizeDiagnosticUrl(socketUrl),
+        subscribedPath: this.subscribedPath,
+      }, { source: "filesystem-client", message: "Filesystem websocket opened" });
       this.options.onOpen?.();
       this.resolveOpenWaiters();
       this.startHeartbeat(socket);
       this.resendOpenFiles();
     });
     socket.addEventListener("message", (event) => {
+      this.messagesIn += 1;
       this.handleMessage(event.data);
     });
     socket.addEventListener("error", () => {
+      emitClientDiagnostic("filesystem_ws.error", {
+        computerId,
+        url: normalizeDiagnosticUrl(socketUrl),
+        ageMs: Date.now() - this.socketOpenedAt,
+        messagesIn: this.messagesIn,
+        messagesOut: this.messagesOut,
+      }, { source: "filesystem-client", message: "Filesystem websocket error" });
       this.options.onError("Filesystem connection failed.");
       this.options.onLoading(false);
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (this.socket !== socket) {
         return;
       }
 
+      emitClientDiagnostic("filesystem_ws.close", {
+        computerId,
+        url: normalizeDiagnosticUrl(socketUrl),
+        closeCode: event.code,
+        closeReason: event.reason,
+        wasClean: event.wasClean,
+        ageMs: Date.now() - this.socketOpenedAt,
+        messagesIn: this.messagesIn,
+        messagesOut: this.messagesOut,
+        subscribedPath: this.subscribedPath,
+      }, { source: "filesystem-client", message: "Filesystem websocket closed" });
       this.socket = null;
       this.stopHeartbeat();
       this.rejectAll("Filesystem connection closed.");
@@ -173,6 +215,7 @@ export class FilesystemClient {
 
     return new Promise((resolve, reject) => {
       this.pending.set(message.requestId, { resolve, reject });
+      this.messagesOut += 1;
       socket.send(JSON.stringify(message));
     });
   }
@@ -253,6 +296,12 @@ export class FilesystemClient {
       this.pendingHeartbeatRequestId !== null &&
       Date.now() - this.pendingHeartbeatStartedAt > HEARTBEAT_TIMEOUT_MS
     ) {
+      emitClientDiagnostic("filesystem_ws.heartbeat_timeout", {
+        computerId: readDiagnosticComputerId(this.getSocketUrl()),
+        pendingHeartbeatRequestId: this.pendingHeartbeatRequestId,
+        heartbeatAgeMs: Date.now() - this.pendingHeartbeatStartedAt,
+        timeoutMs: HEARTBEAT_TIMEOUT_MS,
+      }, { source: "filesystem-client", message: "Filesystem websocket heartbeat timed out" });
       socket.close();
       return;
     }
@@ -264,6 +313,7 @@ export class FilesystemClient {
     const requestId = this.nextRequestId();
     this.pendingHeartbeatRequestId = requestId;
     this.pendingHeartbeatStartedAt = Date.now();
+    this.messagesOut += 1;
     socket.send(JSON.stringify({ type: "ping", requestId }));
   }
 
@@ -306,6 +356,11 @@ export class FilesystemClient {
       this.reconnectTimer = null;
       this.openSocket();
     }, RECONNECT_DELAY_MS);
+    emitClientDiagnostic("filesystem_ws.reconnect_scheduled", {
+      computerId: readDiagnosticComputerId(this.getSocketUrl()),
+      delayMs: RECONNECT_DELAY_MS,
+      subscribedPath: this.subscribedPath,
+    }, { source: "filesystem-client", message: "Filesystem websocket reconnect scheduled" });
   }
 
   private clearReconnectTimer(): void {

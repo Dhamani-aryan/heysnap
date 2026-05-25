@@ -17,6 +17,7 @@ import {
   DEFAULT_RELEASE_PLATFORM,
 } from "../releases/routes.js";
 import { badRequest, forbidden, notFound, unauthorized } from "../shared/errors.js";
+import { logger } from "../shared/logger.js";
 import { serializeComputer } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
@@ -128,6 +129,21 @@ export const createMachineRoutes = (
       machineHealth,
       now,
     });
+    logger.info({
+      event: "machine.heartbeat",
+      computerId: machine.computerId,
+      machineIdentityId: machine.id,
+      reportedStatus: status,
+      storedStatus: (autoSleptComputer ?? computer).status,
+      machineServerVersion: machineServerVersion ?? computer.machineServerVersion,
+      safeToRestart: readBoolean(body["safeToRestart"]),
+      safeToSleep: readBoolean(body["safeToSleep"]),
+      lastActivityAt: readOptionalString(body["lastActivityAt"], 80),
+      activeSessions: isRecord(body["activeSessions"]) ? body["activeSessions"] : undefined,
+      updateState: readOptionalString(body["updateState"], 120),
+      lastUpdateError: readOptionalString(body["lastUpdateError"], 500),
+      autoSlept: autoSleptComputer !== null,
+    }, "Machine heartbeat received");
 
     return context.json({ computer: serializeComputer(autoSleptComputer ?? computer), update });
   });
@@ -254,6 +270,15 @@ const readCapabilities = (value: unknown): string[] => {
 
   return value;
 };
+
+const readBoolean = (value: unknown): boolean | undefined =>
+  typeof value === "boolean" ? value : undefined;
+
+const readOptionalString = (value: unknown, maxLength: number): string | undefined =>
+  typeof value === "string" ? value.trim().slice(0, maxLength) : undefined;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const readMachineStatus = (value: unknown): Extract<ComputerStatus, "online" | "idle" | "failed"> => {
   if (value === "idle" || value === "failed") {

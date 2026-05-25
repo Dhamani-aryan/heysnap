@@ -6,6 +6,11 @@ import {
   createBrowserControlClientId,
   sendBrowserControlExtensionCommand,
 } from "../../../cloud/browser-control-extension";
+import {
+  emitClientDiagnostic,
+  normalizeDiagnosticUrl,
+  readDiagnosticComputerId,
+} from "../../../cloud/client-diagnostics";
 
 import { parseBrowserControlServerMessage } from "./browser-control-bridge-messages";
 import type {
@@ -68,8 +73,12 @@ export function BrowserControlBridge({
     }
 
     const resolvedWebsocketUrl = websocketUrl;
+    const diagnosticComputerId = readDiagnosticComputerId(resolvedWebsocketUrl);
     let webSocket: WebSocket | null = null;
     let isCancelled = false;
+    let socketOpenedAt = 0;
+    let messagesIn = 0;
+    let messagesOut = 0;
     const pendingRequests = new Map<string, PendingBrowserControlRequest>();
     const pendingAttachmentReads = new Map<string, PendingBrowserControlAttachmentRead>();
     const pendingOutputWrites = new Map<string, PendingBrowserControlOutputWrite>();
@@ -123,6 +132,11 @@ export function BrowserControlBridge({
 
       const resolvedExecutor = executorRef.current ?? createExtensionExecutor(extensionIdRef.current);
       if (resolvedExecutor === undefined) {
+        emitClientDiagnostic("browser_control_ws.extension_unavailable", {
+          computerId: diagnosticComputerId,
+          url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+          reason: "executor_unavailable",
+        }, { source: "browser-control-bridge", message: "Browser-control extension executor unavailable" });
         setStatus({
           state: "extension_unavailable",
           label: "Extension missing",
@@ -135,6 +149,12 @@ export function BrowserControlBridge({
       try {
         await resolvedExecutor({ command: "ping", params: undefined, signal: new AbortController().signal });
       } catch (error) {
+        emitClientDiagnostic("browser_control_ws.extension_unavailable", {
+          computerId: diagnosticComputerId,
+          url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+          reason: "ping_failed",
+          errorMessage: error instanceof Error ? error.message : "Chrome extension did not respond.",
+        }, { source: "browser-control-bridge", message: "Browser-control extension ping failed" });
         setStatus({
           state: "extension_unavailable",
           label: "Extension missing",
@@ -149,11 +169,25 @@ export function BrowserControlBridge({
       }
 
       setStatus({ state: "connecting", label: "Connecting" });
+      emitClientDiagnostic("browser_control_ws.connect_start", {
+        computerId: diagnosticComputerId,
+        url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+        clientId,
+      }, { source: "browser-control-bridge", message: "Browser-control websocket connecting" });
       const socket = new WebSocket(resolvedWebsocketUrl);
       webSocket = socket;
+      socketOpenedAt = Date.now();
+      messagesIn = 0;
+      messagesOut = 0;
 
       socket.addEventListener("open", () => {
         setStatus({ state: "connected", label: "Connected" });
+        emitClientDiagnostic("browser_control_ws.open", {
+          computerId: diagnosticComputerId,
+          url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+          clientId,
+        }, { source: "browser-control-bridge", message: "Browser-control websocket opened" });
+        messagesOut += 1;
         socket.send(JSON.stringify({
           type: "hello",
           protocolVersion: 1,
@@ -163,9 +197,15 @@ export function BrowserControlBridge({
       });
 
       socket.addEventListener("message", (event) => {
+        messagesIn += 1;
         const message = parseBrowserControlServerMessage(event.data);
 
         if (message === null) {
+          emitClientDiagnostic("browser_control_ws.invalid_message", {
+            computerId: diagnosticComputerId,
+            url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+            clientId,
+          }, { source: "browser-control-bridge", message: "Invalid browser-control websocket message" });
           socket.close(1003, "Invalid browser-control message");
           return;
         }
@@ -217,14 +257,36 @@ export function BrowserControlBridge({
         });
       });
 
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         closePendingRequests("Browser-control socket closed");
         closePendingAttachmentReads("Browser-control socket closed");
         closePendingOutputWrites("Browser-control socket closed");
+        emitClientDiagnostic("browser_control_ws.close", {
+          computerId: diagnosticComputerId,
+          url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+          clientId,
+          closeCode: event.code,
+          closeReason: event.reason,
+          wasClean: event.wasClean,
+          ageMs: Date.now() - socketOpenedAt,
+          messagesIn,
+          messagesOut,
+          pendingRequestCount: pendingRequests.size,
+          pendingAttachmentReadCount: pendingAttachmentReads.size,
+          pendingOutputWriteCount: pendingOutputWrites.size,
+        }, { source: "browser-control-bridge", message: "Browser-control websocket closed" });
         setStatus({ state: "disconnected", label: "Disconnected" });
       });
 
       socket.addEventListener("error", () => {
+        emitClientDiagnostic("browser_control_ws.error", {
+          computerId: diagnosticComputerId,
+          url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+          clientId,
+          ageMs: Date.now() - socketOpenedAt,
+          messagesIn,
+          messagesOut,
+        }, { source: "browser-control-bridge", message: "Browser-control websocket error" });
         setStatus({ state: "error", label: "Connection error" });
       });
     }

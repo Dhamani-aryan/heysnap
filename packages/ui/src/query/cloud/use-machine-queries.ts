@@ -4,6 +4,7 @@ import { useCallback, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { CloudComputer, ComputerAccessSessionResponse } from "../../cloud/cloud-client";
+import { emitClientDiagnostic } from "../../cloud/client-diagnostics";
 import { useCloudAuthStore, useCloudMachinesStore, useCloudRuntime, useMachineAccessStore } from "../../cloud/cloud-runtime";
 import {
   ACCESS_SESSION_REFRESH_BUFFER_MS,
@@ -208,12 +209,23 @@ export const useMachineWorkspaceSession = (
         throw new Error("Cloud session required.");
       }
 
+      emitClientDiagnostic("cloud.access_session.request", {
+        computerId: targetComputerId,
+      }, { source: "cloud-workspace-session", message: "Requesting machine access session" });
       return client.createComputerAccessSession(token, targetComputerId);
     },
     onMutate: (targetComputerId) => {
       accessStore.getState().setLoading(targetComputerId, true);
     },
     onSuccess: (response, targetComputerId) => {
+      emitClientDiagnostic("cloud.access_session.success", {
+        computerId: targetComputerId,
+        accessSessionId: response.accessSession.id,
+        expiresAt: response.accessSession.expiresAt,
+        expiresInMs: Date.parse(response.accessSession.expiresAt) - Date.now(),
+        hasFilesystemWebSocketUrl: response.routes.filesystemWebSocketUrl.length > 0,
+        hasBrowserControlWebSocketUrl: response.routes.browserControlWebSocketUrl !== undefined,
+      }, { source: "cloud-workspace-session", message: "Machine access session received" });
       accessStore.getState().setSession(targetComputerId, response);
     },
     onError: (error, targetComputerId) => {
@@ -222,6 +234,10 @@ export const useMachineWorkspaceSession = (
         return;
       }
 
+      emitClientDiagnostic("cloud.access_session.error", {
+        computerId: targetComputerId,
+        errorMessage: error instanceof Error ? error.message : "Failed to open machine.",
+      }, { source: "cloud-workspace-session", message: "Machine access session request failed" });
       accessStore.getState().setError(
         targetComputerId,
         error instanceof Error ? error.message : "Failed to open machine.",
@@ -306,6 +322,12 @@ export const useMachineWorkspaceSession = (
     }
 
     const refreshDelay = Math.max(0, expiresAt - Date.now() - ACCESS_SESSION_REFRESH_BUFFER_MS);
+    emitClientDiagnostic("cloud.access_session.refresh_scheduled", {
+      computerId,
+      accessSessionId: accessEntry.response.accessSession.id,
+      refreshDelayMs: refreshDelay,
+      expiresAt: accessEntry.response.accessSession.expiresAt,
+    }, { source: "cloud-workspace-session", message: "Machine access session refresh scheduled" });
     const refreshTimer = window.setTimeout(() => {
       requestAccessSession(computerId);
     }, refreshDelay);

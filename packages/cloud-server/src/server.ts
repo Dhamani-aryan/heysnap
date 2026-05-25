@@ -12,6 +12,7 @@ import { AuthService } from "./auth/service.js";
 import { createAuthRoutes } from "./auth/routes.js";
 import type { CloudServerConfig } from "./config.js";
 import { createComputerRoutes } from "./control-plane/computers.js";
+import { createDiagnosticsRoutes } from "./diagnostics/routes.js";
 import type { CloudStore } from "./db/types.js";
 import { handleGatewayFeedbackRequest } from "./feedback/gateway.js";
 import { createFeedbackArchiveStorage } from "./feedback/storage.js";
@@ -22,6 +23,7 @@ import { AwsEc2Provisioner } from "./provisioning/aws-ec2-provisioner.js";
 import type { ComputerProvisioner } from "./provisioning/types.js";
 import { createReleaseRoutes } from "./releases/routes.js";
 import { HttpError } from "./shared/errors.js";
+import { errorToLog, logger } from "./shared/logger.js";
 import type { AppVariables } from "./shared/context.js";
 import type { GatewayHttpResponse, GatewayHttpStreamResponse, TunnelStatusRegistry } from "./gateway/tunnel.js";
 
@@ -74,6 +76,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     feedbackArchiveStorage,
   ));
   app.route("/auth", createAuthRoutes(authService, options.config));
+  app.route("/diagnostics", createDiagnosticsRoutes(authService));
   app.route("/computers", createComputerRoutes(
     options.store,
     authService,
@@ -134,7 +137,12 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
       }, error.status);
     }
 
-    console.error(error);
+    logger.error({
+      event: "cloud.http_error",
+      err: errorToLog(error),
+      method: context.req.method,
+      path: context.req.path,
+    }, "Unhandled cloud-server error");
 
     return context.json({
       error: {

@@ -48,6 +48,10 @@ import {
   type BrowserControlExecutor,
   type BrowserControlStatus,
 } from "./browser-control-bridge";
+import {
+  emitClientDiagnostic,
+  normalizeDiagnosticUrl,
+} from "./client-diagnostics";
 import type { CloudComputer } from "./cloud-client";
 import { useBrowserWindowStore } from "./cloud-runtime";
 
@@ -142,6 +146,8 @@ export function MachineWorkspace({
   const browserScreencastRequestIdRef = useRef(0);
   const hasAutoShownBrowserExtensionDialogRef = useRef(false);
   const isBrowserControlExtensionMissingRef = useRef(false);
+  const previousFilesystemWebsocketUrlRef = useRef(filesystemWebsocketUrl);
+  const previousBrowserControlWebsocketUrlRef = useRef(browserControlWebSocketUrl);
   const isWorkspaceReady = isFilesystemOpen;
   const activeBrowserTabId = getActiveBrowserTabId(browserWindowTabs);
   const activeBrowserTab = activeBrowserTabId === null
@@ -167,6 +173,18 @@ export function MachineWorkspace({
   }, []);
 
   useEffect(() => {
+    const previousUrl = previousFilesystemWebsocketUrlRef.current;
+    previousFilesystemWebsocketUrlRef.current = filesystemWebsocketUrl;
+
+    if (previousUrl !== filesystemWebsocketUrl) {
+      emitClientDiagnostic("workspace.websocket_url_changed", {
+        computerId: computer.id,
+        route: "filesystem",
+        previousUrl: normalizeDiagnosticUrl(previousUrl),
+        nextUrl: normalizeDiagnosticUrl(filesystemWebsocketUrl),
+      }, { source: "machine-workspace", message: "Workspace websocket URL changed" });
+    }
+
     if (suppressConnectionLoader) {
       setIsFilesystemOpen(true);
       return;
@@ -176,6 +194,18 @@ export function MachineWorkspace({
   }, [computer.id, filesystemWebsocketUrl, suppressConnectionLoader]);
 
   useEffect(() => {
+    const previousUrl = previousBrowserControlWebsocketUrlRef.current;
+    previousBrowserControlWebsocketUrlRef.current = browserControlWebSocketUrl;
+
+    if (previousUrl !== browserControlWebSocketUrl) {
+      emitClientDiagnostic("workspace.websocket_url_changed", {
+        computerId: computer.id,
+        route: "browser-control",
+        previousUrl: normalizeDiagnosticUrl(previousUrl),
+        nextUrl: normalizeDiagnosticUrl(browserControlWebSocketUrl),
+      }, { source: "machine-workspace", message: "Workspace websocket URL changed" });
+    }
+
     hasAutoShownBrowserExtensionDialogRef.current = false;
     isBrowserControlExtensionMissingRef.current = false;
     setIsBrowserExtensionDialogOpen(false);

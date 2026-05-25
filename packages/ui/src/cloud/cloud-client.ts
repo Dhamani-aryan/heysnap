@@ -160,6 +160,28 @@ export class CloudClient {
     );
   }
 
+  sendClientDiagnostics(
+    token: string,
+    input: {
+      readonly logs: readonly {
+        readonly event: string;
+        readonly source?: string;
+        readonly message?: string;
+        readonly time: string;
+        readonly fields?: Record<string, unknown>;
+      }[];
+    },
+  ): Promise<{ readonly ok: boolean; readonly accepted: number }> {
+    return this.request<{ readonly ok: boolean; readonly accepted: number }>("/diagnostics/client-logs", {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: {
+        ...this.authHeaders(token),
+        "content-type": "application/json",
+      },
+    });
+  }
+
   private authHeaders(token: string): HeadersInit {
     return { authorization: `Bearer ${token}` };
   }
