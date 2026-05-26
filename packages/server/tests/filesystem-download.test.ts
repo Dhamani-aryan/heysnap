@@ -25,6 +25,7 @@ describe("filesystem download", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("content-disposition")).toContain("hello.txt");
+    expect(response.headers.get("content-length")).toBe("14");
     expect(await response.text()).toBe("hello download");
   });
 
@@ -52,6 +53,7 @@ describe("filesystem download", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/zip");
     expect(response.headers.get("content-disposition")).toContain("Project.zip");
+    expect(response.headers.get("content-length")).toBeNull();
     expect(archive.readUInt32LE(0)).toBe(0x04034b50);
     expect(archive.toString("utf8")).toContain("Project/src/index.txt");
   });
@@ -69,6 +71,7 @@ describe("filesystem download", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-disposition")).toContain("download.zip");
+    expect(response.headers.get("content-length")).toBeNull();
     expect(archiveText).toContain("Folder/nested.txt");
     expect(archiveText).toContain("file.txt");
   });
