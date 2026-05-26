@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { AgentError, toAgentError } from "./errors.js";
 import { isAgentContent } from "./validation.js";
-import type { AgentContent, AgentThreadGroup, AgentUiContext, IAgentHarness } from "./types.js";
+import type { AgentContent, AgentHarnessName, AgentThreadGroup, AgentUiContext, IAgentHarness } from "./types.js";
 import {
   AgentRunManager,
   type AgentRunRecord,
@@ -231,6 +231,8 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
     (input["threadId"] !== undefined && typeof input["threadId"] !== "string") ||
     typeof input["path"] !== "string" ||
     !isAgentContent(input["content"]) ||
+    !isAgentHarnessName(input["harness"]) ||
+    !isThreadHarnessSelection(input["threadId"], input["harness"]) ||
     (input["clientRunId"] !== undefined && typeof input["clientRunId"] !== "string") ||
     !isProviderModelSelection(input["provider"], input["model"])
   ) {
@@ -242,6 +244,7 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
     path: input["path"],
     content: input["content"] as AgentContent,
     uiContext: parseAgentUiContext(input["uiContext"]),
+    harness: input["harness"] as AgentHarnessName | undefined,
     provider: typeof input["provider"] === "string" ? input["provider"].trim() : undefined,
     model: typeof input["model"] === "string" ? input["model"].trim() : undefined,
     clientRunId: input["clientRunId"] as string | undefined,
@@ -356,6 +359,35 @@ const isProviderModelSelection = (provider: unknown, model: unknown): boolean =>
     provider.trim().length > 0 &&
     typeof model === "string" &&
     model.trim().length > 0;
+};
+
+const isAgentHarnessName = (value: unknown): boolean =>
+  value === undefined || value === "codex" || value === "pi";
+
+const isThreadHarnessSelection = (threadId: unknown, harness: unknown): boolean => {
+  if (harness === undefined || threadId === undefined || typeof threadId !== "string") {
+    return true;
+  }
+
+  const normalizedThreadId = safeDecodeURIComponent(threadId);
+
+  if (normalizedThreadId.startsWith("pi:")) {
+    return harness === "pi";
+  }
+
+  if (normalizedThreadId.startsWith("codex:")) {
+    return harness === "codex";
+  }
+
+  return harness === "codex";
+};
+
+const safeDecodeURIComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 };
 
 const withStreamingState = (

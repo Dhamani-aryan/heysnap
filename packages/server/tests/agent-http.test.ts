@@ -99,7 +99,7 @@ describe("agent HTTP API", () => {
         path: "Projects/app",
         content: textContent("Build the UI"),
         provider: "anthropic",
-        model: "claude-sonnet-4-6",
+        model: "claude-opus-4-7",
       }),
       headers: { "content-type": "application/json" },
     });
@@ -108,7 +108,87 @@ describe("agent HTTP API", () => {
     await readSseMessages(response);
     expect(harness.sendInputs[0]).toMatchObject({
       provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      model: "claude-opus-4-7",
+    });
+  });
+
+  it("passes harness selections to the harness", async () => {
+    const harness = new CapturingAgentHarness();
+    const { url } = await startAgentHttpServer(harness);
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({
+        path: "Projects/app",
+        content: textContent("Build the UI"),
+        harness: "pi",
+        provider: "anthropic",
+        model: "claude-opus-4-7",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.status).toBe(200);
+    await readSseMessages(response);
+    expect(harness.sendInputs[0]).toMatchObject({
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+    });
+  });
+
+  it("rejects invalid harness selections", async () => {
+    const { url } = await startAgentHttpServer(new MockAgentHarness());
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({
+        path: "Projects/app",
+        content: textContent("Build the UI"),
+        harness: "other",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      message: "Invalid run request",
+    });
+  });
+
+  it("rejects mismatched thread and harness selections", async () => {
+    const { url } = await startAgentHttpServer(new MockAgentHarness());
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({
+        threadId: "pi:thread-1",
+        path: "Projects/app",
+        content: textContent("Build the UI"),
+        harness: "codex",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      message: "Invalid run request",
+    });
+  });
+
+  it("rejects mismatched encoded thread and harness selections", async () => {
+    const { url } = await startAgentHttpServer(new MockAgentHarness());
+    const response = await fetch(`${url}/agent/runs`, {
+      method: "POST",
+      body: JSON.stringify({
+        threadId: "pi%3Athread-1",
+        path: "Projects/app",
+        content: textContent("Build the UI"),
+        harness: "codex",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      message: "Invalid run request",
     });
   });
 
