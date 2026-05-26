@@ -765,6 +765,45 @@ describe("browser-control service", () => {
     client.close();
   });
 
+  it("waits for a reconnecting browser-control client before failing a request", async () => {
+    const { baseUrl } = await startBrowserControlServer({ noClientRetryDelaysMs: [20, 20] });
+
+    const responsePromise = fetch(`${baseUrl}/browser-control/requests`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "user-1",
+        command: "tab.refresh",
+        params: { tabId: 123 },
+      }),
+    });
+
+    await delay(1);
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+    client.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
+
+    const request = await waitForJsonMessage<BrowserControlRequestMessage>(client);
+    expect(request).toMatchObject({
+      type: "request",
+      command: "tab.refresh",
+      params: { tabId: 123 },
+    });
+
+    client.send(JSON.stringify({
+      type: "response",
+      requestId: request.requestId,
+      ok: true,
+      result: { refreshed: true },
+    }));
+
+    expect(await (await responsePromise).json()).toEqual({
+      ok: true,
+      result: { refreshed: true },
+    });
+
+    client.close();
+  });
+
   it("rejects unsupported browser commands and invalid command params", async () => {
     const { baseUrl } = await startBrowserControlServer();
 
@@ -884,11 +923,15 @@ interface BrowserControlOutputErrorMessage {
 
 const startBrowserControlServer = async (options: {
   readonly filesystemRootPath?: string;
+  readonly noClientRetryDelaysMs?: readonly number[];
 } = {}): Promise<{
   readonly server: Server;
   readonly baseUrl: string;
 }> => {
-  const service = createBrowserControlService(options);
+  const service = createBrowserControlService({
+    noClientRetryDelaysMs: [],
+    ...options,
+  });
   const server = createServer((request, response) => {
     void service.handleRequest(request, response).then((handled) => {
       if (!handled) {

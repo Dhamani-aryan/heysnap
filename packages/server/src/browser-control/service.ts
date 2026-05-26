@@ -22,6 +22,7 @@ const MAX_OUTPUT_CHUNK_BYTES = 512 * 1024;
 const MAX_SCREENSHOT_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_DOWNLOAD_OUTPUT_BYTES = 100 * 1024 * 1024;
 const DEFAULT_DOWNLOAD_OUTPUT_MIME_TYPE = "application/octet-stream";
+const DEFAULT_NO_CLIENT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
 const jsonHeaders = {
   "access-control-allow-origin": "*",
@@ -38,6 +39,7 @@ export interface BrowserControlService {
 
 export interface BrowserControlServiceOptions {
   readonly filesystemRootPath?: string;
+  readonly noClientRetryDelaysMs?: readonly number[];
   readonly onActivity?: () => void;
 }
 
@@ -298,7 +300,10 @@ type BrowserControlClientMessage =
 export const createBrowserControlService = (
   options: BrowserControlServiceOptions = {},
 ): BrowserControlService => {
-  const broker = new BrowserControlBroker({ onActivity: options.onActivity });
+  const broker = new BrowserControlBroker({
+    noClientRetryDelaysMs: options.noClientRetryDelaysMs,
+    onActivity: options.onActivity,
+  });
   const socketServer = new WebSocketServer({ noServer: true });
 
   socketServer.on("connection", (webSocket, request) => {
@@ -333,6 +338,7 @@ export const attachBrowserControlWebSocketServer = (
 };
 
 export interface BrowserControlBrokerOptions {
+  readonly noClientRetryDelaysMs?: readonly number[];
   readonly onActivity?: () => void;
 }
 
@@ -434,11 +440,13 @@ export class BrowserControlBroker {
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<BrowserControlCliResult> {
     this.options.onActivity?.();
-    const client = input.targetUserId === undefined
-      ? this.selectLatestClient()
-      : this.selectClient(input.targetUserId);
+    const client = await this.selectClientWithRetry(input, options.signal);
 
     if (client === null) {
+      if (options.signal?.aborted === true) {
+        return browserControlError("BROWSER_CONTROL_CANCELLED", "Browser-control request was cancelled.");
+      }
+
       logger.warn({
         event: "browser_control_request.no_client",
         targetUserId: input.targetUserId,
@@ -451,6 +459,10 @@ export class BrowserControlBroker {
           ? "Chrome is not connected. Open the machine workspace in Chrome and keep it connected."
           : "Chrome is not connected for the target user. Open the machine workspace in Chrome and keep it connected.",
       );
+    }
+
+    if (options.signal?.aborted === true) {
+      return browserControlError("BROWSER_CONTROL_CANCELLED", "Browser-control request was cancelled.");
     }
 
     const requestId = randomUUID();
@@ -847,7 +859,79 @@ export class BrowserControlBroker {
       candidate.lastSeenAt >= latest.lastSeenAt ? candidate : latest
     );
   }
+
+  private async selectClientWithRetry(
+    input: BrowserControlBrokerInput,
+    signal: AbortSignal | undefined,
+  ): Promise<BrowserControlClient | null> {
+    const select = (): BrowserControlClient | null =>
+      input.targetUserId === undefined
+        ? this.selectLatestClient()
+        : this.selectClient(input.targetUserId);
+
+    const immediateClient = select();
+    if (immediateClient !== null) {
+      return immediateClient;
+    }
+
+    const retryDelaysMs = this.options.noClientRetryDelaysMs ?? DEFAULT_NO_CLIENT_RETRY_DELAYS_MS;
+    for (const [attemptIndex, delayMs] of retryDelaysMs.entries()) {
+      if (signal?.aborted === true) {
+        return null;
+      }
+
+      logger.info({
+        event: "browser_control_request.no_client_retry_scheduled",
+        targetUserId: input.targetUserId,
+        command: input.command,
+        clientRequestId: input.clientRequestId,
+        attempt: attemptIndex + 1,
+        delayMs,
+      }, "Waiting for browser-control client to reconnect");
+
+      const completed = await delayWithAbort(delayMs, signal);
+      if (!completed) {
+        return null;
+      }
+
+      const retryClient = select();
+      if (retryClient !== null) {
+        logger.info({
+          event: "browser_control_request.no_client_recovered",
+          targetUserId: input.targetUserId,
+          command: input.command,
+          clientRequestId: input.clientRequestId,
+          attempt: attemptIndex + 1,
+          delayMs,
+          connectionId: retryClient.connectionId,
+          clientId: retryClient.clientId,
+        }, "Browser-control client reconnected before request failed");
+        return retryClient;
+      }
+    }
+
+    return null;
+  }
 }
+
+const delayWithAbort = (delayMs: number, signal: AbortSignal | undefined): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve(false);
+      return;
+    }
+
+    const handleAbort = (): void => {
+      clearTimeout(timeout);
+      resolve(false);
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve(true);
+    }, delayMs);
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
 
 const handleBrowserControlHttpRequest = async (
   request: IncomingMessage,
