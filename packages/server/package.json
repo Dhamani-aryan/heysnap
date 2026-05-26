@@ -24,6 +24,7 @@
   "dependencies": {
     "@ank1015-app/previewer": "workspace:*",
     "@axiomhq/pino": "^1.6.1",
+    "@earendil-works/pi-coding-agent": "^0.75.5",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^5.0.0",
     "pino": "^10.3.1",
