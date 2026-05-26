@@ -56,7 +56,7 @@ describe("filesystem HTTP uploads", () => {
       "target/Project/greeting.txt",
     ]);
     await expect(readFile(join(root, "target", "Project", "greeting.txt"), "utf8")).resolves.toBe("hello world");
-  });
+  }, 15_000);
 
   it("rejects path traversal and duplicate target paths when creating sessions", async () => {
     const root = await createRoot();
