@@ -1,13 +1,14 @@
 import { createServer, type Server } from "node:http";
+import { EventEmitter } from "node:events";
 import type { ReadableStream } from "node:stream/web";
 
 import { WebSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CloudServerConfig } from "../src/config.js";
 import { hashToken } from "../src/auth/tokens.js";
 import { GatewayAccessService } from "../src/gateway/access-sessions.js";
-import { attachGatewayTunnelServer, MachineTunnelRegistry, normalizeWebSocketCloseCode } from "../src/gateway/tunnel.js";
+import { attachGatewayTunnelServer, MachineTunnel, MachineTunnelRegistry, normalizeWebSocketCloseCode } from "../src/gateway/tunnel.js";
 import { InMemoryCloudStore } from "./in-memory-store.js";
 
 const config: CloudServerConfig = {
@@ -30,10 +31,46 @@ const config: CloudServerConfig = {
 const servers: Server[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(servers.splice(0).map((server) => closeServer(server)));
 });
 
 describe("gateway tunnel", () => {
+  it("terminates a machine tunnel after a missed heartbeat pong", async () => {
+    vi.useFakeTimers();
+    const registry = new MachineTunnelRegistry();
+    const socket = new FakeMachineWebSocket();
+    const tunnel = new MachineTunnel("computer-1", socket as unknown as WebSocket, registry, {
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 10,
+    });
+    registry.set("computer-1", tunnel);
+
+    await vi.advanceTimersByTimeAsync(5);
+    expect(socket.pingCount).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(socket.terminated).toBe(true);
+    expect(registry.isConnected("computer-1")).toBe(false);
+  });
+
+  it("clears machine tunnel heartbeat timers when the socket closes", async () => {
+    vi.useFakeTimers();
+    const registry = new MachineTunnelRegistry();
+    const socket = new FakeMachineWebSocket();
+    const tunnel = new MachineTunnel("computer-1", socket as unknown as WebSocket, registry, {
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 10,
+    });
+    registry.set("computer-1", tunnel);
+
+    socket.close(1000, "done");
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(socket.pingCount).toBe(0);
+    expect(registry.isConnected("computer-1")).toBe(false);
+  });
+
   it("routes gateway websocket data through a connected machine tunnel", async () => {
     const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
     const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
@@ -129,12 +166,12 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
-  it("proxies HTTP download requests through the machine tunnel", async () => {
+  it("streams HTTP download requests through the machine tunnel", async () => {
     const { server, computer, machine, registry } = await startConnectedTunnel();
     await waitForCondition(() => registry.isConnected(computer.id));
     await delay(10);
     const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
-    const proxyPromise = registry.proxyHttpRequest(computer.id, {
+    const proxyPromise = registry.proxyStreamingHttpRequest(computer.id, {
       path: "/filesystem/download?path=Project",
     });
     const request = await requestPromise;
@@ -142,25 +179,63 @@ describe("gateway tunnel", () => {
     expect(request).toMatchObject({
       type: "httpRequest",
       path: "/filesystem/download?path=Project",
+      stream: true,
     });
 
     machine.send(JSON.stringify({
-      type: "httpResponse",
+      type: "httpResponseStart",
       connectionId: request.connectionId,
       statusCode: 200,
       headers: {
         "content-type": "application/zip",
         "content-disposition": "attachment; filename=\"Project.zip\"",
       },
+    }));
+    machine.send(JSON.stringify({
+      type: "httpResponseChunk",
+      connectionId: request.connectionId,
       bodyBase64: Buffer.from("zip-bytes", "utf8").toString("base64"),
     }));
+    machine.send(JSON.stringify({ type: "httpResponseEnd", connectionId: request.connectionId }));
 
     const response = await proxyPromise;
 
     expect(response).not.toBeNull();
     expect(response?.statusCode).toBe(200);
     expect(response?.headers["content-type"]).toBe("application/zip");
-    expect(response?.body.toString("utf8")).toBe("zip-bytes");
+    expect(await readStreamText(response?.body)).toBe("zip-bytes");
+
+    machine.close();
+    await closeServer(server);
+  });
+
+  it("sends tunnel close when a streamed HTTP response is cancelled", async () => {
+    const { server, computer, machine, registry } = await startConnectedTunnel();
+    await waitForCondition(() => registry.isConnected(computer.id));
+    const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
+    const proxyPromise = registry.proxyStreamingHttpRequest(computer.id, {
+      path: "/filesystem/download?path=Project",
+    });
+    const request = await requestPromise;
+
+    machine.send(JSON.stringify({
+      type: "httpResponseStart",
+      connectionId: request.connectionId,
+      statusCode: 200,
+      headers: { "content-type": "application/zip" },
+    }));
+
+    const response = await proxyPromise;
+    expect(response).not.toBeNull();
+    const closePromise = waitForJsonMessage<CloudCloseMessage>(machine);
+    await response?.body.cancel();
+
+    await expect(closePromise).resolves.toMatchObject({
+      type: "close",
+      connectionId: request.connectionId,
+      code: 1000,
+      reason: "HTTP stream cancelled",
+    });
 
     machine.close();
     await closeServer(server);
@@ -329,6 +404,13 @@ interface CloudHttpRequestMessage {
   readonly headers?: Record<string, string>;
   readonly bodyBase64?: string;
   readonly stream?: boolean;
+}
+
+interface CloudCloseMessage {
+  readonly type: "close";
+  readonly connectionId: string;
+  readonly code?: number;
+  readonly reason?: string;
 }
 
 const startTunnelServer = async (): Promise<{
@@ -501,3 +583,33 @@ const closeServer = (server: Server): Promise<void> =>
       resolve();
     });
   });
+
+class FakeMachineWebSocket extends EventEmitter {
+  readyState = WebSocket.OPEN;
+  pingCount = 0;
+  terminated = false;
+  closed = false;
+
+  ping(): void {
+    this.pingCount += 1;
+  }
+
+  send(): void {
+    // Test double only needs heartbeat behavior.
+  }
+
+  close(code = 1000, reason = ""): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    this.readyState = WebSocket.CLOSED;
+    this.emit("close", code, Buffer.from(reason, "utf8"));
+  }
+
+  terminate(): void {
+    this.terminated = true;
+    this.close(1006, "heartbeat timeout");
+  }
+}

@@ -14,6 +14,8 @@ import type { GatewayAccessService } from "./access-sessions.js";
 export type GatewayRoute = "filesystem" | "browser-control" | "preview";
 
 const PREVIEW_ACCESS_COOKIE_NAME = "heysnap_preview_access";
+const DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS = 30_000;
+const DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS = 10_000;
 
 export interface GatewayRouteMetadata {
   readonly userId: string;
@@ -52,6 +54,8 @@ export interface GatewayTunnelServerOptions {
   readonly config: CloudServerConfig;
   readonly gatewayAccessService: GatewayAccessService;
   readonly registry?: MachineTunnelRegistry;
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
 }
 
 export interface UpgradeServer {
@@ -142,7 +146,10 @@ export const attachGatewayTunnelServer = (
           }
 
           machineSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
-            const tunnel = new MachineTunnel(machine.computerId, webSocket, registry);
+            const tunnel = new MachineTunnel(machine.computerId, webSocket, registry, {
+              heartbeatIntervalMs: options.heartbeatIntervalMs,
+              heartbeatTimeoutMs: options.heartbeatTimeoutMs,
+            });
             registry.set(machine.computerId, tunnel);
           });
         })
@@ -240,6 +247,8 @@ export class MachineTunnel {
   private readonly pendingHttpStreams = new Map<string, PendingHttpStream>();
   private readonly activeHttpStreams = new Map<string, ActiveHttpStream>();
   private readonly openedAt = Date.now();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private messagesFromMachine = 0;
   private messagesToMachine = 0;
 
@@ -247,17 +256,23 @@ export class MachineTunnel {
     readonly computerId: string,
     private readonly machineWebSocket: WebSocket,
     private readonly registry: MachineTunnelRegistry,
+    private readonly heartbeatOptions: MachineTunnelHeartbeatOptions = {},
   ) {
     logger.info({
       event: "machine_tunnel.open",
       computerId: this.computerId,
       tunnelId: this.tunnelId,
     }, "Machine tunnel opened");
+    this.startHeartbeat();
     this.machineWebSocket.on("message", (data) => {
       this.messagesFromMachine += 1;
       this.handleMachineMessage(data);
     });
+    this.machineWebSocket.on("pong", () => {
+      this.clearHeartbeatTimeout();
+    });
     this.machineWebSocket.on("close", (code, reason) => {
+      this.clearHeartbeat();
       logger.warn({
         event: "machine_tunnel.close",
         computerId: this.computerId,
@@ -278,6 +293,7 @@ export class MachineTunnel {
       this.registry.delete(this.computerId, this);
     });
     this.machineWebSocket.on("error", (error) => {
+      this.clearHeartbeat();
       logger.error({
         event: "machine_tunnel.error",
         computerId: this.computerId,
@@ -497,6 +513,53 @@ export class MachineTunnel {
     }
   }
 
+  private startHeartbeat(): void {
+    const heartbeatIntervalMs = this.heartbeatOptions.heartbeatIntervalMs ?? DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatTimer = setInterval(() => {
+      this.sendHeartbeat();
+    }, heartbeatIntervalMs);
+  }
+
+  private sendHeartbeat(): void {
+    if (this.machineWebSocket.readyState !== WebSocket.OPEN || this.heartbeatTimeoutTimer !== null) {
+      return;
+    }
+
+    const heartbeatTimeoutMs = this.heartbeatOptions.heartbeatTimeoutMs ?? DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS;
+    this.heartbeatTimeoutTimer = setTimeout(() => {
+      logger.warn({
+        event: "machine_tunnel.heartbeat_timeout",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        ageMs: Date.now() - this.openedAt,
+        heartbeatTimeoutMs,
+        gatewayConnectionCount: this.gatewayConnections.size,
+        pendingHttpRequestCount: this.pendingHttpRequests.size,
+        pendingHttpStreamCount: this.pendingHttpStreams.size,
+        activeHttpStreamCount: this.activeHttpStreams.size,
+      }, "Machine tunnel heartbeat timed out");
+      this.machineWebSocket.terminate();
+    }, heartbeatTimeoutMs);
+
+    this.machineWebSocket.ping();
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (this.heartbeatTimeoutTimer !== null) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
+  }
+
+  private clearHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+
+    this.clearHeartbeatTimeout();
+  }
+
   private closeGatewayConnections(code: number, reason: string): void {
     for (const gatewayWebSocket of this.gatewayConnections.values()) {
       gatewayWebSocket.close(code, reason);
@@ -607,6 +670,11 @@ export class MachineTunnel {
       this.activeHttpStreams.delete(connectionId);
     }
   }
+}
+
+interface MachineTunnelHeartbeatOptions {
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
 }
 
 interface PendingHttpRequest {
