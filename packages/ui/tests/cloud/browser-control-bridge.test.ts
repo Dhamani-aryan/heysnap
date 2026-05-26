@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseBrowserControlServerMessage } from "../../src/cloud/browser-control-bridge";
+import {
+  parseBrowserControlServerMessage,
+  shouldReconnectBrowserControlWebsocket,
+} from "../../src/cloud/browser-control-bridge";
 
 describe("browser-control bridge protocol", () => {
   it("parses request attachment metadata", () => {
@@ -135,5 +138,35 @@ describe("browser-control bridge protocol", () => {
         message: "Too large.",
       },
     });
+  });
+});
+
+describe("browser-control bridge reconnects", () => {
+  it("reconnects after an abnormal websocket close", () => {
+    expect(shouldReconnectBrowserControlWebsocket({
+      closeCode: 1006,
+      isCancelled: false,
+    })).toBe(true);
+  });
+
+  it("reconnects after a remote normal websocket close", () => {
+    expect(shouldReconnectBrowserControlWebsocket({
+      closeCode: 1000,
+      isCancelled: false,
+    })).toBe(true);
+  });
+
+  it("does not reconnect after the bridge unmounts", () => {
+    expect(shouldReconnectBrowserControlWebsocket({
+      closeCode: 1000,
+      isCancelled: true,
+    })).toBe(false);
+  });
+
+  it("does not reconnect after a protocol error", () => {
+    expect(shouldReconnectBrowserControlWebsocket({
+      closeCode: 1003,
+      isCancelled: false,
+    })).toBe(false);
   });
 });

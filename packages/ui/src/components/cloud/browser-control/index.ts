@@ -1,4 +1,7 @@
-export { BrowserControlBridge } from "./browser-control-bridge";
+export {
+  BrowserControlBridge,
+  shouldReconnectBrowserControlWebsocket,
+} from "./browser-control-bridge";
 export { parseBrowserControlServerMessage } from "./browser-control-bridge-messages";
 export {
   createBrowserKeyboardEventParams,

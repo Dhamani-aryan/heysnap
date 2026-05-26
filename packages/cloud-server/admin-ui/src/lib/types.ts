@@ -13,6 +13,7 @@ export interface AdminUser {
   readonly id: string;
   readonly email: string;
   readonly username: string;
+  readonly allowPiModels: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -145,7 +146,7 @@ export interface AdminFeedbackReport {
 
 export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";
 export type AiUsageBucketGranularity = "hour" | "day";
-export type AiUsageGroupBy = "model" | "status" | "user" | "computer";
+export type AiUsageGroupBy = "provider" | "model" | "status" | "user" | "computer";
 
 export interface AdminAiUsageRequest {
   readonly id: string;

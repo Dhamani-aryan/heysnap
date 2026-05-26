@@ -29,9 +29,9 @@ export function MachineWorkspaceRoute({
   const threadId = activePanel === "connectors"
     ? null
     : Array.isArray(threadIdParam)
-      ? threadIdParam[0] ?? null
+      ? decodeRouteParam(threadIdParam[0] ?? null)
       : typeof threadIdParam === "string"
-        ? threadIdParam
+        ? decodeRouteParam(threadIdParam)
         : null;
 
   return (
@@ -43,3 +43,15 @@ export function MachineWorkspaceRoute({
     />
   );
 }
+
+const decodeRouteParam = (value: string | null): string | null => {
+  if (value === null) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};

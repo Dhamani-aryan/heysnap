@@ -9,6 +9,11 @@ interface RateCard {
   readonly output: number;
 }
 
+interface ClaudeRateCard extends RateCard {
+  readonly cacheWrite5m: number;
+  readonly cacheWrite1h: number;
+}
+
 interface ImageModalityTokens {
   readonly textInputTokens: number;
   readonly cachedTextInputTokens: number;
@@ -44,6 +49,22 @@ export const calculateAiUsageCost = (
       return calculateGpt55Cost(usage);
     case "gpt-image-2":
       return calculateGptImage2Cost(usage);
+    case "claude-sonnet-4-6":
+      return calculateClaudeCost(usage, {
+        input: 3,
+        cachedInput: 0.3,
+        cacheWrite5m: 3.75,
+        cacheWrite1h: 6,
+        output: 15,
+      });
+    case "claude-opus-4-7":
+      return calculateClaudeCost(usage, {
+        input: 5,
+        cachedInput: 0.5,
+        cacheWrite5m: 6.25,
+        cacheWrite1h: 10,
+        output: 25,
+      });
     default:
       return null;
   }
@@ -113,6 +134,43 @@ const calculateGptImage2Cost = (
         2,
       ),
       buildLineItem("image-output", "Image output", usage.outputTokens, 30),
+    ],
+  });
+};
+
+const calculateClaudeCost = (
+  usage: Pick<AiUsageRequestRecord, "model" | "inputTokens" | "outputTokens" | "cachedInputTokens" | "metadata">,
+  rates: ClaudeRateCard,
+): AiUsageCostBreakdown => {
+  const upstreamUsage = readUpstreamUsage(usage.metadata);
+  const cacheCreation = asRecord(upstreamUsage?.["cache_creation"]);
+  const cacheWrite1hTokens = numberField(cacheCreation, "ephemeral_1h_input_tokens") ?? 0;
+  const legacyCacheWriteTokens = numberField(upstreamUsage, "cache_creation_input_tokens");
+  const cacheWrite5mTokens =
+    numberField(cacheCreation, "ephemeral_5m_input_tokens") ??
+    Math.max((legacyCacheWriteTokens ?? 0) - cacheWrite1hTokens, 0);
+  const cacheReadTokens = clampTokens(
+    numberField(upstreamUsage, "cache_read_input_tokens") ?? usage.cachedInputTokens,
+    usage.inputTokens,
+  );
+  const uncachedInputTokens = Math.max(
+    usage.inputTokens - cacheWrite5mTokens - cacheWrite1hTokens - cacheReadTokens,
+    0,
+  );
+  const notes = legacyCacheWriteTokens !== undefined && cacheCreation === undefined
+    ? ["Anthropic cache creation tokens did not include duration details; cache writes were priced at the 5-minute rate."]
+    : [];
+
+  return buildBreakdown({
+    model: usage.model ?? "claude",
+    rateMode: "standard",
+    notes,
+    lineItems: [
+      buildLineItem("input", "Input", uncachedInputTokens, rates.input),
+      buildLineItem("cache-write-5m", "Cache write 5m", cacheWrite5mTokens, rates.cacheWrite5m),
+      buildLineItem("cache-write-1h", "Cache write 1h", cacheWrite1hTokens, rates.cacheWrite1h),
+      buildLineItem("cache-read", "Cache read", cacheReadTokens, rates.cachedInput),
+      buildLineItem("output", "Output", usage.outputTokens, rates.output),
     ],
   });
 };

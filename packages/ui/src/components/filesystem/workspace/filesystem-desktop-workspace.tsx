@@ -1,7 +1,7 @@
 import { useCallback, useState, type Dispatch, type ReactElement, type ReactNode, type SetStateAction } from "react";
 
 import { AgentPanel } from "../../../agent/agent-panel";
-import type { PromptAttachment } from "../../../agent/prompt-composer";
+import type { PromptAttachment, PromptModelChoice } from "../../../agent/prompt-composer";
 import type { AgentThreadSummary, AgentUiContext } from "../../../agent/types";
 import { CapabilitiesPanel } from "../../../cloud/capabilities-panel";
 import { appendPromptTranscript, useFilesystemVoicePrompt } from "../../../hooks/filesystem-voice-prompt";
@@ -22,6 +22,7 @@ export const FilesystemDesktopWorkspace = ({
   currentDirectoryName,
   promptDraft,
   promptAttachments,
+  allowModelSelection,
   workspacePanel,
   capabilitiesBaseUrl,
   uiContext,
@@ -43,6 +44,7 @@ export const FilesystemDesktopWorkspace = ({
   readonly currentDirectoryName: string;
   readonly promptDraft: string;
   readonly promptAttachments: readonly PromptAttachment[];
+  readonly allowModelSelection?: boolean;
   readonly workspacePanel: WorkspacePanel;
   readonly capabilitiesBaseUrl?: string;
   readonly uiContext: AgentUiContext;
@@ -53,6 +55,7 @@ export const FilesystemDesktopWorkspace = ({
   readonly onThreadResolved?: (threadId: string) => void;
 }): ReactElement => {
   const [promptFocusToken, setPromptFocusToken] = useState(0);
+  const [promptModelChoice, setPromptModelChoice] = useState<PromptModelChoice>("gpt");
   const handleVoiceTranscript = useCallback((transcript: string): void => {
     onPromptDraftChange((currentDraft) => appendPromptTranscript(currentDraft, transcript));
     setPromptFocusToken((currentToken) => currentToken + 1);
@@ -81,8 +84,11 @@ export const FilesystemDesktopWorkspace = ({
       currentPath={currentPath}
       selectedThreadId={selectedThreadId}
       uiContext={uiContext}
+      allowModelSelection={allowModelSelection === true}
+      promptModelChoice={promptModelChoice}
       onPromptDraftChange={onPromptDraftChange}
       onPromptAttachmentsChange={onPromptAttachmentsChange}
+      onPromptModelChoiceChange={setPromptModelChoice}
       onStartRecording={voicePrompt.startRecording}
       onStopRecording={voicePrompt.stopRecording}
       onOpenFilePath={onOpenFilePath}
@@ -101,11 +107,14 @@ export const FilesystemDesktopWorkspace = ({
       uiContext={uiContext}
       promptDraft={promptDraft}
       promptAttachments={promptAttachments}
+      promptModelChoice={promptModelChoice}
+      allowModelSelection={allowModelSelection === true}
       promptVoiceState={isRightAgentAreaOpen ? voicePrompt.recordingState : "idle"}
       promptAutoFocusToken={isRightAgentAreaOpen ? promptFocusToken : undefined}
       onOpenFilePath={onOpenFilePath}
       onPromptDraftChange={onPromptDraftChange}
       onPromptAttachmentsChange={onPromptAttachmentsChange}
+      onPromptModelChoiceChange={setPromptModelChoice}
       onPromptVoiceToggle={isRightAgentAreaOpen ? handleRightPromptVoiceToggle : undefined}
       onSelectThread={onSelectThread}
       onThreadResolved={onThreadResolved}

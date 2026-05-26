@@ -145,6 +145,7 @@ export const createAdminRoutes = (
       store.listAiUsageRequests({
         userId: readOptionalQueryString(context.req.query("userId")),
         computerId: readOptionalQueryString(context.req.query("computerId")),
+        provider: readOptionalQueryString(context.req.query("provider")),
         status: readAiUsageStatus(context.req.query("status")),
         model: readOptionalQueryString(context.req.query("model")),
         from: readOptionalDate(context.req.query("from")),
@@ -164,6 +165,7 @@ export const createAdminRoutes = (
     const summary = await store.summarizeAiUsageRequests({
       userId: readOptionalQueryString(context.req.query("userId")),
       computerId: readOptionalQueryString(context.req.query("computerId")),
+      provider: readOptionalQueryString(context.req.query("provider")),
       model: readOptionalQueryString(context.req.query("model")),
       status: readAiUsageStatus(context.req.query("status")),
       from: readOptionalDate(context.req.query("from")),
@@ -177,6 +179,7 @@ export const createAdminRoutes = (
     const buckets = await store.bucketAiUsageRequests({
       userId: readOptionalQueryString(context.req.query("userId")),
       computerId: readOptionalQueryString(context.req.query("computerId")),
+      provider: readOptionalQueryString(context.req.query("provider")),
       model: readOptionalQueryString(context.req.query("model")),
       status: readAiUsageStatus(context.req.query("status")),
       from: readOptionalDate(context.req.query("from")),
@@ -194,6 +197,7 @@ export const createAdminRoutes = (
         groupBy,
         userId: readOptionalQueryString(context.req.query("userId")),
         computerId: readOptionalQueryString(context.req.query("computerId")),
+        provider: readOptionalQueryString(context.req.query("provider")),
         model: readOptionalQueryString(context.req.query("model")),
         status: readAiUsageStatus(context.req.query("status")),
         from: readOptionalDate(context.req.query("from")),
@@ -380,6 +384,21 @@ export const createAdminRoutes = (
       userId: context.req.param("userId"),
       password: stringField(body, "password", { required: true, maxLength: 1024 }) ?? "",
     });
+
+    return context.json({ user: serializeUser(user) });
+  });
+
+  app.patch("/users/:userId/model-access", async (context) => {
+    const body = await readJsonBody(context.req.raw);
+    const allowPiModels = booleanField(body, "allowPiModels", { required: true }) ?? false;
+    const user = await store.updateUserModelAccess({
+      userId: context.req.param("userId"),
+      allowPiModels,
+    });
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
 
     return context.json({ user: serializeUser(user) });
   });
@@ -603,6 +622,28 @@ const buildStats = (
   idleComputers: computers.filter((computer) => computer.status === "idle").length,
   failedComputers: computers.filter((computer) => computer.status === "failed").length,
 });
+
+const booleanField = (
+  input: Record<string, unknown>,
+  key: string,
+  options: { readonly required?: boolean } = {},
+): boolean | undefined => {
+  const value = input[key];
+
+  if (value === undefined) {
+    if (options.required === true) {
+      throw badRequest("INVALID_BODY", `${key} is required`);
+    }
+
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw badRequest("INVALID_BODY", `${key} must be a boolean`);
+  }
+
+  return value;
+};
 
 const readComputer = async (store: CloudStore, computerId: string): Promise<ComputerRecord> => {
   const computer = await store.getComputerById(computerId);
@@ -852,6 +893,7 @@ const readBucketGranularity = (value: string | undefined): AiUsageBucketGranular
 };
 
 const VALID_AI_USAGE_GROUP_BY: ReadonlySet<AiUsageGroupBy> = new Set([
+  "provider",
   "model",
   "status",
   "user",

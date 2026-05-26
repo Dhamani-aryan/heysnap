@@ -133,6 +133,35 @@ describe("admin user management", () => {
     expect(newLogin.status).toBe(200);
   });
 
+  it("lets admins update user Pi model access", async () => {
+    const { app } = createTestApp();
+    const owner = await registerUser(app, "pi-models@example.com");
+
+    const initial = await app.request(`/admin/users/${owner.userId}`, {
+      headers: adminHeaders(),
+    });
+    expect(await initial.json()).toMatchObject({
+      user: { allowPiModels: false },
+    });
+
+    const update = await app.request(`/admin/users/${owner.userId}/model-access`, {
+      method: "PATCH",
+      body: JSON.stringify({ allowPiModels: true }),
+      headers: adminHeaders(),
+    });
+    expect(update.status).toBe(200);
+    expect(await update.json()).toMatchObject({
+      user: { id: owner.userId, allowPiModels: true },
+    });
+
+    const me = await app.request("/auth/me", {
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    expect(await me.json()).toMatchObject({
+      user: { id: owner.userId, allowPiModels: true },
+    });
+  });
+
   it("rejects weak passwords on reset", async () => {
     const { app } = createTestApp();
     const owner = await registerUser(app, "weakpw@example.com");
@@ -318,6 +347,19 @@ describe("admin AI usage analytics", () => {
       userId: owner.userId,
       computerId: computer.id,
       identityId: identity!.id,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      status: "succeeded",
+      inputTokens: 30,
+      outputTokens: 12,
+      durationMs: 800,
+      startedAt: new Date("2026-04-04T10:00:00Z"),
+      upstreamPath: "/v1/messages",
+    });
+    await seedAiUsage(store, {
+      userId: owner.userId,
+      computerId: computer.id,
+      identityId: identity!.id,
       model: "gpt-4o-mini",
       status: "failed",
       inputTokens: 10,
@@ -361,7 +403,23 @@ describe("admin AI usage analytics", () => {
     );
     expect(filteredByFrom.status).toBe(200);
     const fromBody = await filteredByFrom.json() as { readonly usage: unknown[] };
-    expect(fromBody.usage).toHaveLength(2);
+    expect(fromBody.usage).toHaveLength(3);
+
+    const filteredByProvider = await app.request(
+      "/admin/ai-usage?provider=anthropic",
+      { headers: adminHeaders() },
+    );
+    expect(filteredByProvider.status).toBe(200);
+    const providerBody = await filteredByProvider.json() as {
+      readonly usage: ReadonlyArray<{ readonly provider: string; readonly model: string; readonly upstreamPath: string }>;
+    };
+    expect(providerBody.usage).toEqual([
+      expect.objectContaining({
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        upstreamPath: "/v1/messages",
+      }),
+    ]);
   });
 
   it("returns rich summary fields", async () => {
@@ -626,6 +684,20 @@ describe("admin AI usage analytics", () => {
     const labelByKey = new Map(userBody.groups.map((row) => [row.key, row.label]));
     expect(labelByKey.get(userA.userId)).toBe("ai-break-a@example.com");
     expect(labelByKey.get(userB.userId)).toBe("ai-break-b@example.com");
+
+    const providerResponse = await app.request(
+      "/admin/ai-usage/breakdown?groupBy=provider",
+      { headers: adminHeaders() },
+    );
+    expect(providerResponse.status).toBe(200);
+    const providerBody = await providerResponse.json() as {
+      readonly groupBy: string;
+      readonly groups: ReadonlyArray<{ readonly key: string; readonly requestCount: number }>;
+    };
+    expect(providerBody.groupBy).toBe("provider");
+    expect(providerBody.groups).toEqual([
+      expect.objectContaining({ key: "azure", requestCount: 3 }),
+    ]);
   });
 
   it("returns combined per-user analytics", async () => {
@@ -806,6 +878,7 @@ const seedAiUsage = async (
     readonly userId: string;
     readonly computerId: string;
     readonly identityId: string;
+    readonly provider?: string;
     readonly model: string | null;
     readonly status: "started" | "succeeded" | "failed" | "aborted";
     readonly inputTokens: number;
@@ -822,7 +895,7 @@ const seedAiUsage = async (
     userId: input.userId,
     computerId: input.computerId,
     machineIdentityId: input.identityId,
-    provider: "azure",
+    provider: input.provider ?? "azure",
     model: input.model,
     method: "POST",
     upstreamPath: input.upstreamPath ?? "/openai/v1/chat/completions",

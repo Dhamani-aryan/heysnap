@@ -5,6 +5,7 @@ export const serializeUser = (user: AuthenticatedUser) => ({
   id: user.id,
   email: user.email,
   username: user.username,
+  allowPiModels: user.allowPiModels,
   createdAt: user.createdAt.toISOString(),
   updatedAt: user.updatedAt.toISOString(),
 });

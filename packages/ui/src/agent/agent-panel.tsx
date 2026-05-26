@@ -12,9 +12,9 @@ import {
   useOptionalAgentRuntime,
 } from "./agent-runtime";
 import { AgentEmptyThread } from "./empty-thread";
-import { RightPromptComposer, type PromptAttachment, type PromptVoiceState } from "./prompt-composer";
+import { RightPromptComposer, type PromptAttachment, type PromptModelChoice, type PromptVoiceState } from "./prompt-composer";
 import { AgentTimeline } from "./timeline";
-import type { AgentThreadSummary, AgentUiContext } from "./types";
+import type { AgentContent, AgentThreadSummary, AgentUiContext } from "./types";
 
 export interface AgentPanelProps {
   readonly agentBaseUrl: string;
@@ -25,11 +25,14 @@ export interface AgentPanelProps {
   readonly workspaceRoot?: string;
   readonly promptDraft?: string;
   readonly promptAttachments?: readonly PromptAttachment[];
+  readonly promptModelChoice?: PromptModelChoice;
+  readonly allowModelSelection?: boolean;
   readonly promptVoiceState?: PromptVoiceState;
   readonly promptAutoFocusToken?: number;
   readonly onOpenFilePath?: (path: string) => void;
   readonly onPromptDraftChange?: (draft: string) => void;
   readonly onPromptAttachmentsChange?: (attachments: PromptAttachment[]) => void;
+  readonly onPromptModelChoiceChange?: (choice: PromptModelChoice) => void;
   readonly onPromptVoiceToggle?: () => void;
   readonly onSelectThread?: (thread: AgentThreadSummary) => void;
   readonly onThreadResolved?: (threadId: string) => void;
@@ -57,11 +60,14 @@ const AgentPanelContent = ({
   workspaceRoot,
   promptDraft,
   promptAttachments,
+  promptModelChoice = "gpt",
+  allowModelSelection = false,
   promptVoiceState,
   promptAutoFocusToken,
   onOpenFilePath,
   onPromptDraftChange,
   onPromptAttachmentsChange,
+  onPromptModelChoiceChange,
   onPromptVoiceToggle,
   onSelectThread,
   onThreadResolved,
@@ -74,6 +80,11 @@ const AgentPanelContent = ({
   const loadStatus = useAgentChatStore((state) => state.loadStatus);
   const loadError = useAgentChatStore((state) => state.loadError);
   const isRunning = activeRun !== null;
+  const canChangeModel =
+    allowModelSelection &&
+    selectedThreadId === null &&
+    !isRunning &&
+    onPromptModelChoiceChange !== undefined;
   const { cancel, steer, submit } = useAgentRunMutation({
     currentPath,
     uiContext,
@@ -99,7 +110,22 @@ const AgentPanelContent = ({
     onAttachmentsChange: onPromptAttachmentsChange,
     onVoiceToggle: onPromptVoiceToggle,
     onCancel: cancel,
-    onSubmit: isRunning ? steer : submit,
+    modelPicker: allowModelSelection ? {
+      value: selectedThreadId === null ? promptModelChoice : getThreadModelChoice(selectedThreadId),
+      disabled: !canChangeModel,
+      onChange: onPromptModelChoiceChange ?? (() => {}),
+    } : undefined,
+    onSubmit: isRunning
+      ? steer
+      : (input: { readonly content: AgentContent }) =>
+        submit({
+          ...input,
+          ...getNewThreadModelSelection({
+            allowModelSelection,
+            selectedThreadId,
+            promptModelChoice,
+          }),
+        }),
   };
 
   if (selectedThreadId === null && !hasMessages && !isRunning) {
@@ -124,6 +150,41 @@ const AgentPanelContent = ({
       </div>
     </div>
   );
+};
+
+const getNewThreadModelSelection = ({
+  allowModelSelection,
+  selectedThreadId,
+  promptModelChoice,
+}: {
+  readonly allowModelSelection: boolean;
+  readonly selectedThreadId: string | null;
+  readonly promptModelChoice: PromptModelChoice;
+}) => {
+  if (!allowModelSelection || selectedThreadId !== null) {
+    return {};
+  }
+
+  if (promptModelChoice === "claude") {
+    return {
+      harness: "pi" as const,
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+    };
+  }
+
+  return { harness: "codex" as const };
+};
+
+const getThreadModelChoice = (threadId: string): PromptModelChoice =>
+  decodeThreadId(threadId).startsWith("pi:") ? "claude" : "gpt";
+
+const decodeThreadId = (threadId: string): string => {
+  try {
+    return decodeURIComponent(threadId);
+  } catch {
+    return threadId;
+  }
 };
 
 const AgentPanelState = ({

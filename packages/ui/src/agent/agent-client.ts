@@ -1,5 +1,6 @@
 import type {
   AgentContent,
+  AgentHarnessName,
   AgentRunEvent,
   AgentThread,
   AgentThreadGroup,
@@ -50,6 +51,9 @@ export interface StartAgentRunInput {
   readonly path: string;
   readonly content: AgentContent;
   readonly uiContext?: AgentUiContext;
+  readonly harness?: AgentHarnessName;
+  readonly provider?: string;
+  readonly model?: string;
 }
 
 export interface SteerAgentRunInput {

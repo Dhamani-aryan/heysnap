@@ -11,3 +11,4 @@ coverage
 .local/
 .secrets/
 infra/machine-image/manifest.json
+.codex

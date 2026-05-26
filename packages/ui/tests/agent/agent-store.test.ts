@@ -508,6 +508,31 @@ describe("agent chat store projector", () => {
     });
   });
 
+  it("marks failed context compaction activities as failed", () => {
+    const store = createAgentChatStore();
+    const compactionItem: AgentRuntimeItem = {
+      id: "compact-failed",
+      itemType: "context_compaction",
+      status: "failed",
+      title: "Context compacted",
+      summary: "Compaction model quota exceeded",
+      isError: true,
+    };
+
+    store.getState().applyRuntimeEvent(baseEvent("item.completed", {
+      item: compactionItem,
+    }, 1));
+
+    expect(store.getState().activeCompactionItemIds).toEqual([]);
+    expect(store.getState().activitiesById["activity:compact-failed"]).toMatchObject({
+      kind: "info",
+      tone: "error",
+      status: "failed",
+      title: "Context compacted",
+      summary: "Compaction model quota exceeded",
+    });
+  });
+
   it("completes streamed assistant messages without replacing streamed text or message object", () => {
     const store = createAgentChatStore();
     const message = assistantMessage("assistant-1");

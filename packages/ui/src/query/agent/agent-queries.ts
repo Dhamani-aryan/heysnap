@@ -17,6 +17,7 @@ import { useAgentRuntime } from "../../agent/agent-runtime";
 import { selectHasStreamingThreads } from "../../stores/agent/agent-thread-list-store";
 import type {
   AgentContent,
+  AgentHarnessName,
   AgentRunEvent,
   AgentThreadGroup,
   AgentThreadSummary,
@@ -211,7 +212,17 @@ export const useAgentRunMutation = ({
     onThreadResolved,
   });
   const mutation = useMutation({
-    mutationFn: async ({ content }: { readonly content: AgentContent }) => {
+    mutationFn: async ({
+      content,
+      harness,
+      provider,
+      model,
+    }: {
+      readonly content: AgentContent;
+      readonly harness?: AgentHarnessName;
+      readonly provider?: string;
+      readonly model?: string;
+    }) => {
       if (runtime.activeRunHandleRef.current !== null) {
         throw new Error("An agent run is already active.");
       }
@@ -234,6 +245,9 @@ export const useAgentRunMutation = ({
         path: currentPath,
         content,
         uiContext,
+        harness,
+        provider,
+        model,
       }, {
         onRunStart: ({ runId, threadId }) => {
           runtime.chatStore.getState().markRunStarted({ runId, threadId });
@@ -284,7 +298,12 @@ export const useAgentRunMutation = ({
     },
   });
 
-  const submit = useCallback((input: { readonly content: AgentContent }): boolean => {
+  const submit = useCallback((input: {
+    readonly content: AgentContent;
+    readonly harness?: AgentHarnessName;
+    readonly provider?: string;
+    readonly model?: string;
+  }): boolean => {
     if (runtime.activeRunHandleRef.current !== null) {
       return false;
     }

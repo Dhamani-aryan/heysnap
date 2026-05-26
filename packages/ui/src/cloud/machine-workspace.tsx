@@ -74,6 +74,7 @@ export interface MachineWorkspaceProps {
   readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
   readonly feedbackUrl?: string;
+  readonly allowModelSelection?: boolean;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
@@ -97,6 +98,7 @@ export function MachineWorkspace({
   filesystemPreviewBaseUrl,
   filesystemWebsocketUrl,
   feedbackUrl,
+  allowModelSelection = false,
   sarvamApiKey,
   selectedThreadId = null,
   workspacePanel = "chat",
@@ -1278,6 +1280,7 @@ export function MachineWorkspace({
           workspacePersistenceKey={`filesystem:${computer.id}`}
           filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
           feedbackUrl={feedbackUrl}
+          allowModelSelection={allowModelSelection}
           agentBaseUrl={agentBaseUrl}
           sarvamApiKey={sarvamApiKey}
           browserControlStatus={browserControlStatus}

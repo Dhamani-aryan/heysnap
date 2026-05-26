@@ -19,6 +19,7 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   username: text("username").notNull(),
   passwordHash: text("password_hash").notNull(),
+  allowPiModels: boolean("allow_pi_models").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({

@@ -21,6 +21,13 @@ export type PromptAttachment = {
 };
 
 export type PromptVoiceState = "idle" | "starting" | "recording" | "transcribing";
+export type PromptModelChoice = "gpt" | "claude";
+
+export interface PromptModelPickerState {
+  readonly value: PromptModelChoice;
+  readonly disabled?: boolean;
+  readonly onChange: (value: PromptModelChoice) => void;
+}
 
 export interface RightPromptComposerProps {
   readonly isRunning?: boolean;
@@ -28,6 +35,7 @@ export interface RightPromptComposerProps {
   readonly draft?: string;
   readonly attachments?: readonly PromptAttachment[];
   readonly activeFolderName?: string;
+  readonly modelPicker?: PromptModelPickerState;
   readonly voiceState?: PromptVoiceState;
   readonly autoFocus?: boolean;
   readonly autoFocusToken?: number;
@@ -167,6 +175,7 @@ export const RightPromptComposer = ({
   draft: controlledDraft,
   attachments: controlledAttachments,
   activeFolderName,
+  modelPicker,
   voiceState = "idle",
   autoFocus = false,
   autoFocusToken,
@@ -468,6 +477,25 @@ export const RightPromptComposer = ({
               <HugeiconsIcon icon={Folder01Icon} size={14} color="currentColor" strokeWidth={1.9} />
               <span>{activeFolderName}</span>
             </div>
+          )}
+
+          {modelPicker === undefined ? null : (
+            <label
+              className="prompt-model-picker"
+              title={modelPicker.disabled === true ? "Model can only be changed before starting a new chat" : "Choose model"}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <span className="sr-only">Model</span>
+              <select
+                value={modelPicker.value}
+                disabled={modelPicker.disabled === true}
+                aria-label="Model"
+                onChange={(event) => modelPicker.onChange(event.target.value as PromptModelChoice)}
+              >
+                <option value="gpt">GPT</option>
+                <option value="claude">Claude</option>
+              </select>
+            </label>
           )}
         </div>
 

@@ -228,6 +228,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
             <TableHeader>
               <TableRow>
                 <TableHead className="w-32">Started</TableHead>
+                <TableHead>Provider</TableHead>
                 <TableHead>Model</TableHead>
                 {scope.kind === "user" ? (
                   <TableHead>Machine</TableHead>
@@ -243,13 +244,13 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
             <TableBody>
               {list.loading ? (
                 <TableRow>
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={8}>
                     <Skeleton className="h-5" />
                   </TableCell>
                 </TableRow>
               ) : (list.data?.usage ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
                     No AI requests in this window
                   </TableCell>
                 </TableRow>
@@ -261,6 +262,7 @@ export const AiUsagePanel: React.FC<AiUsagePanelProps> = ({ scope, defaultWindow
                         <RelativeTime value={row.startedAt} />
                       </Link>
                     </TableCell>
+                    <TableCell className="font-mono text-xs">{row.provider}</TableCell>
                     <TableCell className="font-mono text-xs">{row.model ?? "—"}</TableCell>
                     {scope.kind === "user" ? (
                       <TableCell className="text-sm">

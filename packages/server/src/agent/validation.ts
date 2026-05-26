@@ -36,7 +36,10 @@ export const isAgentClientMessage = (value: unknown): value is AgentClientMessag
       return (
         optionalString(value["threadId"]) &&
         typeof value["path"] === "string" &&
-        isAgentContent(value["content"])
+        isAgentContent(value["content"]) &&
+        isAgentHarnessName(value["harness"]) &&
+        isThreadHarnessSelection(value["threadId"], value["harness"]) &&
+        isProviderModelSelection(value["provider"], value["model"])
       );
     case "cancelRun":
       return typeof value["threadId"] === "string" && typeof value["runId"] === "string";
@@ -79,6 +82,46 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const optionalString = (value: unknown): boolean =>
   value === undefined || typeof value === "string";
+
+const isProviderModelSelection = (provider: unknown, model: unknown): boolean => {
+  if (provider === undefined && model === undefined) {
+    return true;
+  }
+
+  return typeof provider === "string" &&
+    provider.trim().length > 0 &&
+    typeof model === "string" &&
+    model.trim().length > 0;
+};
+
+const isAgentHarnessName = (value: unknown): boolean =>
+  value === undefined || value === "codex" || value === "pi";
+
+const isThreadHarnessSelection = (threadId: unknown, harness: unknown): boolean => {
+  if (harness === undefined || threadId === undefined || typeof threadId !== "string") {
+    return true;
+  }
+
+  const normalizedThreadId = safeDecodeURIComponent(threadId);
+
+  if (normalizedThreadId.startsWith("pi:")) {
+    return harness === "pi";
+  }
+
+  if (normalizedThreadId.startsWith("codex:")) {
+    return harness === "codex";
+  }
+
+  return harness === "codex";
+};
+
+const safeDecodeURIComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
 
 const optionalPositiveInteger = (value: unknown): boolean =>
   value === undefined || (Number.isInteger(value) && typeof value === "number" && value > 0);

@@ -15,6 +15,7 @@ export interface UserRecord {
   readonly email: string;
   readonly username: string;
   readonly passwordHash: string;
+  readonly allowPiModels: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -175,7 +176,7 @@ export interface AiUsageBucket {
   readonly failedCount: number;
 }
 
-export type AiUsageGroupBy = "model" | "status" | "user" | "computer";
+export type AiUsageGroupBy = "provider" | "model" | "status" | "user" | "computer";
 
 export interface AiUsageBreakdownRow {
   readonly key: string;
@@ -203,6 +204,10 @@ export interface CloudStore {
   updateUserPassword(input: {
     readonly userId: string;
     readonly passwordHash: string;
+  }): Promise<UserRecord | null>;
+  updateUserModelAccess(input: {
+    readonly userId: string;
+    readonly allowPiModels: boolean;
   }): Promise<UserRecord | null>;
   deleteUserById(userId: string): Promise<boolean>;
 
@@ -389,6 +394,7 @@ export interface CloudStore {
   listAiUsageRequests(input?: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly status?: AiUsageStatus;
     readonly model?: string;
     readonly from?: Date;
@@ -398,6 +404,7 @@ export interface CloudStore {
   summarizeAiUsageRequests(input?: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -406,6 +413,7 @@ export interface CloudStore {
   bucketAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -416,6 +424,7 @@ export interface CloudStore {
     readonly groupBy: AiUsageGroupBy;
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;

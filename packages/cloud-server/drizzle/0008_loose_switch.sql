@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "allow_pi_models" boolean DEFAULT false NOT NULL;

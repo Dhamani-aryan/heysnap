@@ -50,6 +50,7 @@ export class InMemoryCloudStore implements CloudStore {
       email: input.email,
       username: input.username,
       passwordHash: input.passwordHash,
+      allowPiModels: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -84,6 +85,21 @@ export class InMemoryCloudStore implements CloudStore {
     }
 
     const updated = { ...user, passwordHash: input.passwordHash, updatedAt: new Date() };
+    this.users.set(input.userId, updated);
+    return updated;
+  }
+
+  async updateUserModelAccess(input: {
+    readonly userId: string;
+    readonly allowPiModels: boolean;
+  }): Promise<UserRecord | null> {
+    const user = this.users.get(input.userId);
+
+    if (user === undefined) {
+      return null;
+    }
+
+    const updated = { ...user, allowPiModels: input.allowPiModels, updatedAt: new Date() };
     this.users.set(input.userId, updated);
     return updated;
   }
@@ -713,6 +729,7 @@ export class InMemoryCloudStore implements CloudStore {
   async listAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly status?: AiUsageStatus;
     readonly model?: string;
     readonly from?: Date;
@@ -727,6 +744,7 @@ export class InMemoryCloudStore implements CloudStore {
   async summarizeAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -738,6 +756,7 @@ export class InMemoryCloudStore implements CloudStore {
   async bucketAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -751,6 +770,7 @@ export class InMemoryCloudStore implements CloudStore {
     readonly groupBy: AiUsageGroupBy;
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -763,6 +783,7 @@ export class InMemoryCloudStore implements CloudStore {
   private filterAiUsageRows(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly status?: AiUsageStatus;
     readonly model?: string;
     readonly from?: Date;
@@ -772,6 +793,7 @@ export class InMemoryCloudStore implements CloudStore {
     return Array.from(this.aiUsageRequests.values())
       .filter((usage) => input.userId === undefined || usage.userId === input.userId)
       .filter((usage) => input.computerId === undefined || usage.computerId === input.computerId)
+      .filter((usage) => input.provider === undefined || usage.provider === input.provider)
       .filter((usage) => input.status === undefined || usage.status === input.status)
       .filter((usage) => input.model === undefined || usage.model === input.model)
       .filter((usage) => input.before === undefined || usage.startedAt.getTime() < input.before.getTime())

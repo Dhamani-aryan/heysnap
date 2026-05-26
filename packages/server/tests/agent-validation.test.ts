@@ -35,10 +35,58 @@ describe("agent validation", () => {
       requestId: "send-1",
       path: "Projects",
       content: [{ type: "text", content: "Build this" }],
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-7",
     }))).toMatchObject({
       type: "sendMessage",
       requestId: "send-1",
       path: "Projects",
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-7",
     });
+  });
+
+  it("rejects invalid harness selections", () => {
+    expect(() => parseAgentClientMessage(JSON.stringify({
+      type: "sendMessage",
+      requestId: "send-1",
+      path: "Projects",
+      content: [{ type: "text", content: "Build this" }],
+      harness: "other",
+    }))).toThrow(AgentError);
+  });
+
+  it("rejects mismatched thread and harness selections", () => {
+    expect(() => parseAgentClientMessage(JSON.stringify({
+      type: "sendMessage",
+      requestId: "send-1",
+      threadId: "pi:thread-1",
+      path: "Projects",
+      content: [{ type: "text", content: "Build this" }],
+      harness: "codex",
+    }))).toThrow(AgentError);
+  });
+
+  it("rejects mismatched encoded thread and harness selections", () => {
+    expect(() => parseAgentClientMessage(JSON.stringify({
+      type: "sendMessage",
+      requestId: "send-1",
+      threadId: "pi%3Athread-1",
+      path: "Projects",
+      content: [{ type: "text", content: "Build this" }],
+      harness: "codex",
+    }))).toThrow(AgentError);
+  });
+
+  it("rejects partial provider/model selections", () => {
+    expect(() => parseAgentClientMessage(JSON.stringify({
+      type: "sendMessage",
+      requestId: "send-1",
+      path: "Projects",
+      content: [{ type: "text", content: "Build this" }],
+      provider: "anthropic",
+    }))).toThrow(AgentError);
   });
 });

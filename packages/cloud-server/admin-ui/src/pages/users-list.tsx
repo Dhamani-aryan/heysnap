@@ -1,4 +1,4 @@
-import { Eye, KeyRound, MoreHorizontal, RefreshCw, Trash2, UserPlus } from "lucide-react";
+import { Eye, KeyRound, MoreHorizontal, RefreshCw, Sparkles, Trash2, UserPlus } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -82,6 +83,19 @@ export const UsersListPage = () => {
     }
   };
 
+  const handleTogglePiModels = async (user: AdminUserSummary) => {
+    setActionBusy(true);
+    try {
+      await adminApi.setUserModelAccess(user.id, !user.allowPiModels);
+      toast.success(user.allowPiModels ? "Pi models disabled" : "Pi models enabled");
+      users.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Failed to update model access");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -119,6 +133,7 @@ export const UsersListPage = () => {
                 <TableHead>Username</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead className="w-40">User ID</TableHead>
+                <TableHead className="w-28">Pi models</TableHead>
                 <TableHead className="w-24">Machines</TableHead>
                 <TableHead className="w-36">Created</TableHead>
                 <TableHead className="w-12" />
@@ -128,7 +143,7 @@ export const UsersListPage = () => {
               {users.loading ? (
                 Array.from({ length: 4 }).map((_, index) => (
                   <TableRow key={index}>
-                    {Array.from({ length: 6 }).map((__, cellIndex) => (
+                    {Array.from({ length: 7 }).map((__, cellIndex) => (
                       <TableCell key={cellIndex}>
                         <Skeleton className="h-4" />
                       </TableCell>
@@ -137,7 +152,7 @@ export const UsersListPage = () => {
                 ))
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
                     No users found
                   </TableCell>
                 </TableRow>
@@ -151,6 +166,11 @@ export const UsersListPage = () => {
                     </TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{user.id}</TableCell>
+                    <TableCell>
+                      <Badge variant={user.allowPiModels ? "success" : "secondary"}>
+                        {user.allowPiModels ? "Allowed" : "Off"}
+                      </Badge>
+                    </TableCell>
                     <TableCell>{user.computerCount ?? user.computers?.length ?? 0}</TableCell>
                     <TableCell>
                       <RelativeTime value={user.createdAt} />
@@ -169,6 +189,16 @@ export const UsersListPage = () => {
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            disabled={actionBusy}
+                            onClick={() => {
+                              void handleTogglePiModels(user);
+                            }}
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            {user.allowPiModels ? "Disable Pi models" : "Enable Pi models"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={actionBusy}
                             onClick={() => {
                               setActionUser(user);
                               setActionKind("password");

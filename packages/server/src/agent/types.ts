@@ -187,6 +187,8 @@ export interface GetThreadInput {
   readonly threadId: string;
 }
 
+export type AgentHarnessName = "codex" | "pi";
+
 export interface AgentUiContext {
   readonly openFiles: readonly AgentUiOpenFile[];
 }
@@ -201,6 +203,9 @@ export interface SendMessageInput {
   readonly path: string;
   readonly content: AgentContent;
   readonly uiContext?: AgentUiContext;
+  readonly harness?: AgentHarnessName;
+  readonly provider?: string;
+  readonly model?: string;
 }
 
 export interface EditThreadUserMessageInput {
@@ -396,6 +401,9 @@ export type AgentClientMessage =
       readonly threadId?: string;
       readonly path: string;
       readonly content: AgentContent;
+      readonly harness?: AgentHarnessName;
+      readonly provider?: string;
+      readonly model?: string;
     }
   | { readonly type: "cancelRun"; readonly requestId: string; readonly threadId: string; readonly runId: string };
 

@@ -83,6 +83,19 @@ export class DrizzleCloudStore implements CloudStore {
     return user ?? null;
   }
 
+  async updateUserModelAccess(input: {
+    readonly userId: string;
+    readonly allowPiModels: boolean;
+  }): Promise<UserRecord | null> {
+    const updatedAt = new Date();
+    const [user] = await this.db
+      .update(users)
+      .set({ allowPiModels: input.allowPiModels, updatedAt })
+      .where(eq(users.id, input.userId))
+      .returning();
+    return user ?? null;
+  }
+
   async deleteUserById(userId: string): Promise<boolean> {
     const deleted = await this.db
       .delete(users)
@@ -624,6 +637,7 @@ export class DrizzleCloudStore implements CloudStore {
   async listAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly status?: AiUsageStatus;
     readonly model?: string;
     readonly from?: Date;
@@ -641,6 +655,7 @@ export class DrizzleCloudStore implements CloudStore {
   async summarizeAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -659,6 +674,7 @@ export class DrizzleCloudStore implements CloudStore {
   async bucketAiUsageRequests(input: {
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -676,6 +692,7 @@ export class DrizzleCloudStore implements CloudStore {
     readonly groupBy: AiUsageGroupBy;
     readonly userId?: string;
     readonly computerId?: string;
+    readonly provider?: string;
     readonly model?: string;
     readonly status?: AiUsageStatus;
     readonly from?: Date;
@@ -720,6 +737,7 @@ const buildFeedbackReportWhere = (input: {
 const buildAiUsageWhere = (input: {
   readonly userId?: string;
   readonly computerId?: string;
+  readonly provider?: string;
   readonly status?: AiUsageStatus;
   readonly model?: string;
   readonly before?: Date;
@@ -734,6 +752,10 @@ const buildAiUsageWhere = (input: {
 
   if (input.computerId !== undefined) {
     conditions.push(eq(aiUsageRequests.computerId, input.computerId));
+  }
+
+  if (input.provider !== undefined) {
+    conditions.push(eq(aiUsageRequests.provider, input.provider));
   }
 
   if (input.status !== undefined) {

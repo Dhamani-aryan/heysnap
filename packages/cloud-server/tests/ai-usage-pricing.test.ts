@@ -96,4 +96,59 @@ describe("AI usage pricing", () => {
       ],
     });
   });
+
+  it("prices claude-sonnet-4-6 cache writes, cache reads, input, and output", () => {
+    const cost = calculateAiUsageCost({
+      model: "claude-sonnet-4-6",
+      inputTokens: 115,
+      outputTokens: 7,
+      cachedInputTokens: 3,
+      reasoningOutputTokens: 0,
+      metadata: {
+        upstreamUsage: {
+          input_tokens: 100,
+          output_tokens: 7,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 10,
+            ephemeral_1h_input_tokens: 2,
+          },
+          cache_read_input_tokens: 3,
+        },
+      },
+    });
+
+    expect(cost).toMatchObject({
+      model: "claude-sonnet-4-6",
+      rateMode: "standard",
+      totalUsd: 0.0004554,
+      lineItems: [
+        { key: "input", tokens: 100, rateUsdPerMillion: 3 },
+        { key: "cache-write-5m", tokens: 10, rateUsdPerMillion: 3.75 },
+        { key: "cache-write-1h", tokens: 2, rateUsdPerMillion: 6 },
+        { key: "cache-read", tokens: 3, rateUsdPerMillion: 0.3 },
+        { key: "output", tokens: 7, rateUsdPerMillion: 15 },
+      ],
+    });
+  });
+
+  it("prices claude-opus-4-7 with standard Anthropic rates", () => {
+    const cost = calculateAiUsageCost({
+      model: "claude-opus-4-7",
+      inputTokens: 10,
+      outputTokens: 4,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0,
+      metadata: {},
+    });
+
+    expect(cost).toMatchObject({
+      model: "claude-opus-4-7",
+      rateMode: "standard",
+      totalUsd: 0.00015,
+      lineItems: [
+        { key: "input", tokens: 10, rateUsdPerMillion: 5 },
+        { key: "output", tokens: 4, rateUsdPerMillion: 25 },
+      ],
+    });
+  });
 });

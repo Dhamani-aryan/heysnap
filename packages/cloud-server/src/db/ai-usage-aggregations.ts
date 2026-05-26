@@ -238,6 +238,8 @@ const readGroupKey = (
   groupBy: AiUsageGroupBy,
 ): string => {
   switch (groupBy) {
+    case "provider":
+      return row.provider;
     case "model":
       return row.model ?? "unknown";
     case "status":

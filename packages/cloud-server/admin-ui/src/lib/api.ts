@@ -151,6 +151,11 @@ export const adminApi = {
       method: "POST",
       body: { password },
     }),
+  setUserModelAccess: (userId: string, allowPiModels: boolean) =>
+    request<{ readonly user: AdminUser }>(`/admin/users/${encodeURIComponent(userId)}/model-access`, {
+      method: "PATCH",
+      body: { allowPiModels },
+    }),
   revokeAllUserSessions: (userId: string) =>
     request<{ readonly revokedCount: number }>(
       `/admin/users/${encodeURIComponent(userId)}/sessions/revoke-all`,
@@ -234,6 +239,7 @@ interface FeedbackListParams {
 interface AiUsageFilterParams {
   readonly userId?: string;
   readonly computerId?: string;
+  readonly provider?: string;
   readonly model?: string;
   readonly status?: AiUsageStatus;
   readonly from?: string | Date;
