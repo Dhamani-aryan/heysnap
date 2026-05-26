@@ -57,6 +57,16 @@ export const parseBrowserControlServerMessage = (data: unknown): BrowserControlS
       : null;
   }
 
+  if (message["type"] === "pong") {
+    return typeof message["requestId"] === "string" && typeof message["serverTime"] === "string"
+      ? {
+          type: "pong",
+          requestId: message["requestId"],
+          serverTime: message["serverTime"],
+        }
+      : null;
+  }
+
   if (message["type"] === "attachment.chunk") {
     return typeof message["requestId"] === "string" &&
       typeof message["chunkRequestId"] === "string" &&
