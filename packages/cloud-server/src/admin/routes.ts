@@ -388,6 +388,21 @@ export const createAdminRoutes = (
     return context.json({ user: serializeUser(user) });
   });
 
+  app.patch("/users/:userId/model-access", async (context) => {
+    const body = await readJsonBody(context.req.raw);
+    const allowPiModels = booleanField(body, "allowPiModels", { required: true }) ?? false;
+    const user = await store.updateUserModelAccess({
+      userId: context.req.param("userId"),
+      allowPiModels,
+    });
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    return context.json({ user: serializeUser(user) });
+  });
+
   app.post("/users/:userId/sessions/revoke-all", async (context) => {
     const userId = context.req.param("userId");
     const user = await store.getUserById(userId);
@@ -607,6 +622,28 @@ const buildStats = (
   idleComputers: computers.filter((computer) => computer.status === "idle").length,
   failedComputers: computers.filter((computer) => computer.status === "failed").length,
 });
+
+const booleanField = (
+  input: Record<string, unknown>,
+  key: string,
+  options: { readonly required?: boolean } = {},
+): boolean | undefined => {
+  const value = input[key];
+
+  if (value === undefined) {
+    if (options.required === true) {
+      throw badRequest("INVALID_BODY", `${key} is required`);
+    }
+
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw badRequest("INVALID_BODY", `${key} must be a boolean`);
+  }
+
+  return value;
+};
 
 const readComputer = async (store: CloudStore, computerId: string): Promise<ComputerRecord> => {
   const computer = await store.getComputerById(computerId);
