@@ -19,6 +19,9 @@ export interface CloudServerConfig {
   readonly aiGatewayAzureBaseUrl?: string;
   readonly aiGatewayAzureImagesBaseUrl?: string;
   readonly aiGatewayAzureApiKey?: string;
+  readonly aiGatewayAnthropicBaseUrl?: string;
+  readonly aiGatewayAnthropicApiKey?: string;
+  readonly aiGatewayAnthropicWorkspaceId?: string;
   readonly aiGatewayCaptureBodies?: boolean;
   readonly aiGatewayCaptureBodyMaxBytes?: number;
   readonly firecrawlBaseUrl?: string;
@@ -57,6 +60,9 @@ export const getCloudServerConfig = (
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
+  aiGatewayAnthropicBaseUrl: readOptionalEnv(env, "AI_GATEWAY_ANTHROPIC_BASE_URL"),
+  aiGatewayAnthropicApiKey: readOptionalEnv(env, "AI_GATEWAY_ANTHROPIC_API_KEY"),
+  aiGatewayAnthropicWorkspaceId: readOptionalEnv(env, "AI_GATEWAY_ANTHROPIC_WORKSPACE_ID"),
   aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, false),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
@@ -92,6 +98,9 @@ export const getDevelopmentCloudServerConfig = (
   aiGatewayAzureBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_BASE_URL"),
   aiGatewayAzureImagesBaseUrl: readOptionalEnv(env, "AI_GATEWAY_AZURE_IMAGES_BASE_URL"),
   aiGatewayAzureApiKey: readOptionalEnv(env, "AI_GATEWAY_AZURE_API_KEY"),
+  aiGatewayAnthropicBaseUrl: readOptionalEnv(env, "AI_GATEWAY_ANTHROPIC_BASE_URL"),
+  aiGatewayAnthropicApiKey: readOptionalEnv(env, "AI_GATEWAY_ANTHROPIC_API_KEY"),
+  aiGatewayAnthropicWorkspaceId: readOptionalEnv(env, "AI_GATEWAY_ANTHROPIC_WORKSPACE_ID"),
   aiGatewayCaptureBodies: parseBooleanEnv(env.AI_GATEWAY_CAPTURE_BODIES, true),
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
