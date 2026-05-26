@@ -8,12 +8,12 @@
   },
   "types": "./src/runtime.ts",
   "scripts": {
-    "dev": "pnpm --filter @ank1015-app/previewer build && tsx watch src/index.ts",
-    "build": "pnpm --filter @ank1015-app/previewer build && tsc -p tsconfig.json",
+    "dev": "pnpm --filter @ank1015-app/tunnel-protocol build && pnpm --filter @ank1015-app/previewer build && tsx watch src/index.ts",
+    "build": "pnpm --filter @ank1015-app/tunnel-protocol build && pnpm --filter @ank1015-app/previewer build && tsc -p tsconfig.json",
     "docker:build": "docker build -f Dockerfile -t ank1015-machine-server:development ../..",
-    "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "pnpm --filter @ank1015-app/tunnel-protocol build && tsc --noEmit",
+    "lint": "pnpm --filter @ank1015-app/tunnel-protocol build && tsc --noEmit",
+    "test": "pnpm --filter @ank1015-app/tunnel-protocol build && vitest run"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@ank1015-app/previewer": "workspace:*",
+    "@ank1015-app/tunnel-protocol": "workspace:*",
     "@axiomhq/pino": "^1.6.1",
     "@earendil-works/pi-coding-agent": "^0.75.5",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
