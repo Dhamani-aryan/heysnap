@@ -73,6 +73,9 @@ jobs:
           cp -R packages/server/dist "$ARTIFACT_DIR/dist"
           cp -R packages/server/skills "$ARTIFACT_DIR/skills"
           cp -R packages/previewer "$ARTIFACT_DIR/previewer"
+          mkdir -p "$ARTIFACT_DIR/tunnel-protocol"
+          cp packages/tunnel-protocol/package.json "$ARTIFACT_DIR/tunnel-protocol/package.json"
+          cp -R packages/tunnel-protocol/dist "$ARTIFACT_DIR/tunnel-protocol/dist"
           if [ -d packages/server/migrations ]; then
             cp -R packages/server/migrations "$ARTIFACT_DIR/migrations"
           fi
@@ -83,6 +86,7 @@ jobs:
           const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
           packageJson.dependencies ??= {};
           packageJson.dependencies["@ank1015-app/previewer"] = "file:./previewer";
+          packageJson.dependencies["@ank1015-app/tunnel-protocol"] = "file:./tunnel-protocol";
           writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
