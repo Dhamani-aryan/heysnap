@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { toClientPath } from "../../../filesystem/paths.js";
 import type {
@@ -13,6 +13,15 @@ import type {
   StopReason,
   Usage,
 } from "../../types.js";
+
+const HEYSNAP_CONTEXT_PATTERN = /\s*<heysnap_context>[\s\S]*?<\/heysnap_context>\s*/gu;
+const HEYSNAP_CONTEXT_CAPTURE_PATTERN = /<heysnap_context>([\s\S]*?)<\/heysnap_context>/u;
+const USER_ATTACHED_FILES_CAPTURE_PATTERN =
+  /<user_attached_files_with_message>([\s\S]*?)<\/user_attached_files_with_message>/u;
+const PI_ATTACHED_TEXT_FILE_BLOCK_PATTERN = /(?:\n\s*)*Attached file: [^\n]+\n```[\s\S]*?\n```\s*/gu;
+const PI_ATTACHED_FILE_LINE_PATTERN = /(?:\n\s*)*Attached file: [^\n]+\s*/gu;
+const USER_UPLOADS_DIRECTORY = ".codex/user_uploads";
+const MAX_IMAGE_PREVIEW_BYTES = 5 * 1024 * 1024;
 
 export interface PiSessionFile {
   readonly path: string;
@@ -138,6 +147,14 @@ export const toPiThread = (
     activities: branch.flatMap(mapPiEntryToActivities),
   };
 };
+
+export const hydratePiThreadAttachmentPreviews = async (
+  thread: AgentThread,
+  filesystemRoot: string,
+): Promise<AgentThread> => ({
+  ...thread,
+  messages: await hydrateMessagesAttachmentPreviews(thread.messages, filesystemRoot),
+});
 
 export const groupPiThreads = (threads: readonly AgentThreadSummary[]): AgentThreadGroup[] => {
   const groups = new Map<string, AgentThreadSummary[]>();
@@ -425,7 +442,18 @@ const mapPiEntryToActivities = (entry: PiSessionEntry): AgentThreadActivity[] =>
 
 const toAgentContent = (value: unknown): AgentContent => {
   if (typeof value === "string") {
-    return value.length > 0 ? [{ type: "text", content: value }] : [];
+    const heysnapContext = extractHeySnapContext(value);
+    const content = stripPiAttachmentPromptText(stripHeySnapContextText(value), heysnapContext);
+
+    if (content.length > 0) {
+      return [{
+        type: "text",
+        content,
+        ...(heysnapContext === undefined ? {} : { metadata: { heysnapContext } }),
+      }];
+    }
+
+    return heysnapContext === undefined ? [] : [{ type: "text", content: "", metadata: { heysnapContext } }];
   }
 
   if (!Array.isArray(value)) {
@@ -437,7 +465,16 @@ const toAgentContent = (value: unknown): AgentContent => {
 
     if (record?.["type"] === "text") {
       const text = stringField(record, "text") ?? stringField(record, "content") ?? "";
-      return text.length > 0 ? [{ type: "text" as const, content: text }] : [];
+      const heysnapContext = extractHeySnapContext(text);
+      const content = stripPiAttachmentPromptText(stripHeySnapContextText(text), heysnapContext);
+
+      return content.length > 0
+        ? [{
+          type: "text" as const,
+          content,
+          ...(heysnapContext === undefined ? {} : { metadata: { heysnapContext } }),
+        }]
+        : [];
     }
 
     if (record?.["type"] === "image") {
@@ -458,14 +495,232 @@ const stripHeySnapContextContent = (content: AgentContent): AgentContent =>
       return [block];
     }
 
-    const contentWithoutContext = stripHeySnapContextText(block.content);
-    return contentWithoutContext.length > 0
-      ? [{ ...block, content: contentWithoutContext }]
-      : [];
+    const heysnapContext = asRecord(block.metadata?.["heysnapContext"]) ?? extractHeySnapContext(block.content);
+    const contentWithoutContext = stripPiAttachmentPromptText(stripHeySnapContextText(block.content), heysnapContext);
+    if (contentWithoutContext.length > 0) {
+      return [{ ...block, content: contentWithoutContext }];
+    }
+
+    return heysnapContext === undefined ? [] : [{ ...block, content: "" }];
   });
 
 const stripHeySnapContextText = (text: string): string =>
-  text.replace(/(?:\n\s*)*<heysnap_context>[\s\S]*?<\/heysnap_context>\s*$/u, "").trimEnd();
+  text.replace(HEYSNAP_CONTEXT_PATTERN, "").trim();
+
+const stripPiAttachmentPromptText = (
+  text: string,
+  heysnapContext: Record<string, unknown> | undefined,
+): string => {
+  if (!Array.isArray(heysnapContext?.["userAttachedFilePaths"])) {
+    return text.trim();
+  }
+
+  return text
+    .replace(PI_ATTACHED_TEXT_FILE_BLOCK_PATTERN, "\n")
+    .replace(PI_ATTACHED_FILE_LINE_PATTERN, "\n")
+    .trim();
+};
+
+const extractHeySnapContext = (text: string): Record<string, unknown> | undefined => {
+  const contextText = HEYSNAP_CONTEXT_CAPTURE_PATTERN.exec(text)?.[1];
+
+  if (contextText === undefined) {
+    return undefined;
+  }
+
+  const attachedFilesText = USER_ATTACHED_FILES_CAPTURE_PATTERN.exec(contextText)?.[1];
+
+  if (attachedFilesText === undefined) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(unescapeXmlText(attachedFilesText.trim())) as unknown;
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    const userAttachedFilePaths = parsed.filter((path): path is string => typeof path === "string" && path.length > 0);
+    return userAttachedFilePaths.length > 0 ? { userAttachedFilePaths } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const unescapeXmlText = (text: string): string =>
+  text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+
+const hydrateMessagesAttachmentPreviews = async (
+  messages: readonly AgentMessage[],
+  filesystemRoot: string,
+): Promise<AgentMessage[]> => Promise.all(messages.map(async (message) => {
+  if (message.role !== "user") {
+    return message;
+  }
+
+  const attachedFilePaths = userAttachedFilePathsFromContent(message.content);
+  const contentWithoutContext = stripHeySnapContextMetadata(message.content);
+
+  if (attachedFilePaths.length === 0) {
+    return contentWithoutContext === message.content ? message : { ...message, content: contentWithoutContext };
+  }
+
+  const attachmentPreviews = (
+    await Promise.all(attachedFilePaths.map((filePath) => hydrateAttachmentPreview(filePath, filesystemRoot)))
+  ).filter((block): block is AgentContent[number] => block !== undefined);
+
+  if (attachmentPreviews.length === 0) {
+    return contentWithoutContext === message.content ? message : { ...message, content: contentWithoutContext };
+  }
+
+  return {
+    ...message,
+    content: [...contentWithoutContext, ...attachmentPreviews],
+  };
+}));
+
+const userAttachedFilePathsFromContent = (content: AgentContent): string[] => {
+  const paths: string[] = [];
+
+  for (const block of content) {
+    if (block.type !== "text") {
+      continue;
+    }
+
+    const context = asRecord(block.metadata?.["heysnapContext"]);
+    const userAttachedFilePaths = context?.["userAttachedFilePaths"];
+
+    if (!Array.isArray(userAttachedFilePaths)) {
+      continue;
+    }
+
+    for (const path of userAttachedFilePaths) {
+      if (typeof path === "string" && path.length > 0) {
+        paths.push(path);
+      }
+    }
+  }
+
+  return paths;
+};
+
+const stripHeySnapContextMetadata = (content: AgentContent): AgentContent => {
+  let changed = false;
+
+  const nextContent = content.flatMap((block): AgentContent[number][] => {
+    if (block.type !== "text" || block.metadata?.["heysnapContext"] === undefined) {
+      return [block];
+    }
+
+    const { heysnapContext: _heysnapContext, ...metadata } = block.metadata;
+    changed = true;
+    if (block.content.length === 0 && Object.keys(metadata).length === 0) {
+      return [];
+    }
+
+    return [{
+      ...block,
+      ...(Object.keys(metadata).length > 0 ? { metadata } : { metadata: undefined }),
+    }];
+  });
+
+  return changed ? nextContent : content;
+};
+
+const hydrateAttachmentPreview = async (
+  uploadPath: string,
+  filesystemRoot: string,
+): Promise<AgentContent[number] | undefined> => {
+  const safePath = safeUserUploadPath(uploadPath, filesystemRoot);
+
+  if (safePath === undefined) {
+    return undefined;
+  }
+
+  try {
+    const fileStat = await stat(safePath);
+
+    if (!fileStat.isFile()) {
+      return undefined;
+    }
+
+    const filename = basename(safePath);
+    const mimeType = mimeTypeForPath(safePath);
+    const metadata = { filename, savedPath: safePath, size: fileStat.size };
+
+    if (mimeType.startsWith("image/") && fileStat.size <= MAX_IMAGE_PREVIEW_BYTES) {
+      const data = await readFile(safePath, "base64");
+      return {
+        type: "image",
+        data,
+        mimeType,
+        metadata,
+      };
+    }
+
+    return {
+      type: "file",
+      filename,
+      mimeType,
+      metadata,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const safeUserUploadPath = (uploadPath: string, filesystemRoot: string): string | undefined => {
+  if (!isAbsolute(uploadPath)) {
+    return undefined;
+  }
+
+  const root = resolve(filesystemRoot);
+  const candidate = resolve(uploadPath);
+  const relativePath = relative(root, candidate);
+
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    return undefined;
+  }
+
+  if (!candidate.includes(`${sep}${USER_UPLOADS_DIRECTORY.split("/").join(sep)}${sep}`)) {
+    return undefined;
+  }
+
+  return candidate;
+};
+
+const mimeTypeForPath = (filePath: string): string => {
+  switch (extname(filePath).toLowerCase()) {
+    case ".heic":
+      return "image/heic";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".webp":
+      return "image/webp";
+    case ".gif":
+      return "image/gif";
+    case ".pdf":
+      return "application/pdf";
+    case ".csv":
+      return "text/csv";
+    case ".xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case ".xls":
+      return "application/vnd.ms-excel";
+    case ".txt":
+      return "text/plain";
+    case ".json":
+      return "application/json";
+    default:
+      return "application/octet-stream";
+  }
+};
 
 const toAssistantContent = (value: unknown): AssistantContent => {
   if (!Array.isArray(value)) {

@@ -14,6 +14,7 @@ import {
 } from "../src/agent/harnesses/pi/config.js";
 import { PiAgentHarness } from "../src/agent/harnesses/pi/pi-agent-harness.js";
 import {
+  agentContentToPiPrompt,
   branchPiSessionForEdit,
   formatHeySnapContext,
   PiLiveTurnMapper,
@@ -35,7 +36,7 @@ describe("Pi user config", () => {
   it("renders managed Pi settings for cloud machine defaults", () => {
     expect(renderPiSettings()).toBe(`${JSON.stringify({
       defaultProvider: "anthropic",
-      defaultModel: "claude-sonnet-4-6",
+      defaultModel: "claude-opus-4-7",
       defaultThinkingLevel: "medium",
       enabledModels: ["claude-sonnet-4-6", "claude-opus-4-7"],
       sessionDir: "sessions",
@@ -458,6 +459,122 @@ describe("Pi user config", () => {
     expect(context).toContain("<heysnap_context>");
     expect(context).toContain(`${root}/app/src/index.ts`);
     expect(context).toContain("\"filepath\": \"chrome\"");
+  });
+
+  it("hydrates Pi attachment previews from hidden HeySnap context without showing prompt attachment text", async () => {
+    const home = await createTempRoot();
+    const root = join(home, "Desktop");
+    const appPath = join(root, "app");
+    const uploadDir = join(appPath, ".codex", "user_uploads");
+    const spreadsheetPath = join(uploadDir, "india_lab_gemstone_instagram_pages.xlsx");
+    await mkdir(uploadDir, { recursive: true });
+    await writeFile(spreadsheetPath, "xlsx");
+    const context = formatHeySnapContext({
+      filesystemRoot: root,
+      path: "app",
+      userAttachedFilePaths: [spreadsheetPath],
+    });
+
+    await writePiSession(home, "--Desktop-app--", "session-attachments.jsonl", [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-attachment-thread",
+        timestamp: "2026-05-26T12:30:00.000Z",
+        cwd: appPath,
+      },
+      {
+        type: "message",
+        id: "u1",
+        parentId: null,
+        timestamp: "2026-05-26T12:30:01.000Z",
+        message: {
+          role: "user",
+          content: [{
+            type: "text",
+            text: [
+              "Review this file",
+              "Attached file: india_lab_gemstone_instagram_pages.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)",
+              context,
+            ].join("\n\n"),
+          }],
+          timestamp: Date.parse("2026-05-26T12:30:01.000Z"),
+        },
+      },
+    ]);
+    const harness = new PiAgentHarness({ filesystemRoot: root, home });
+
+    const thread = await harness.getThread({ threadId: "pi-attachment-thread" });
+
+    expect(thread.messages[0]).toMatchObject({
+      role: "user",
+      id: "u1",
+      path: "app",
+    });
+    expect(thread.messages[0]?.content).toEqual([
+      { type: "text", content: "Review this file" },
+      {
+        type: "file",
+        filename: "india_lab_gemstone_instagram_pages.xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        metadata: {
+          filename: "india_lab_gemstone_instagram_pages.xlsx",
+          savedPath: spreadsheetPath,
+          size: 4,
+        },
+      },
+    ]);
+  });
+
+  it("only sends PNG and JPEG image payloads to Pi while keeping all attachments in HeySnap context", () => {
+    const root = "/workspace/Desktop";
+    const prompt = agentContentToPiPrompt([
+      { type: "text", content: "Look at these assets" },
+      {
+        type: "image",
+        data: "cG5n",
+        mimeType: "image/png",
+        metadata: { filename: "screenshot.png" },
+      },
+      {
+        type: "image",
+        data: "aGVpYw==",
+        mimeType: "image/heic",
+        metadata: { filename: "photo.heic" },
+      },
+      {
+        type: "file",
+        data: "anBn",
+        mimeType: "image/jpeg",
+        filename: "camera.jpg",
+      },
+      {
+        type: "file",
+        data: "cGRm",
+        mimeType: "application/pdf",
+        filename: "notes.pdf",
+      },
+    ], {
+      filesystemRoot: root,
+      path: "Projects/app",
+      userAttachedFilePaths: [
+        `${root}/Projects/app/.codex/user_uploads/screenshot.png`,
+        `${root}/Projects/app/.codex/user_uploads/photo.heic`,
+        `${root}/Projects/app/.codex/user_uploads/camera.jpg`,
+        `${root}/Projects/app/.codex/user_uploads/notes.pdf`,
+      ],
+    });
+
+    expect(prompt.images).toEqual([
+      { type: "image", data: "cG5n", mimeType: "image/png" },
+      { type: "image", data: "anBn", mimeType: "image/jpeg" },
+    ]);
+    expect(prompt.text).toContain("Look at these assets");
+    expect(prompt.text).toContain("<user_attached_files_with_message>");
+    expect(prompt.text).toContain("photo.heic");
+    expect(prompt.text).toContain("notes.pdf");
+    expect(prompt.text).not.toContain("Attached file:");
+    expect(prompt.text).not.toContain("cGRm");
   });
 
   it("branches before the latest user message when editing a Pi turn", async () => {

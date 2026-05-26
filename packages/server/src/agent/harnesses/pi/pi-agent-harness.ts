@@ -46,6 +46,7 @@ import {
 import {
   findPiSessionById,
   groupPiThreads,
+  hydratePiThreadAttachmentPreviews,
   isPiThreadInRoot,
   loadPiSessionFiles,
   toPiThread,
@@ -53,14 +54,15 @@ import {
 } from "./thread-mapper.js";
 
 const USER_UPLOADS_DIRECTORY = ".codex/user_uploads";
+const PI_PROMPT_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 
-type PiPromptImage = {
+export type PiPromptImage = {
   readonly type: "image";
   readonly data: string;
   readonly mimeType: string;
 };
 
-type PiPromptContent = {
+export type PiPromptContent = {
   readonly text: string;
   readonly images: readonly PiPromptImage[];
 };
@@ -158,7 +160,7 @@ export class PiAgentHarness implements IAgentHarness {
     const session = await findPiSessionById(this.sessionsDir(), input.threadId);
 
     if (session !== null) {
-      return toPiThread(session, this.filesystemRoot);
+      return hydratePiThreadAttachmentPreviews(toPiThread(session, this.filesystemRoot), this.filesystemRoot);
     }
 
     const pendingThread = this.pendingThreads.get(input.threadId);
@@ -677,7 +679,7 @@ const createPendingThread = (
   };
 };
 
-const agentContentToPiPrompt = (
+export const agentContentToPiPrompt = (
   content: AgentContent,
   heysnapContext?: HeySnapContextInput,
 ): PiPromptContent => {
@@ -691,27 +693,16 @@ const agentContentToPiPrompt = (
     }
 
     if (block.type === "image") {
-      images.push({ type: "image", data: block.data, mimeType: block.mimeType });
+      if (isPiPromptImageMimeType(block.mimeType)) {
+        images.push({ type: "image", data: block.data, mimeType: normalizeMimeType(block.mimeType) });
+      }
       continue;
     }
 
     if (block.type === "file") {
-      if (block.data !== undefined && block.mimeType.startsWith("image/")) {
-        images.push({ type: "image", data: block.data, mimeType: block.mimeType });
-        continue;
+      if (block.data !== undefined && isPiPromptImageMimeType(block.mimeType)) {
+        images.push({ type: "image", data: block.data, mimeType: normalizeMimeType(block.mimeType) });
       }
-
-      if (block.data !== undefined && isTextFile(block.mimeType, block.filename)) {
-        textParts.push([
-          `Attached file: ${block.filename}`,
-          "```",
-          Buffer.from(block.data, "base64").toString("utf8"),
-          "```",
-        ].join("\n"));
-        continue;
-      }
-
-      textParts.push(`Attached file: ${block.filename} (${block.mimeType})`);
     }
   }
 
@@ -798,11 +789,10 @@ const escapeXmlText = (text: string): string =>
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 
-const isTextFile = (mimeType: string, filename: string): boolean =>
-  mimeType.startsWith("text/") ||
-  mimeType === "application/json" ||
-  mimeType === "application/xml" ||
-  /\.(?:css|csv|html|js|jsx|json|md|mdx|ts|tsx|txt|xml|yaml|yml)$/iu.test(filename);
+const normalizeMimeType = (mimeType: string): string => mimeType.trim().toLowerCase();
+
+const isPiPromptImageMimeType = (mimeType: string): boolean =>
+  PI_PROMPT_IMAGE_MIME_TYPES.has(normalizeMimeType(mimeType));
 
 const agentContentText = (content: AgentContent): string =>
   content.flatMap((block) => block.type === "text" ? [block.content] : []).join(" ");
