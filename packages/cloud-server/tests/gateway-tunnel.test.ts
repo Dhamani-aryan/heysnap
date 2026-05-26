@@ -4,6 +4,14 @@ import type { ReadableStream } from "node:stream/web";
 
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  decodeTunnelBinaryFrame,
+  encodeTunnelBinaryFrame,
+  parseTunnelControlMessage,
+  stringifyTunnelControlMessage,
+  type TunnelBinaryFrame,
+  type TunnelControlMessage,
+} from "@ank1015-app/tunnel-protocol";
 
 import type { CloudServerConfig } from "../src/config.js";
 import { hashToken } from "../src/auth/tokens.js";
@@ -71,6 +79,23 @@ describe("gateway tunnel", () => {
     expect(registry.isConnected("computer-1")).toBe(false);
   });
 
+  it("drops late messages from a replaced machine tunnel", () => {
+    const registry = new MachineTunnelRegistry();
+    const staleSocket = new FakeMachineWebSocket();
+    const currentSocket = new FakeMachineWebSocket();
+    const staleTunnel = new MachineTunnel("computer-1", staleSocket as unknown as WebSocket, registry);
+    const currentTunnel = new MachineTunnel("computer-1", currentSocket as unknown as WebSocket, registry);
+    registry.set("computer-1", currentTunnel);
+
+    staleSocket.emit("message", Buffer.from("not-json", "utf8"), false);
+
+    expect(staleSocket.closed).toBe(false);
+    expect(registry.get("computer-1")).toBe(currentTunnel);
+
+    staleTunnel.close(1000, "done");
+    currentTunnel.close(1000, "done");
+  });
+
   it("routes gateway websocket data through a connected machine tunnel", async () => {
     const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
     const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
@@ -90,12 +115,12 @@ describe("gateway tunnel", () => {
       },
     });
 
-    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
-    machine.send(JSON.stringify({
-      type: "data",
+    machine.send(stringifyTunnelControlMessage({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
+    machine.send(encodeTunnelBinaryFrame({
+      type: "wsData",
       connectionId: openMessage.connectionId,
-      data: Buffer.from(JSON.stringify({ type: "hello", serverTime: "now" }), "utf8").toString("base64"),
-      dataType: "text",
+      payload: Buffer.from(JSON.stringify({ type: "hello", serverTime: "now" }), "utf8"),
+      isText: true,
     }));
 
     const gatewayHello = await waitForJsonFrame(gateway);
@@ -103,10 +128,10 @@ describe("gateway tunnel", () => {
     expect(gatewayHello.message).toMatchObject({ type: "hello" });
     gateway.send(JSON.stringify({ type: "ping", requestId: "ping-1" }));
 
-    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
-    expect(dataMessage.type).toBe("data");
-    expect(dataMessage.dataType).toBe("text");
-    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
+    const dataMessage = await waitForBinaryFrame(machine);
+    expect(dataMessage.type).toBe("wsData");
+    expect(dataMessage.isText).toBe(true);
+    expect(JSON.parse(dataMessage.payload.toString("utf8"))).toEqual({
       type: "ping",
       requestId: "ping-1",
     });
@@ -119,7 +144,7 @@ describe("gateway tunnel", () => {
   it("streams agent HTTP responses through the machine tunnel", async () => {
     const { server, computer, machine, registry } = await startConnectedTunnel();
     await waitForCondition(() => registry.isConnected(computer.id));
-    const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
+    const requestPromise = waitForHttpRequestMessage(machine);
     const proxyPromise = registry.proxyStreamingHttpRequest(computer.id, {
       path: "/agent/runs",
       method: "POST",
@@ -129,31 +154,32 @@ describe("gateway tunnel", () => {
     const request = await requestPromise;
 
     expect(request).toMatchObject({
-      type: "httpRequest",
+      type: "httpRequestStart",
       path: "/agent/runs",
       method: "POST",
       headers: { "content-type": "application/json" },
-      bodyBase64: Buffer.from("{\"path\":\"Projects\"}", "utf8").toString("base64"),
       stream: true,
+      trafficClass: "agent:http",
     });
+    expect(request.body.toString("utf8")).toBe("{\"path\":\"Projects\"}");
 
-    machine.send(JSON.stringify({
+    machine.send(stringifyTunnelControlMessage({
       type: "httpResponseStart",
       connectionId: request.connectionId,
       statusCode: 200,
       headers: { "content-type": "text/event-stream" },
     }));
-    machine.send(JSON.stringify({
-      type: "httpResponseChunk",
+    machine.send(encodeTunnelBinaryFrame({
+      type: "httpResponseBody",
       connectionId: request.connectionId,
-      bodyBase64: Buffer.from("event: run_start\n", "utf8").toString("base64"),
+      payload: Buffer.from("event: run_start\n", "utf8"),
     }));
-    machine.send(JSON.stringify({
-      type: "httpResponseChunk",
+    machine.send(encodeTunnelBinaryFrame({
+      type: "httpResponseBody",
       connectionId: request.connectionId,
-      bodyBase64: Buffer.from("data: {\"runId\":\"run-1\"}\n\n", "utf8").toString("base64"),
+      payload: Buffer.from("data: {\"runId\":\"run-1\"}\n\n", "utf8"),
     }));
-    machine.send(JSON.stringify({ type: "httpResponseEnd", connectionId: request.connectionId }));
+    machine.send(stringifyTunnelControlMessage({ type: "httpResponseEnd", connectionId: request.connectionId }));
 
     const response = await proxyPromise;
 
@@ -170,19 +196,22 @@ describe("gateway tunnel", () => {
     const { server, computer, machine, registry } = await startConnectedTunnel();
     await waitForCondition(() => registry.isConnected(computer.id));
     await delay(10);
-    const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
+    const requestPromise = waitForHttpRequestMessage(machine);
     const proxyPromise = registry.proxyStreamingHttpRequest(computer.id, {
       path: "/filesystem/download?path=Project",
+      trafficClass: "filesystem:download",
     });
     const request = await requestPromise;
 
     expect(request).toMatchObject({
-      type: "httpRequest",
+      type: "httpRequestStart",
       path: "/filesystem/download?path=Project",
       stream: true,
+      trafficClass: "filesystem:download",
     });
+    expect(request.body.byteLength).toBe(0);
 
-    machine.send(JSON.stringify({
+    machine.send(stringifyTunnelControlMessage({
       type: "httpResponseStart",
       connectionId: request.connectionId,
       statusCode: 200,
@@ -191,12 +220,12 @@ describe("gateway tunnel", () => {
         "content-disposition": "attachment; filename=\"Project.zip\"",
       },
     }));
-    machine.send(JSON.stringify({
-      type: "httpResponseChunk",
+    machine.send(encodeTunnelBinaryFrame({
+      type: "httpResponseBody",
       connectionId: request.connectionId,
-      bodyBase64: Buffer.from("zip-bytes", "utf8").toString("base64"),
+      payload: Buffer.from("zip-bytes", "utf8"),
     }));
-    machine.send(JSON.stringify({ type: "httpResponseEnd", connectionId: request.connectionId }));
+    machine.send(stringifyTunnelControlMessage({ type: "httpResponseEnd", connectionId: request.connectionId }));
 
     const response = await proxyPromise;
 
@@ -212,13 +241,14 @@ describe("gateway tunnel", () => {
   it("sends tunnel close when a streamed HTTP response is cancelled", async () => {
     const { server, computer, machine, registry } = await startConnectedTunnel();
     await waitForCondition(() => registry.isConnected(computer.id));
-    const requestPromise = waitForJsonMessage<CloudHttpRequestMessage>(machine);
+    const requestPromise = waitForHttpRequestMessage(machine);
     const proxyPromise = registry.proxyStreamingHttpRequest(computer.id, {
       path: "/filesystem/download?path=Project",
+      trafficClass: "filesystem:download",
     });
     const request = await requestPromise;
 
-    machine.send(JSON.stringify({
+    machine.send(stringifyTunnelControlMessage({
       type: "httpResponseStart",
       connectionId: request.connectionId,
       statusCode: 200,
@@ -292,12 +322,13 @@ describe("gateway tunnel", () => {
       },
     });
 
-    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
+    machine.send(stringifyTunnelControlMessage({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
     gateway.send(JSON.stringify({ type: "hello", protocolVersion: 1, clientId: "client-1", capabilities: [] }));
 
-    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
-    expect(dataMessage.type).toBe("data");
-    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
+    const dataMessage = await waitForBinaryFrame(machine);
+    expect(dataMessage.type).toBe("wsData");
+    expect(dataMessage.isText).toBe(true);
+    expect(JSON.parse(dataMessage.payload.toString("utf8"))).toEqual({
       type: "hello",
       protocolVersion: 1,
       clientId: "client-1",
@@ -328,12 +359,13 @@ describe("gateway tunnel", () => {
       },
     });
 
-    machine.send(JSON.stringify({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
+    machine.send(stringifyTunnelControlMessage({ type: "openResult", connectionId: openMessage.connectionId, ok: true }));
     gateway.send(JSON.stringify({ type: "watch", path: "Budget.xlsx" }));
 
-    const dataMessage = await waitForJsonMessage<CloudDataMessage>(machine);
-    expect(dataMessage.type).toBe("data");
-    expect(JSON.parse(Buffer.from(dataMessage.data, "base64").toString("utf8"))).toEqual({
+    const dataMessage = await waitForBinaryFrame(machine);
+    expect(dataMessage.type).toBe("wsData");
+    expect(dataMessage.isText).toBe(true);
+    expect(JSON.parse(dataMessage.payload.toString("utf8"))).toEqual({
       type: "watch",
       path: "Budget.xlsx",
     });
@@ -389,21 +421,15 @@ interface CloudOpenMessage {
   };
 }
 
-interface CloudDataMessage {
-  readonly type: "data";
-  readonly connectionId: string;
-  readonly data: string;
-  readonly dataType?: "text" | "binary";
-}
-
 interface CloudHttpRequestMessage {
-  readonly type: "httpRequest";
+  readonly type: "httpRequestStart";
   readonly connectionId: string;
   readonly path: string;
   readonly method?: string;
   readonly headers?: Record<string, string>;
-  readonly bodyBase64?: string;
   readonly stream?: boolean;
+  readonly trafficClass?: string;
+  readonly body: Buffer;
 }
 
 interface CloudCloseMessage {
@@ -495,15 +521,115 @@ const openWebSocket = (
 
 const waitForJsonMessage = <TMessage>(webSocket: WebSocket): Promise<TMessage> =>
   new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Timed out waiting for websocket message")), 3000);
-    webSocket.once("message", (data) => {
+    const cleanup = (): void => {
       clearTimeout(timeout);
+      webSocket.off("message", onMessage);
+      webSocket.off("error", onError);
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+      if (isBinary) {
+        return;
+      }
+
+      cleanup();
       try {
         resolve(JSON.parse(data.toString("utf8")) as TMessage);
       } catch (error) {
         reject(error);
       }
-    });
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for websocket message"));
+    }, 3000);
+    webSocket.on("message", onMessage);
+    webSocket.once("error", onError);
+  });
+
+const waitForBinaryFrame = (webSocket: WebSocket): Promise<TunnelBinaryFrame> =>
+  new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      webSocket.off("message", onMessage);
+      webSocket.off("error", onError);
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+      if (!isBinary) {
+        return;
+      }
+
+      cleanup();
+      const frame = decodeTunnelBinaryFrame(data);
+      if (frame === null) {
+        reject(new Error("Received malformed tunnel binary frame"));
+        return;
+      }
+
+      resolve(frame);
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for websocket binary frame"));
+    }, 3000);
+    webSocket.on("message", onMessage);
+    webSocket.once("error", onError);
+  });
+
+const waitForHttpRequestMessage = (webSocket: WebSocket): Promise<CloudHttpRequestMessage> =>
+  new Promise((resolve, reject) => {
+    let start: Extract<TunnelControlMessage, { type: "httpRequestStart" }> | undefined;
+    const chunks: Buffer[] = [];
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      webSocket.off("message", onMessage);
+      webSocket.off("error", onError);
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+      try {
+        if (isBinary) {
+          const frame = decodeTunnelBinaryFrame(data);
+          if (frame?.type === "httpRequestBody") {
+            chunks.push(frame.payload);
+          }
+          return;
+        }
+
+        const message = parseTunnelControlMessage(data.toString("utf8"));
+        if (message?.type === "httpRequestStart") {
+          start = message;
+          return;
+        }
+
+        if (message?.type === "httpRequestEnd" && start !== undefined) {
+          cleanup();
+          resolve({
+            ...start,
+            body: Buffer.concat(chunks),
+          });
+        }
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for tunnel HTTP request"));
+    }, 3000);
+    webSocket.on("message", onMessage);
+    webSocket.once("error", onError);
   });
 
 const waitForJsonFrame = <TMessage>(webSocket: WebSocket): Promise<{
