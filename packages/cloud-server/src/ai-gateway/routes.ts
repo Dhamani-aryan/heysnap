@@ -3,11 +3,17 @@ import { Hono } from "hono";
 import type { CloudServerConfig } from "../config.js";
 import type { AiUsageRequestRecord, CloudStore } from "../db/types.js";
 import { authenticateMachineToken } from "../machines/auth.js";
-import { badGateway, notFound, serviceUnavailable } from "../shared/errors.js";
+import { badGateway, badRequest, notFound, serviceUnavailable } from "../shared/errors.js";
 
 const GATEWAY_PREFIX = "/llm/openai/v1";
-const PROVIDER = "azure";
+const ANTHROPIC_GATEWAY_PREFIX = "/llm/anthropic";
+const AZURE_PROVIDER = "azure";
+const ANTHROPIC_PROVIDER = "anthropic";
 const IMAGE_MODEL = "gpt-image-2";
+const ALLOWED_ANTHROPIC_MODELS = new Set([
+  "claude-sonnet-4-6",
+  "claude-opus-4-7",
+]);
 const CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
 const REQUEST_USER_INPUT_TOOL_NAME = "request_user_input";
 const DEFAULT_CAPTURE_BODY_MAX_BYTES = 262_144;
@@ -83,7 +89,7 @@ export const createAiGatewayRoutes = (
       userId: computer.ownerUserId,
       computerId: computer.id,
       machineIdentityId: machine.id,
-      provider: PROVIDER,
+      provider: AZURE_PROVIDER,
       model: usageModel,
       method: context.req.method,
       upstreamPath,
@@ -96,6 +102,120 @@ export const createAiGatewayRoutes = (
       const upstreamRequestHeaders = routeKind === "images"
         ? buildImageUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body)
         : buildResponsesUpstreamRequestHeaders(context.req.raw.headers, azureApiKey, requestBody.body);
+      const upstreamResponse = await fetch(upstreamUrl, {
+        method: context.req.method,
+        headers: upstreamRequestHeaders,
+        body: requestBody.body,
+        ...(["GET", "HEAD"].includes(context.req.method) ? {} : { duplex: "half" as const }),
+      });
+      const responseHeaders = buildDownstreamResponseHeaders(upstreamResponse.headers);
+      const observer = new AiGatewayResponseObserver({
+        usageId: usage.id,
+        startedAt,
+        store,
+        httpStatus: upstreamResponse.status,
+        captureBodies,
+        captureMaxBytes,
+        requestCapture: requestBody.capture,
+        requestHeaders: redactHeaders(upstreamRequestHeaders),
+        responseHeaders: redactHeaders(upstreamResponse.headers),
+        model: usageModel,
+        metadata: gatewayMetadata,
+      });
+      let downstreamBody: ReadableStream<Uint8Array> | null = null;
+
+      if (upstreamResponse.body === null) {
+        void observer.finish().catch((error) => {
+          console.error("failed to finish AI usage logging", error);
+        });
+      } else {
+        const [clientBody, loggingBody] = upstreamResponse.body.tee();
+        downstreamBody = clientBody;
+        void observer.consume(loggingBody).catch((error) => {
+          console.error("failed to finish AI usage logging", error);
+        });
+      }
+
+      return new Response(downstreamBody, {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        headers: responseHeaders,
+      });
+    } catch (error) {
+      await failUsage(store, usage, startedAt, error);
+      throw badGateway("AI_GATEWAY_UPSTREAM_ERROR", "AI gateway upstream request failed");
+    }
+  });
+
+  app.all("/anthropic/v1/messages", async (context) => {
+    const requestUrl = new URL(context.req.url);
+    const anthropicBaseUrl = config.aiGatewayAnthropicBaseUrl;
+    const anthropicApiKey = config.aiGatewayAnthropicApiKey;
+    const anthropicWorkspaceId = config.aiGatewayAnthropicWorkspaceId;
+
+    if (
+      anthropicBaseUrl === undefined ||
+      anthropicApiKey === undefined ||
+      anthropicWorkspaceId === undefined
+    ) {
+      throw serviceUnavailable("AI_GATEWAY_NOT_CONFIGURED", "Anthropic AI gateway is not configured");
+    }
+
+    const startedAt = new Date();
+    const machine = await authenticateMachineToken(
+      store,
+      config,
+      context.req.header("x-api-key") ?? context.req.header("api-key"),
+    );
+    const computer = await store.getComputerById(machine.computerId);
+
+    if (computer === null) {
+      throw notFound("COMPUTER_NOT_FOUND", "Computer not found");
+    }
+
+    await store.touchMachineIdentity({ identityId: machine.id, lastUsedAt: startedAt });
+
+    const upstreamPath = buildAnthropicUpstreamPath(requestUrl);
+    const upstreamUrl = buildAnthropicUpstreamUrl(anthropicBaseUrl, requestUrl);
+    const captureBodies = config.aiGatewayCaptureBodies === true;
+    const captureMaxBytes = config.aiGatewayCaptureBodyMaxBytes ?? DEFAULT_CAPTURE_BODY_MAX_BYTES;
+    const requestBody = await readProxyRequestBody(
+      context.req.raw,
+      captureBodies,
+      captureMaxBytes,
+      false,
+    );
+    const usageModel = extractModelFromJsonText(requestBody.text);
+    const gatewayMetadata = {
+      gatewayPath: requestUrl.pathname,
+      gatewayRouteKind: "anthropic-messages",
+    };
+    const usage = await store.createAiUsageRequest({
+      userId: computer.ownerUserId,
+      computerId: computer.id,
+      machineIdentityId: machine.id,
+      provider: ANTHROPIC_PROVIDER,
+      model: usageModel,
+      method: context.req.method,
+      upstreamPath,
+      status: "started",
+      metadata: gatewayMetadata,
+      startedAt,
+    });
+
+    if (usageModel === null || !ALLOWED_ANTHROPIC_MODELS.has(usageModel)) {
+      const error = new Error(`Anthropic model is not allowed: ${usageModel ?? "missing"}`);
+      await failUsage(store, usage, startedAt, error);
+      throw badRequest("ANTHROPIC_MODEL_NOT_ALLOWED", "Anthropic model is not allowed");
+    }
+
+    try {
+      const upstreamRequestHeaders = buildAnthropicUpstreamRequestHeaders(
+        context.req.raw.headers,
+        anthropicApiKey,
+        anthropicWorkspaceId,
+        requestBody.body,
+      );
       const upstreamResponse = await fetch(upstreamUrl, {
         method: context.req.method,
         headers: upstreamRequestHeaders,
@@ -183,6 +303,39 @@ const buildUpstreamUrl = (configuredUrl: string, requestUrl: URL, routeKind: Gat
     for (const [key, value] of requestUrl.searchParams.entries()) {
       upstreamUrl.searchParams.set(key, value);
     }
+  }
+
+  return upstreamUrl.toString();
+};
+
+const buildAnthropicUpstreamPath = (requestUrl: URL): string => {
+  const suffix = requestUrl.pathname.startsWith(ANTHROPIC_GATEWAY_PREFIX)
+    ? requestUrl.pathname.slice(ANTHROPIC_GATEWAY_PREFIX.length)
+    : requestUrl.pathname;
+  const normalizedSuffix = suffix.length === 0 ? "/" : suffix;
+
+  return `${normalizedSuffix}${requestUrl.search}`;
+};
+
+const buildAnthropicUpstreamUrl = (configuredUrl: string, requestUrl: URL): string => {
+  const upstreamUrl = new URL(configuredUrl);
+  const suffixPath = buildAnthropicUpstreamPath(new URL(`${requestUrl.origin}${requestUrl.pathname}`));
+  const normalizedSuffix = suffixPath.replace(/^\/+/, "");
+  const configuredPath = upstreamUrl.pathname.replace(/\/+$/, "");
+  let appendPath = normalizedSuffix;
+
+  if (configuredPath.endsWith(`/${normalizedSuffix}`)) {
+    appendPath = "";
+  } else if (configuredPath.endsWith("/v1") && normalizedSuffix.startsWith("v1/")) {
+    appendPath = normalizedSuffix.slice("v1/".length);
+  }
+
+  if (appendPath.length > 0) {
+    upstreamUrl.pathname = `${configuredPath}/${appendPath}`.replace(/\/{2,}/g, "/");
+  }
+
+  for (const [key, value] of requestUrl.searchParams.entries()) {
+    upstreamUrl.searchParams.set(key, value);
   }
 
   return upstreamUrl.toString();
@@ -407,6 +560,38 @@ const buildImageUpstreamRequestHeaders = (
   }
 
   headers.set("authorization", `Bearer ${azureApiKey}`);
+
+  if (body === undefined || body === null) {
+    headers.delete("content-length");
+  }
+
+  return headers;
+};
+
+const buildAnthropicUpstreamRequestHeaders = (
+  source: Headers,
+  anthropicApiKey: string,
+  anthropicWorkspaceId: string,
+  body: RequestInit["body"] | null | undefined,
+): Headers => {
+  const headers = new Headers(source);
+
+  for (const name of Array.from(headers.keys())) {
+    const lowerName = name.toLowerCase();
+
+    if (
+      HOP_BY_HOP_HEADERS.has(lowerName) ||
+      SECRET_HEADER_NAMES.has(lowerName) ||
+      lowerName === "host" ||
+      lowerName === "content-length" ||
+      lowerName === "anthropic-dangerous-direct-browser-access"
+    ) {
+      headers.delete(name);
+    }
+  }
+
+  headers.set("x-api-key", anthropicApiKey);
+  headers.set("anthropic-workspace-id", anthropicWorkspaceId);
 
   if (body === undefined || body === null) {
     headers.delete("content-length");
@@ -688,10 +873,11 @@ class UsageStreamParser {
 
   private observeJson(value: unknown): void {
     const record = asRecord(value);
+    const message = asRecord(record?.["message"]);
     const response = asRecord(record?.["response"]);
-    const model = stringField(record, "model") ?? stringField(response, "model");
-    const usage = asRecord(record?.["usage"]) ?? asRecord(response?.["usage"]);
-    const error = asRecord(record?.["error"]) ?? asRecord(response?.["error"]);
+    const model = stringField(record, "model") ?? stringField(message, "model") ?? stringField(response, "model");
+    const usage = asRecord(record?.["usage"]) ?? asRecord(message?.["usage"]) ?? asRecord(response?.["usage"]);
+    const error = asRecord(record?.["error"]) ?? asRecord(message?.["error"]) ?? asRecord(response?.["error"]);
 
     if (model !== undefined) {
       this.model = model;
@@ -703,31 +889,55 @@ class UsageStreamParser {
     }
 
     if (usage !== undefined) {
-      const parsed = readUsage(usage);
-      this.inputTokens = parsed.inputTokens;
-      this.outputTokens = parsed.outputTokens;
-      this.cachedInputTokens = parsed.cachedInputTokens;
-      this.reasoningOutputTokens = parsed.reasoningOutputTokens;
-      this.totalTokens = parsed.totalTokens;
-      this.rawUsage = usage;
+      this.observeUsage(usage);
     }
+  }
+
+  private observeUsage(usage: Record<string, unknown>): void {
+    const inputDetails = asRecord(usage["input_tokens_details"]) ?? asRecord(usage["prompt_tokens_details"]);
+    const outputDetails = asRecord(usage["output_tokens_details"]) ?? asRecord(usage["completion_tokens_details"]);
+    const anthropicCacheCreationTokens = readAnthropicCacheCreationTokens(usage);
+    const anthropicCacheReadTokens = numberField(usage, "cache_read_input_tokens");
+    const hasAnthropicCacheFields =
+      usage["cache_creation_input_tokens"] !== undefined ||
+      usage["cache_read_input_tokens"] !== undefined ||
+      usage["cache_creation"] !== undefined;
+    const inputTokens = numberField(usage, "input_tokens") ?? numberField(usage, "prompt_tokens");
+    const outputTokens = numberField(usage, "output_tokens") ?? numberField(usage, "completion_tokens");
+    const reasoningOutputTokens = numberField(outputDetails, "reasoning_tokens");
+
+    if (inputTokens !== undefined || hasAnthropicCacheFields) {
+      this.inputTokens = hasAnthropicCacheFields
+        ? (inputTokens ?? 0) + anthropicCacheCreationTokens + (anthropicCacheReadTokens ?? 0)
+        : inputTokens ?? 0;
+      this.cachedInputTokens = hasAnthropicCacheFields
+        ? anthropicCacheReadTokens ?? 0
+        : numberField(inputDetails, "cached_tokens") ?? 0;
+    }
+
+    if (outputTokens !== undefined) {
+      this.outputTokens = outputTokens;
+    }
+
+    if (reasoningOutputTokens !== undefined) {
+      this.reasoningOutputTokens = reasoningOutputTokens;
+    }
+
+    this.totalTokens = numberField(usage, "total_tokens") ?? this.inputTokens + this.outputTokens;
+    this.rawUsage = { ...(this.rawUsage ?? {}), ...usage };
   }
 }
 
-const readUsage = (usage: Record<string, unknown>) => {
-  const inputTokens = numberField(usage, "input_tokens") ?? numberField(usage, "prompt_tokens") ?? 0;
-  const outputTokens = numberField(usage, "output_tokens") ?? numberField(usage, "completion_tokens") ?? 0;
-  const totalTokens = numberField(usage, "total_tokens") ?? inputTokens + outputTokens;
-  const inputDetails = asRecord(usage["input_tokens_details"]) ?? asRecord(usage["prompt_tokens_details"]);
-  const outputDetails = asRecord(usage["output_tokens_details"]) ?? asRecord(usage["completion_tokens_details"]);
+const readAnthropicCacheCreationTokens = (usage: Record<string, unknown>): number => {
+  const legacyCacheCreationTokens = numberField(usage, "cache_creation_input_tokens");
 
-  return {
-    inputTokens,
-    outputTokens,
-    cachedInputTokens: numberField(inputDetails, "cached_tokens") ?? 0,
-    reasoningOutputTokens: numberField(outputDetails, "reasoning_tokens") ?? 0,
-    totalTokens,
-  };
+  if (legacyCacheCreationTokens !== undefined) {
+    return legacyCacheCreationTokens;
+  }
+
+  const cacheCreation = asRecord(usage["cache_creation"]);
+  return (numberField(cacheCreation, "ephemeral_5m_input_tokens") ?? 0) +
+    (numberField(cacheCreation, "ephemeral_1h_input_tokens") ?? 0);
 };
 
 const extractModelFromJsonText = (text: string | null): string | null => {
