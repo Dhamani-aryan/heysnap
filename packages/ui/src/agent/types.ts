@@ -196,10 +196,13 @@ export interface GetThreadInput {
   readonly threadId: string;
 }
 
+export type AgentHarnessName = "codex" | "pi";
+
 export interface SendMessageInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly harness?: AgentHarnessName;
   readonly provider?: string;
   readonly model?: string;
 }
@@ -375,6 +378,7 @@ export type AgentClientMessage =
       readonly threadId?: string;
       readonly path: string;
       readonly content: AgentContent;
+      readonly harness?: AgentHarnessName;
       readonly provider?: string;
       readonly model?: string;
     }
