@@ -8,6 +8,9 @@ import {
 } from "@ank1015-app/previewer";
 import { WebSocketServer } from "ws";
 
+import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
+import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
+import { HeysnapAgentHarness } from "./agent/harnesses/heysnap/heysnap-agent-harness.js";
 import { PiAgentHarness } from "./agent/harnesses/pi/pi-agent-harness.js";
 import { ensurePiUserConfig } from "./agent/harnesses/pi/config.js";
 import { createAgentHttpService } from "./agent/http.js";
@@ -87,11 +90,20 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const markActivity = (): void => {
     lastActivityAt = new Date();
   };
-  await ensurePiUserConfig();
+  await Promise.all([
+    ensureCodexUserConfig(),
+    ensurePiUserConfig(),
+  ]);
   const capabilities = new AgentCapabilitiesService();
   await capabilities.initialize();
-  const agentHarness = new PiAgentHarness({
-    filesystemRoot: filesystemRoot.absolutePath,
+  const agentHarness = new HeysnapAgentHarness({
+    codex: new CodexAgentHarness({
+      filesystemRoot: filesystemRoot.absolutePath,
+      codexBin: options.codexBin,
+    }),
+    pi: new PiAgentHarness({
+      filesystemRoot: filesystemRoot.absolutePath,
+    }),
   });
   const agentHttpService = createAgentHttpService({ harness: agentHarness, onActivity: markActivity });
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
