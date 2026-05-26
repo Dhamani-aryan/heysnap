@@ -5,6 +5,13 @@ import { join } from "node:path";
 
 import { WebSocket, WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  decodeTunnelBinaryFrame,
+  encodeTunnelBinaryFrame,
+  parseTunnelControlMessage,
+  stringifyTunnelControlMessage,
+  type TunnelControlMessage,
+} from "@ank1015-app/tunnel-protocol";
 
 import { MachineTunnelClient, normalizeWebSocketCloseCode, toLocalHttpRequestHeaders } from "../src/tunnel/client.js";
 
@@ -63,17 +70,23 @@ describe("machine tunnel client", () => {
     const cloudSocketServer = new WebSocketServer({ server: cloudServer, path: "/machines/tunnel" });
     socketServers.push(cloudSocketServer);
     const responsePromise = waitForTunnelHttpResponse(cloudSocketServer, (socket) => {
-      socket.send(JSON.stringify({
-        type: "httpRequest",
-        connectionId: "upload-create",
+      const connectionId = "11111111-2222-4333-8444-555555555555";
+      socket.send(stringifyTunnelControlMessage({
+        type: "httpRequestStart",
+        connectionId,
         path: "/filesystem/uploads",
         method: "POST",
         headers: {
           "content-type": "application/json",
           "content-length": "999",
         },
-        bodyBase64: Buffer.from("{}", "utf8").toString("base64"),
       }));
+      socket.send(encodeTunnelBinaryFrame({
+        type: "httpRequestBody",
+        connectionId,
+        payload: Buffer.from("{}", "utf8"),
+      }));
+      socket.send(stringifyTunnelControlMessage({ type: "httpRequestEnd", connectionId }));
     });
     const tokenFile = await writeTokenFile("machine-token");
     const client = new MachineTunnelClient({
@@ -87,7 +100,7 @@ describe("machine tunnel client", () => {
     client.start();
 
     const response = await responsePromise;
-    const body = JSON.parse(Buffer.from(response.bodyBase64, "base64").toString("utf8")) as Record<string, unknown>;
+    const body = JSON.parse(response.body.toString("utf8")) as Record<string, unknown>;
 
     expect(response.statusCode).toBe(400);
     expect(response.headers["content-type"]).toContain("application/json");
@@ -107,14 +120,20 @@ describe("machine tunnel client", () => {
     const cloudSocketServer = new WebSocketServer({ server: cloudServer, path: "/machines/tunnel" });
     socketServers.push(cloudSocketServer);
     const responsePromise = waitForTunnelHttpResponse(cloudSocketServer, (socket) => {
-      socket.send(JSON.stringify({
-        type: "httpRequest",
-        connectionId: "missing-local-server",
+      const connectionId = "22222222-2222-4333-8444-555555555555";
+      socket.send(stringifyTunnelControlMessage({
+        type: "httpRequestStart",
+        connectionId,
         path: "/filesystem/uploads",
         method: "POST",
         headers: { "content-type": "application/json" },
-        bodyBase64: Buffer.from("{}", "utf8").toString("base64"),
       }));
+      socket.send(encodeTunnelBinaryFrame({
+        type: "httpRequestBody",
+        connectionId,
+        payload: Buffer.from("{}", "utf8"),
+      }));
+      socket.send(stringifyTunnelControlMessage({ type: "httpRequestEnd", connectionId }));
     });
     const tokenFile = await writeTokenFile("machine-token");
     const client = new MachineTunnelClient({
@@ -128,7 +147,7 @@ describe("machine tunnel client", () => {
     client.start();
 
     const response = await responsePromise;
-    const body = JSON.parse(Buffer.from(response.bodyBase64, "base64").toString("utf8")) as {
+    const body = JSON.parse(response.body.toString("utf8")) as {
       readonly error?: { readonly code?: string; readonly message?: string };
     };
 
@@ -140,11 +159,10 @@ describe("machine tunnel client", () => {
 });
 
 interface TunnelHttpResponseMessage {
-  readonly type: "httpResponse";
   readonly connectionId: string;
   readonly statusCode: number;
   readonly headers: Record<string, string>;
-  readonly bodyBase64: string;
+  readonly body: Buffer;
 }
 
 const startServer = (
@@ -184,12 +202,37 @@ const waitForTunnelHttpResponse = (
       reject(new Error("Timed out waiting for tunnel HTTP response"));
     }, 3000);
     socketServer.once("connection", (socket) => {
+      const chunks: Buffer[] = [];
+      let responseStart: Extract<TunnelControlMessage, { type: "httpResponseStart" }> | undefined;
       onConnection(socket);
-      socket.on("message", (data) => {
-        const message = JSON.parse(data.toString("utf8")) as TunnelHttpResponseMessage;
-        if (message.type === "httpResponse") {
+      socket.on("message", (data, isBinary) => {
+        try {
+          if (isBinary) {
+            const frame = decodeTunnelBinaryFrame(data);
+            if (frame.type === "httpResponseBody") {
+              chunks.push(frame.payload);
+            }
+            return;
+          }
+
+          const message = parseTunnelControlMessage(data.toString("utf8"));
+          if (message?.type === "httpResponseStart") {
+            responseStart = message;
+            return;
+          }
+
+          if (message?.type === "httpResponseEnd" && responseStart !== undefined) {
+            clearTimeout(timeout);
+            resolve({
+              connectionId: responseStart.connectionId,
+              statusCode: responseStart.statusCode,
+              headers: responseStart.headers,
+              body: Buffer.concat(chunks),
+            });
+          }
+        } catch (error) {
           clearTimeout(timeout);
-          resolve(message);
+          reject(error);
         }
       });
       socket.once("error", reject);
