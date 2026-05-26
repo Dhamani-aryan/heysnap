@@ -145,6 +145,7 @@ export const createAdminRoutes = (
       store.listAiUsageRequests({
         userId: readOptionalQueryString(context.req.query("userId")),
         computerId: readOptionalQueryString(context.req.query("computerId")),
+        provider: readOptionalQueryString(context.req.query("provider")),
         status: readAiUsageStatus(context.req.query("status")),
         model: readOptionalQueryString(context.req.query("model")),
         from: readOptionalDate(context.req.query("from")),
@@ -164,6 +165,7 @@ export const createAdminRoutes = (
     const summary = await store.summarizeAiUsageRequests({
       userId: readOptionalQueryString(context.req.query("userId")),
       computerId: readOptionalQueryString(context.req.query("computerId")),
+      provider: readOptionalQueryString(context.req.query("provider")),
       model: readOptionalQueryString(context.req.query("model")),
       status: readAiUsageStatus(context.req.query("status")),
       from: readOptionalDate(context.req.query("from")),
@@ -177,6 +179,7 @@ export const createAdminRoutes = (
     const buckets = await store.bucketAiUsageRequests({
       userId: readOptionalQueryString(context.req.query("userId")),
       computerId: readOptionalQueryString(context.req.query("computerId")),
+      provider: readOptionalQueryString(context.req.query("provider")),
       model: readOptionalQueryString(context.req.query("model")),
       status: readAiUsageStatus(context.req.query("status")),
       from: readOptionalDate(context.req.query("from")),
@@ -194,6 +197,7 @@ export const createAdminRoutes = (
         groupBy,
         userId: readOptionalQueryString(context.req.query("userId")),
         computerId: readOptionalQueryString(context.req.query("computerId")),
+        provider: readOptionalQueryString(context.req.query("provider")),
         model: readOptionalQueryString(context.req.query("model")),
         status: readAiUsageStatus(context.req.query("status")),
         from: readOptionalDate(context.req.query("from")),
@@ -852,6 +856,7 @@ const readBucketGranularity = (value: string | undefined): AiUsageBucketGranular
 };
 
 const VALID_AI_USAGE_GROUP_BY: ReadonlySet<AiUsageGroupBy> = new Set([
+  "provider",
   "model",
   "status",
   "user",
