@@ -580,15 +580,22 @@ describe("cloud server computer access sessions", () => {
     const requestedPaths: string[] = [];
     const tunnelRegistry: TunnelStatusRegistry = {
       isConnected: () => true,
-      proxyHttpRequest: async (_computerId, input) => {
+      proxyStreamingHttpRequest: async (_computerId, input) => {
         requestedPaths.push(input.path);
         return {
           statusCode: 200,
           headers: {
             "content-type": "application/zip",
             "content-disposition": "attachment; filename=\"Project.zip\"",
+            "content-length": "9",
           },
-          body: Buffer.from("zip-bytes", "utf8"),
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("zip-bytes"));
+              controller.close();
+            },
+          }),
+          cancel() {},
         };
       },
     };
@@ -608,8 +615,134 @@ describe("cloud server computer access sessions", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/zip");
     expect(response.headers.get("content-disposition")).toBe("attachment; filename=\"Project.zip\"");
+    expect(response.headers.get("content-length")).toBe("9");
     expect(await response.text()).toBe("zip-bytes");
     expect(requestedPaths).toEqual(["/filesystem/download?path=Project"]);
+  });
+
+  it("proxies filesystem upload chunks through authenticated gateway access sessions", async () => {
+    const requested: Array<{
+      readonly path: string;
+      readonly method?: string;
+      readonly headers?: Record<string, string>;
+      readonly body?: string;
+    }> = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async (_computerId, input) => {
+        requested.push({
+          path: input.path,
+          method: input.method,
+          headers: input.headers,
+          body: input.body?.toString("utf8"),
+        });
+        return {
+          statusCode: 200,
+          headers: { "content-type": "application/json" },
+          body: Buffer.from(JSON.stringify({
+            fileId: "0",
+            offset: 0,
+            bytesReceived: 5,
+            size: 10,
+            done: false,
+          }), "utf8"),
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "upload-user@example.com");
+    const computer = await createComputer(app, auth.token, "Upload VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/uploads/upload-1/files/0?accessToken=${accessBody.accessSession.token}&offset=0`,
+      {
+        method: "PATCH",
+        body: "hello",
+        headers: { "content-type": "application/octet-stream", "content-length": "5" },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      fileId: "0",
+      bytesReceived: 5,
+    });
+    expect(requested).toEqual([{
+      path: "/filesystem/uploads/upload-1/files/0?offset=0",
+      method: "PATCH",
+      headers: { "content-type": "application/octet-stream" },
+      body: "hello",
+    }]);
+  });
+
+  it("returns machine filesystem upload errors instead of replacing them with gateway 502s", async () => {
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async () => ({
+        statusCode: 400,
+        headers: { "content-type": "application/json" },
+        body: Buffer.from(JSON.stringify({
+          code: "INVALID_UPLOAD",
+          message: "Upload request items must be an array.",
+        }), "utf8"),
+      }),
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "upload-error-user@example.com");
+    const computer = await createComputer(app, auth.token, "Upload Error VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/uploads?accessToken=${accessBody.accessSession.token}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "content-length": "2" },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      code: "INVALID_UPLOAD",
+      message: "Upload request items must be an array.",
+    });
+  });
+
+  it("rejects gateway filesystem upload chunks over the bounded chunk size", async () => {
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async () => {
+        throw new Error("should not proxy oversized chunks");
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "upload-large-user@example.com");
+    const computer = await createComputer(app, auth.token, "Large Upload VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/uploads/upload-1/files/0?accessToken=${accessBody.accessSession.token}&offset=0`,
+      {
+        method: "PATCH",
+        body: "",
+        headers: { "content-length": String(4 * 1024 * 1024 + 1) },
+      },
+    );
+
+    expect(response.status).toBe(413);
   });
 
   it("proxies standalone preview assets through authenticated gateway access sessions", async () => {
