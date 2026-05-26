@@ -27,6 +27,7 @@ import type {
 } from "./browser-control-bridge-types";
 
 const EXTENSION_RETRY_DELAY_MS = 2500;
+const BROWSER_CONTROL_RECONNECT_DELAY_MS = 1000;
 
 interface PendingBrowserControlRequest {
   readonly abortController: AbortController;
@@ -83,6 +84,7 @@ export function BrowserControlBridge({
     const pendingAttachmentReads = new Map<string, PendingBrowserControlAttachmentRead>();
     const pendingOutputWrites = new Map<string, PendingBrowserControlOutputWrite>();
     let extensionRetryTimer: number | undefined;
+    let websocketReconnectTimer: number | undefined;
     const setStatus = (status: BrowserControlStatus): void => {
       if (!isCancelled) {
         onStatusChange?.(status);
@@ -125,6 +127,35 @@ export function BrowserControlBridge({
         extensionRetryTimer = undefined;
         void connect().catch(handleConnectError);
       }, EXTENSION_RETRY_DELAY_MS);
+    };
+
+    const scheduleWebsocketReconnect = (event: CloseEvent): void => {
+      if (!shouldReconnectBrowserControlWebsocket({ closeCode: event.code, isCancelled })) {
+        return;
+      }
+
+      if (websocketReconnectTimer !== undefined) {
+        return;
+      }
+
+      setStatus({
+        state: "disconnected",
+        label: "Reconnecting",
+        detail: "Browser control disconnected. Reconnecting...",
+      });
+      emitClientDiagnostic("browser_control_ws.reconnect_scheduled", {
+        computerId: diagnosticComputerId,
+        url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+        clientId,
+        closeCode: event.code,
+        closeReason: event.reason,
+        wasClean: event.wasClean,
+        delayMs: BROWSER_CONTROL_RECONNECT_DELAY_MS,
+      }, { source: "browser-control-bridge", message: "Browser-control websocket reconnect scheduled" });
+      websocketReconnectTimer = window.setTimeout(() => {
+        websocketReconnectTimer = undefined;
+        void connect().catch(handleConnectError);
+      }, BROWSER_CONTROL_RECONNECT_DELAY_MS);
     };
 
     async function connect(): Promise<void> {
@@ -258,6 +289,10 @@ export function BrowserControlBridge({
       });
 
       socket.addEventListener("close", (event) => {
+        if (webSocket === socket) {
+          webSocket = null;
+        }
+
         closePendingRequests("Browser-control socket closed");
         closePendingAttachmentReads("Browser-control socket closed");
         closePendingOutputWrites("Browser-control socket closed");
@@ -275,7 +310,11 @@ export function BrowserControlBridge({
           pendingAttachmentReadCount: pendingAttachmentReads.size,
           pendingOutputWriteCount: pendingOutputWrites.size,
         }, { source: "browser-control-bridge", message: "Browser-control websocket closed" });
-        setStatus({ state: "disconnected", label: "Disconnected" });
+        if (shouldReconnectBrowserControlWebsocket({ closeCode: event.code, isCancelled })) {
+          scheduleWebsocketReconnect(event);
+        } else {
+          setStatus({ state: "disconnected", label: "Disconnected" });
+        }
       });
 
       socket.addEventListener("error", () => {
@@ -298,6 +337,9 @@ export function BrowserControlBridge({
       if (extensionRetryTimer !== undefined) {
         window.clearTimeout(extensionRetryTimer);
       }
+      if (websocketReconnectTimer !== undefined) {
+        window.clearTimeout(websocketReconnectTimer);
+      }
       closePendingRequests("Browser-control bridge unmounted");
       closePendingAttachmentReads("Browser-control bridge unmounted");
       closePendingOutputWrites("Browser-control bridge unmounted");
@@ -307,6 +349,16 @@ export function BrowserControlBridge({
 
   return null;
 }
+
+export const shouldReconnectBrowserControlWebsocket = (
+  input: { readonly closeCode: number; readonly isCancelled: boolean },
+): boolean => {
+  if (input.isCancelled) {
+    return false;
+  }
+
+  return input.closeCode !== 1003;
+};
 
 const executeRequest = async (input: {
   readonly abortController: AbortController;

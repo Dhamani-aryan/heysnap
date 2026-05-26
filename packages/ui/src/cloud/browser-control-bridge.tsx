@@ -1,6 +1,7 @@
 export {
   BrowserControlBridge,
   parseBrowserControlServerMessage,
+  shouldReconnectBrowserControlWebsocket,
 } from "../components/cloud/browser-control";
 export type {
   BrowserControlAttachmentChunk,
