@@ -15,6 +15,7 @@ import {
   UploadProgressDialog,
   WorkspaceRightSidebar,
   buildFilesystemDownloadUrl,
+  buildFilesystemUploadUrl,
   createInitialNavigationHistory,
   formatBytes,
   formatBrowserControlTitle,
@@ -29,9 +30,9 @@ import {
   isInvalidInitialFilesystemPathError,
   normalizeInitialFilesystemPath,
   normalizeOpenFilePath,
-  toFilesystemUploadFile,
   toListingErrorMessage,
   toOpenFileTab,
+  uploadBrowserSourcesToFilesystem,
   type ActiveLeftPaneSurface,
   type BrowserScreencastState,
   type BrowserUploadSource,
@@ -54,7 +55,7 @@ import {
   type PersistedFilesystemExplorerState,
 } from "./filesystem-persistence";
 import { normalizeFilesystemConnectionIdentity } from "./filesystem-url";
-import type { FilesystemEntry, FilesystemListing, FilesystemUploadFile } from "./types";
+import type { FilesystemEntry, FilesystemListing } from "./types";
 
 export type {
   BrowserViewportClickInput,
@@ -927,8 +928,6 @@ export function FilesystemExplorer({
       setIsFetching(true);
       setListingError(null);
       const totalBytes = sources.reduce((sum, source) => sum + (source.type === "file" ? source.file.size : 0), 0);
-      let completedBytes = 0;
-      const uploadFiles: FilesystemUploadFile[] = [];
 
       setUploadProgress({
         title,
@@ -938,51 +937,40 @@ export function FilesystemExplorer({
         phase: "preparing",
       });
 
-      for (const source of sources) {
-        if (source.type === "directory") {
-          uploadFiles.push({ type: "directory", relativePath: source.relativePath });
-          continue;
-        }
-
-        setUploadProgress({
-          title,
-          detail: source.file.name,
-          completedBytes,
-          totalBytes,
-          phase: "preparing",
-        });
-        uploadFiles.push(await toFilesystemUploadFile(source));
-        completedBytes += source.file.size;
-        setUploadProgress({
-          title,
-          detail: source.file.name,
-          completedBytes,
-          totalBytes,
-          phase: "preparing",
-        });
-      }
-
-      setUploadProgress({
-        title,
-        detail: "Sending items to the machine...",
-        completedBytes: totalBytes,
-        totalBytes,
-        phase: "uploading",
+      await uploadBrowserSourcesToFilesystem({
+        uploadUrl: buildFilesystemUploadUrl(websocketUrl),
+        directoryPath: currentPath,
+        sources,
+        onProgress: (progress) => {
+          setUploadProgress({
+            title,
+            detail: progress.detail,
+            completedBytes: progress.completedBytes,
+            totalBytes: progress.totalBytes,
+            phase: progress.phase,
+          });
+        },
       });
-      await clientRef.current?.upload(currentPath, uploadFiles);
-      const uploadedPaths = getUploadSelectionPaths(currentPath, uploadFiles);
+      await clientRef.current?.subscribe(currentPath);
+      const uploadedPaths = getUploadSelectionPaths(currentPath, sources);
 
       if (uploadedPaths.length > 0) {
         setSelectedPaths(uploadedPaths);
         setSelectionAnchorPath(uploadedPaths[0] ?? null);
       }
+      setIsFetching(false);
     } catch (error) {
-      setListingError(toListingErrorMessage(error instanceof Error ? error.message : "Failed to upload items."));
+      const uploadErrorMessage = error instanceof Error ? error.message : "Failed to upload items.";
+      dispatchToast({ type: "error", message: uploadErrorMessage });
+      if (listing === null) {
+        setListingError(toListingErrorMessage(uploadErrorMessage));
+      }
+      await clientRef.current?.subscribe(currentPath).catch(() => undefined);
       setIsFetching(false);
     } finally {
       setUploadProgress(null);
     }
-  }, [currentPath]);
+  }, [currentPath, listing, websocketUrl]);
 
   const uploadBrowserFiles = useCallback(async (
     files: FileList | null,
