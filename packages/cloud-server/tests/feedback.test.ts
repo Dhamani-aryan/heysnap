@@ -279,6 +279,7 @@ const createFeedbackFixture = async (options: {
     userId: user.id,
     computerId: computer.id,
     tokenHash: hashToken(accessToken, config.sessionSecret),
+    scopes: ["feedback:http"],
     expiresAt: new Date(Date.now() + 60_000),
   });
   const machineToken = "machine-token";
