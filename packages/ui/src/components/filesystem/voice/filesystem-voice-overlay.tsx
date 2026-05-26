@@ -6,6 +6,7 @@ import { getAssistantMarkdown } from "../../../stores/agent/agent-store";
 import {
   RightPromptComposer,
   type PromptAttachment,
+  type PromptModelChoice,
   type PromptVoiceState,
 } from "../../../agent/prompt-composer";
 import type { AgentThreadSummary, AgentUiContext } from "../../../agent/types";
@@ -23,8 +24,11 @@ export const FilesystemVoiceOverlay = ({
   currentPath,
   selectedThreadId,
   uiContext,
+  allowModelSelection = false,
+  promptModelChoice = "gpt",
   onPromptDraftChange,
   onPromptAttachmentsChange,
+  onPromptModelChoiceChange,
   onStartRecording,
   onStopRecording,
   onOpenFilePath,
@@ -39,8 +43,11 @@ export const FilesystemVoiceOverlay = ({
   readonly currentPath: string;
   readonly selectedThreadId: string | null;
   readonly uiContext: AgentUiContext;
+  readonly allowModelSelection?: boolean;
+  readonly promptModelChoice?: PromptModelChoice;
   readonly onPromptDraftChange: (draft: string) => void;
   readonly onPromptAttachmentsChange: (attachments: PromptAttachment[]) => void;
+  readonly onPromptModelChoiceChange?: (choice: PromptModelChoice) => void;
   readonly onStartRecording: () => Promise<void>;
   readonly onStopRecording: () => void;
   readonly onOpenFilePath: (path: string) => void;
@@ -82,6 +89,11 @@ export const FilesystemVoiceOverlay = ({
     return latestResponse;
   }, [activeRun, messageOrder, messagesById, streamingMessageIds]);
   const isAgentRunning = activeRun !== null;
+  const canChangeModel =
+    allowModelSelection &&
+    selectedThreadId === null &&
+    !isAgentRunning &&
+    onPromptModelChoiceChange !== undefined;
   const [retainedAssistantResponse, setRetainedAssistantResponse] = useState<FilesystemAgentStatusResponse | null>(null);
   const latestAssistantResponseRef = useRef<FilesystemAgentStatusResponse | null>(null);
   const wasAgentRunningRef = useRef(isAgentRunning);
@@ -161,11 +173,25 @@ export const FilesystemVoiceOverlay = ({
             voiceState={voiceState}
             autoFocus={shouldAutoFocus}
             isRunning={isAgentRunning}
+            modelPicker={allowModelSelection ? {
+              value: selectedThreadId === null ? promptModelChoice : getThreadModelChoice(selectedThreadId),
+              disabled: !canChangeModel,
+              onChange: onPromptModelChoiceChange ?? (() => {}),
+            } : undefined}
             onDraftChange={onPromptDraftChange}
             onAttachmentsChange={onPromptAttachmentsChange}
             onCancel={cancel}
             onSubmit={async (input) => {
-              const didSubmit = isAgentRunning ? await steer(input) : submit(input);
+              const didSubmit = isAgentRunning
+                ? await steer(input)
+                : submit({
+                  ...input,
+                  ...getNewThreadModelSelection({
+                    allowModelSelection,
+                    selectedThreadId,
+                    promptModelChoice,
+                  }),
+                });
               return didSubmit;
             }}
           />
@@ -209,6 +235,41 @@ export const FilesystemVoiceOverlay = ({
       )}
     </div>
   );
+};
+
+const getNewThreadModelSelection = ({
+  allowModelSelection,
+  selectedThreadId,
+  promptModelChoice,
+}: {
+  readonly allowModelSelection: boolean;
+  readonly selectedThreadId: string | null;
+  readonly promptModelChoice: PromptModelChoice;
+}) => {
+  if (!allowModelSelection || selectedThreadId !== null) {
+    return {};
+  }
+
+  if (promptModelChoice === "claude") {
+    return {
+      harness: "pi" as const,
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+    };
+  }
+
+  return { harness: "codex" as const };
+};
+
+const getThreadModelChoice = (threadId: string): PromptModelChoice =>
+  decodeThreadId(threadId).startsWith("pi:") ? "claude" : "gpt";
+
+const decodeThreadId = (threadId: string): string => {
+  try {
+    return decodeURIComponent(threadId);
+  } catch {
+    return threadId;
+  }
 };
 
 type FilesystemAgentStatusResponse = {

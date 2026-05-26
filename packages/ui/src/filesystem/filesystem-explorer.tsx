@@ -112,6 +112,7 @@ export interface FilesystemExplorerProps {
   readonly isBrowserWindowOpening?: boolean;
   readonly capabilitiesBaseUrl?: string;
   readonly selectedThreadId?: string | null;
+  readonly allowModelSelection?: boolean;
   readonly workspacePanel?: WorkspacePanel;
   readonly initialPath?: string;
   readonly machineName?: string;
@@ -160,6 +161,7 @@ export function FilesystemExplorer({
   isBrowserWindowOpening = false,
   capabilitiesBaseUrl,
   selectedThreadId = null,
+  allowModelSelection = false,
   workspacePanel,
   initialPath,
   machineName = "Machine",
@@ -1158,6 +1160,7 @@ export function FilesystemExplorer({
         currentDirectoryName={currentDirectoryName}
         promptDraft={sharedPromptDraft}
         promptAttachments={sharedPromptAttachments}
+        allowModelSelection={allowModelSelection}
         workspacePanel={activeWorkspacePanel}
         capabilitiesBaseUrl={capabilitiesBaseUrl}
         uiContext={agentUiContext}

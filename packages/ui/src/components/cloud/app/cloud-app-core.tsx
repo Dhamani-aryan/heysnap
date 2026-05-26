@@ -62,6 +62,7 @@ export interface CloudWorkspaceRendererProps {
   readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
   readonly feedbackUrl?: string;
+  readonly allowModelSelection?: boolean;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
   readonly workspacePanel?: "chat" | "connectors";
@@ -579,6 +580,7 @@ function CloudAppContent({
           path: `/gateway/computers/${encodeURIComponent(selectedComputer.id)}/feedback`,
           token: workspaceSession.accessSession.accessSession.token,
         }),
+        allowModelSelection: user?.allowPiModels === true,
         sarvamApiKey,
         selectedThreadId,
         workspacePanel: selectedWorkspacePanel,
