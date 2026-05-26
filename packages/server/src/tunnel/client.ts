@@ -11,19 +11,24 @@ export interface MachineTunnelClientOptions {
   readonly tokenFile: string;
   readonly localPort: number;
   readonly reconnectMs?: number;
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
 }
 
-export const startMachineTunnelClient = (options: MachineTunnelClientOptions): void => {
+export const startMachineTunnelClient = (options: MachineTunnelClientOptions): MachineTunnelClient => {
   const client = new MachineTunnelClient(options);
   client.start();
+  return client;
 };
 
-class MachineTunnelClient {
+export class MachineTunnelClient {
   private cloudWebSocket: WebSocket | null = null;
   private readonly localConnections = new Map<string, LocalTunnelConnection>();
   private readonly httpAbortControllers = new Map<string, AbortController>();
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private cloudTunnelId: string | null = null;
   private cloudTunnelOpenedAt = 0;
   private cloudMessagesIn = 0;
@@ -33,6 +38,19 @@ class MachineTunnelClient {
 
   start(): void {
     this.connectSoon(0);
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.clearHeartbeat();
+    this.abortHttpRequests("Machine tunnel client stopped");
+    this.closeLocalConnections(1000, "Machine tunnel client stopped");
+    this.cloudWebSocket?.close(1000, "Machine tunnel client stopped");
+    this.cloudWebSocket = null;
   }
 
   private connectSoon(delayMs: number): void {
@@ -93,12 +111,17 @@ class MachineTunnelClient {
         computerId: this.options.computerId,
         cloudTunnelId,
       }, "Machine tunnel connected");
+      this.startHeartbeat(webSocket, cloudTunnelId);
     });
     webSocket.on("message", (data) => {
       this.cloudMessagesIn += 1;
       this.handleCloudMessage(data);
     });
+    webSocket.on("pong", () => {
+      this.clearHeartbeatTimeout();
+    });
     webSocket.on("close", (code, reason) => {
+      this.clearHeartbeat();
       logger.warn({
         event: "machine_tunnel_client.close",
         computerId: this.options.computerId,
@@ -112,16 +135,19 @@ class MachineTunnelClient {
         messagesOut: this.cloudMessagesOut,
       }, "Machine tunnel closed");
       this.closeLocalConnections(1011, "Cloud tunnel closed");
+      this.abortHttpRequests("Cloud tunnel closed");
       this.cloudWebSocket = null;
       this.connectSoon(this.options.reconnectMs ?? 5000);
     });
     webSocket.on("error", (error) => {
+      this.clearHeartbeat();
       logger.error({
         event: "machine_tunnel_client.error",
         computerId: this.options.computerId,
         cloudTunnelId,
         err: errorToLog(error),
       }, "Machine tunnel error");
+      this.abortHttpRequests("Cloud tunnel errored");
       webSocket.close();
     });
   }
@@ -179,13 +205,15 @@ class MachineTunnelClient {
 
   private async handleHttpRequest(message: Extract<CloudTunnelMessage, { readonly type: "httpRequest" }>): Promise<void> {
     const abortController = new AbortController();
+    const requestBody = message.bodyBase64 === undefined ? undefined : Buffer.from(message.bodyBase64, "base64");
+    const requestHeaders = toLocalHttpRequestHeaders(message.headers);
     this.httpAbortControllers.set(message.connectionId, abortController);
 
     try {
       const response = await fetch(`http://127.0.0.1:${String(this.options.localPort)}${message.path}`, {
         method: message.method ?? "GET",
-        headers: message.headers,
-        body: message.bodyBase64 === undefined ? undefined : Buffer.from(message.bodyBase64, "base64"),
+        headers: requestHeaders,
+        body: requestBody,
         signal: abortController.signal,
       });
 
@@ -203,13 +231,37 @@ class MachineTunnelClient {
         bodyBase64: body.toString("base64"),
       });
     } catch (error) {
-      const body = Buffer.from(error instanceof Error ? error.message : "Failed to proxy HTTP request", "utf8");
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      const errorMessage = toHttpProxyErrorMessage(error);
+      logger.error({
+        event: "machine_tunnel_client.http_proxy_error",
+        computerId: this.options.computerId,
+        cloudTunnelId: this.cloudTunnelId,
+        connectionId: message.connectionId,
+        method: message.method ?? "GET",
+        path: sanitizeUrlPath(message.path),
+        hasBody: requestBody !== undefined,
+        bodyBytes: requestBody?.byteLength ?? 0,
+        forwardedHeaderNames: Object.keys(message.headers ?? {}).sort(),
+        localHeaderNames: Object.keys(requestHeaders ?? {}).sort(),
+        err: errorToLog(error),
+        cause: getErrorCauseLog(error),
+      }, "Machine tunnel HTTP proxy request failed");
+      const body = Buffer.from(JSON.stringify({
+        error: {
+          code: "MACHINE_HTTP_PROXY_FAILED",
+          message: errorMessage,
+        },
+      }), "utf8");
       this.sendToCloud({
         type: "httpResponse",
         connectionId: message.connectionId,
         statusCode: 502,
         headers: {
-          "content-type": "text/plain; charset=utf-8",
+          "content-type": "application/json",
         },
         bodyBase64: body.toString("base64"),
       });
@@ -350,6 +402,54 @@ class MachineTunnelClient {
     }
   }
 
+  private startHeartbeat(webSocket: WebSocket, cloudTunnelId: string): void {
+    const heartbeatIntervalMs = this.options.heartbeatIntervalMs ?? DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS;
+    this.clearHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      this.sendHeartbeat(webSocket, cloudTunnelId);
+    }, heartbeatIntervalMs);
+  }
+
+  private sendHeartbeat(webSocket: WebSocket, cloudTunnelId: string): void {
+    if (webSocket !== this.cloudWebSocket || webSocket.readyState !== WebSocket.OPEN || this.heartbeatTimeoutTimer !== null) {
+      return;
+    }
+
+    const heartbeatTimeoutMs = this.options.heartbeatTimeoutMs ?? DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS;
+    this.heartbeatTimeoutTimer = setTimeout(() => {
+      logger.warn({
+        event: "machine_tunnel_client.heartbeat_timeout",
+        computerId: this.options.computerId,
+        cloudTunnelId,
+        ageMs: Date.now() - this.cloudTunnelOpenedAt,
+        heartbeatTimeoutMs,
+        localConnectionCount: this.localConnections.size,
+        httpRequestCount: this.httpAbortControllers.size,
+        messagesIn: this.cloudMessagesIn,
+        messagesOut: this.cloudMessagesOut,
+      }, "Machine tunnel heartbeat timed out");
+      webSocket.terminate();
+    }, heartbeatTimeoutMs);
+
+    webSocket.ping();
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (this.heartbeatTimeoutTimer !== null) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
+  }
+
+  private clearHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+
+    this.clearHeartbeatTimeout();
+  }
+
   private closeLocalConnections(code: number, reason: string): void {
     for (const localConnection of this.localConnections.values()) {
       localConnection.webSocket.close(code, reason);
@@ -357,7 +457,18 @@ class MachineTunnelClient {
 
     this.localConnections.clear();
   }
+
+  private abortHttpRequests(reason: string): void {
+    for (const abortController of this.httpAbortControllers.values()) {
+      abortController.abort(reason);
+    }
+
+    this.httpAbortControllers.clear();
+  }
 }
+
+const DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS = 30_000;
+const DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS = 10_000;
 
 interface LocalTunnelConnection {
   readonly webSocket: WebSocket;
@@ -442,6 +553,41 @@ const buildTunnelUrl = (cloudServerPublicUrl: string): string => {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 };
+
+export const toLocalHttpRequestHeaders = (
+  headers: Record<string, string> | undefined,
+): Record<string, string> | undefined => {
+  if (headers === undefined) {
+    return undefined;
+  }
+
+  const localHeaders: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "content-length") {
+      continue;
+    }
+
+    localHeaders[name] = value;
+  }
+
+  return Object.keys(localHeaders).length === 0 ? undefined : localHeaders;
+};
+
+const toHttpProxyErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : "Failed to proxy HTTP request";
+  const cause = error instanceof Error && error.cause !== undefined
+    ? `: ${getErrorCauseMessage(error.cause)}`
+    : "";
+
+  return `Machine HTTP proxy failed: ${message}${cause}`;
+};
+
+const getErrorCauseMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
+
+const getErrorCauseLog = (error: unknown): Record<string, unknown> | undefined =>
+  error instanceof Error && error.cause !== undefined ? errorToLog(error.cause) : undefined;
 
 const parseCloudMessage = (data: RawData): CloudTunnelMessage | null => {
   let parsed: unknown;
