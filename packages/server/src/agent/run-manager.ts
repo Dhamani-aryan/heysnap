@@ -4,6 +4,7 @@ import { AgentError, toAgentError } from "./errors.js";
 import type {
   AgentContent,
   EditThreadUserMessageInput,
+  AgentHarnessName,
   AgentMessage,
   AgentRunEvent,
   AgentThread,
@@ -24,6 +25,7 @@ export interface StartAgentRunInput {
   readonly path: string;
   readonly content: AgentContent;
   readonly uiContext?: AgentUiContext;
+  readonly harness?: AgentHarnessName;
   readonly provider?: string;
   readonly model?: string;
   readonly clientRunId?: string;
@@ -252,6 +254,7 @@ export class AgentRunManager {
           path: record.input.path,
           content: record.input.content,
           uiContext: record.input.uiContext,
+          harness: record.input.harness,
           provider: record.input.provider,
           model: record.input.model,
         })
