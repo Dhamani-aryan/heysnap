@@ -234,6 +234,7 @@ interface FeedbackListParams {
 interface AiUsageFilterParams {
   readonly userId?: string;
   readonly computerId?: string;
+  readonly provider?: string;
   readonly model?: string;
   readonly status?: AiUsageStatus;
   readonly from?: string | Date;

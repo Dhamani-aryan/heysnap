@@ -72,6 +72,7 @@ export const AiUsagePage = () => {
   const windowKey = (searchParams.get("window") ?? "30d") as AiUsageWindowKey;
   const window = getAiUsageWindow(windowKey);
   const statusFilter = (searchParams.get("status") ?? "all") as "all" | AiUsageStatus;
+  const providerFilter = searchParams.get("provider") ?? "";
   const modelFilter = searchParams.get("model") ?? "";
   const userFilter = searchParams.get("userId") ?? "";
   const computerFilter = searchParams.get("computerId") ?? "";
@@ -91,6 +92,10 @@ export const AiUsagePage = () => {
     () => adminApi.breakdownAiUsage({ from: fromIso, groupBy: "model", limit: 10 }),
     [fromIso],
   );
+  const providerBreakdown = useAdminQuery(
+    () => adminApi.breakdownAiUsage({ from: fromIso, groupBy: "provider", limit: 10 }),
+    [fromIso],
+  );
   const userBreakdown = useAdminQuery(
     () => adminApi.breakdownAiUsage({ from: fromIso, groupBy: "user", limit: 10 }),
     [fromIso],
@@ -101,6 +106,7 @@ export const AiUsagePage = () => {
         from: fromIso,
         limit: 100,
         ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+        ...(providerFilter.length > 0 ? { provider: providerFilter } : {}),
         ...(modelFilter.length > 0 ? { model: modelFilter } : {}),
         ...(userFilter.length > 0 ? { userId: userFilter } : {}),
         ...(computerFilter.length > 0 ? { computerId: computerFilter } : {}),
@@ -124,6 +130,7 @@ export const AiUsagePage = () => {
     summary.reload();
     buckets.reload();
     modelBreakdown.reload();
+    providerBreakdown.reload();
     userBreakdown.reload();
     list.reload();
   };
@@ -139,7 +146,7 @@ export const AiUsagePage = () => {
     return list.data.usage.filter((row) => row.upstreamPath.toLowerCase().includes(needle));
   }, [list.data, pathFilter]);
 
-  const summaryError = summary.error ?? buckets.error ?? modelBreakdown.error ?? userBreakdown.error;
+  const summaryError = summary.error ?? buckets.error ?? modelBreakdown.error ?? providerBreakdown.error ?? userBreakdown.error;
 
   const topModelItems: TopBarItem[] = React.useMemo(
     () =>
@@ -150,6 +157,17 @@ export const AiUsagePage = () => {
         secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
       })),
     [modelBreakdown.data?.groups],
+  );
+
+  const topProviderItems: TopBarItem[] = React.useMemo(
+    () =>
+      (providerBreakdown.data?.groups ?? []).map((row) => ({
+        key: row.key,
+        label: row.label,
+        value: row.estimatedCostUsd,
+        secondary: `${formatTokens(row.totalTokens)} tokens · ${row.requestCount.toLocaleString()} requests`,
+      })),
+    [providerBreakdown.data?.groups],
   );
 
   const topUserItems: TopBarItem[] = React.useMemo(
@@ -300,7 +318,25 @@ export const AiUsagePage = () => {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <Card>
+              <CardHeader>
+                <CardTitle>Providers</CardTitle>
+                <CardDescription>OpenAI, Anthropic, and other gateway traffic.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {providerBreakdown.loading ? (
+                  <Skeleton className="h-32" />
+                ) : (
+                  <TopBarList
+                    items={topProviderItems}
+                    valueFormatter={formatCurrency}
+                    emptyLabel="No provider data yet"
+                  />
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>Top models</CardTitle>
@@ -351,9 +387,9 @@ export const AiUsagePage = () => {
             <CardHeader className="space-y-3">
               <div>
                 <CardTitle>Recent requests</CardTitle>
-                <CardDescription>Latest 100 calls in the selected window.</CardDescription>
+                <CardDescription>Latest 100 calls across all gateway providers in the selected window.</CardDescription>
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-5">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-6">
                 <Select
                   value={statusFilter}
                   onValueChange={(value) => updateParam("status", value === "all" ? null : value)}
@@ -369,6 +405,11 @@ export const AiUsagePage = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                <Input
+                  placeholder="Provider"
+                  value={providerFilter}
+                  onChange={(event) => updateParam("provider", event.target.value)}
+                />
                 <Input
                   placeholder="Filter by model"
                   value={modelFilter}
@@ -397,6 +438,7 @@ export const AiUsagePage = () => {
                   <TableRow>
                     <TableHead className="w-32">Started</TableHead>
                     <TableHead>User · machine</TableHead>
+                    <TableHead>Provider</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Path</TableHead>
                     <TableHead>Status</TableHead>
@@ -408,13 +450,13 @@ export const AiUsagePage = () => {
                 <TableBody>
                   {list.loading ? (
                     <TableRow>
-                      <TableCell colSpan={8}>
+                      <TableCell colSpan={9}>
                         <Skeleton className="h-5" />
                       </TableCell>
                     </TableRow>
                   ) : filteredUsage.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
                         No requests
                       </TableCell>
                     </TableRow>
@@ -440,6 +482,7 @@ export const AiUsagePage = () => {
                             {row.computerName ?? row.computerId.slice(0, 8)}
                           </Link>
                         </TableCell>
+                        <TableCell className="font-mono text-xs">{row.provider}</TableCell>
                         <TableCell className="font-mono text-xs">{row.model ?? "—"}</TableCell>
                         <TableCell className="max-w-[280px] truncate font-mono text-xs text-muted-foreground" title={`${row.method} ${row.upstreamPath}`}>
                           <span className="text-foreground/80">{row.method}</span> {row.upstreamPath}

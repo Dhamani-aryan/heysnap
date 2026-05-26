@@ -153,7 +153,7 @@ export const AiUsageDetailPage = () => {
         <Card>
           <CardHeader>
             <CardTitle>Upstream usage</CardTitle>
-            <CardDescription>Raw usage object returned by Azure.</CardDescription>
+            <CardDescription>Raw usage object returned by the upstream provider.</CardDescription>
           </CardHeader>
           <CardContent>
             <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
