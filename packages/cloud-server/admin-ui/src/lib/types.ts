@@ -13,6 +13,7 @@ export interface AdminUser {
   readonly id: string;
   readonly email: string;
   readonly username: string;
+  readonly allowPiModels: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
