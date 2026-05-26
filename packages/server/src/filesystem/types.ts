@@ -26,6 +26,46 @@ export interface FilesystemUploadFile {
   readonly updatedAt?: string;
 }
 
+export type FilesystemUploadItem =
+  | {
+      readonly type: "directory";
+      readonly relativePath: string;
+      readonly updatedAt?: string;
+    }
+  | {
+      readonly type: "file";
+      readonly relativePath: string;
+      readonly size: number;
+      readonly updatedAt?: string;
+    };
+
+export interface FilesystemUploadCreateRequest {
+  readonly path?: string;
+  readonly items: FilesystemUploadItem[];
+}
+
+export interface FilesystemUploadCreateResponse {
+  readonly uploadId: string;
+  readonly expiresAt: string;
+  readonly files: Array<{
+    readonly fileId: string;
+    readonly relativePath: string;
+    readonly size: number;
+  }>;
+}
+
+export interface FilesystemUploadChunkResponse {
+  readonly fileId: string;
+  readonly offset: number;
+  readonly bytesReceived: number;
+  readonly size: number;
+  readonly done: boolean;
+}
+
+export interface FilesystemUploadCompleteResponse {
+  readonly entries: FilesystemEntry[];
+}
+
 export interface FilesystemViewState {
   readonly currentPath: string | null;
   readonly openFiles: FilesystemEntry[];
