@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 
 import type { CloudStore, FeedbackReportRecord } from "../db/types.js";
-import type { GatewayAccessService } from "../gateway/access-sessions.js";
+import { hasAccessScope, type GatewayAccessService } from "../gateway/access-sessions.js";
 import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
 import type { AppVariables } from "../shared/context.js";
 import { badRequest } from "../shared/errors.js";
@@ -38,6 +38,10 @@ export const handleGatewayFeedbackRequest = async (
 
   if (accessSession === null) {
     return context.json({ error: { code: "UNAUTHORIZED", message: "Invalid gateway access token" } }, 401);
+  }
+
+  if (!hasAccessScope(accessSession, "feedback:http")) {
+    return context.json({ error: { code: "FORBIDDEN", message: "Gateway access token does not allow this route" } }, 403);
   }
 
   const body = await readJsonBody(context.req.raw);
@@ -100,6 +104,7 @@ const requestMachineSnapshot = async (
         "content-type": "application/json",
       },
       body,
+      trafficClass: "feedback:http",
     });
   } catch (error) {
     return markCommentOnly(options.store, report.id, errorMessage(error, "Machine snapshot request failed"));

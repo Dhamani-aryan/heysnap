@@ -32,5 +32,8 @@ export const serializeComputerAccessSession = (
   id: accessSession.id,
   computerId: accessSession.computerId,
   token,
+  scopes: Array.isArray(accessSession.scopes) && accessSession.scopes.every((scope) => typeof scope === "string")
+    ? accessSession.scopes
+    : ["*"],
   expiresAt: accessSession.expiresAt.toISOString(),
 });
