@@ -354,6 +354,7 @@ export class DrizzleCloudStore implements CloudStore {
     readonly userId: string;
     readonly computerId: string;
     readonly tokenHash: string;
+    readonly scopes: unknown;
     readonly expiresAt: Date;
   }): Promise<ComputerAccessSessionRecord> {
     const [accessSession] = await this.db.insert(computerAccessSessions).values(input).returning();

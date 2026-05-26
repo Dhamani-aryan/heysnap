@@ -125,3 +125,23 @@ export const buildFilesystemDownloadUrl = (
 
   return url.toString();
 };
+
+export const buildFilesystemUploadUrl = (
+  filesystemWebsocketUrl: string,
+): string => {
+  const baseUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "http://localhost";
+  const url = new URL(filesystemWebsocketUrl, baseUrl);
+
+  if (url.protocol === "ws:") {
+    url.protocol = "http:";
+  } else if (url.protocol === "wss:") {
+    url.protocol = "https:";
+  }
+
+  url.pathname = url.pathname.replace(/\/filesystem\/?$/u, "/filesystem/uploads");
+  url.searchParams.delete("path");
+  url.searchParams.delete("showHidden");
+  url.searchParams.delete("v");
+
+  return url.toString();
+};

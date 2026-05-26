@@ -26,6 +26,7 @@ import {
   handleFilesystemDownloadRequest,
   sendFilesystemDownloadError,
 } from "./filesystem/download.js";
+import { handleFilesystemUploadRequest } from "./filesystem/upload.js";
 import { createFeedbackHttpService } from "./feedback/http.js";
 import { resolveFilesystemRoot } from "./filesystem/paths.js";
 import type { FilesystemRoot } from "./filesystem/types.js";
@@ -163,6 +164,22 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
 
       void handleFilesystemDownloadRequest(request, response, filesystemRoot).catch((error) => {
         sendFilesystemDownloadError(response, error);
+      });
+      return;
+    }
+
+    if (requestUrl.pathname.startsWith("/filesystem/uploads")) {
+      void handleFilesystemUploadRequest(request, response, filesystemRoot).catch((error) => {
+        if (response.headersSent) {
+          response.destroy(error instanceof Error ? error : undefined);
+          return;
+        }
+
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          code: "UPLOAD_FAILED",
+          message: error instanceof Error ? error.message : "Filesystem upload failed",
+        }));
       });
       return;
     }

@@ -268,6 +268,10 @@ type BrowserControlClientMessage =
       readonly capabilities: string[];
     }
   | {
+      readonly type: "ping";
+      readonly requestId: string;
+    }
+  | {
       readonly type: "response";
       readonly requestId: string;
       readonly ok: true;
@@ -586,6 +590,15 @@ export class BrowserControlBroker {
         clientId: client.clientId,
         capabilities: client.capabilities,
       }, "Browser-control client announced readiness");
+      return;
+    }
+
+    if (message.type === "ping") {
+      sendWebSocketJson(client.webSocket, {
+        type: "pong",
+        requestId: message.requestId,
+        serverTime: new Date().toISOString(),
+      });
       return;
     }
 
@@ -1739,6 +1752,17 @@ const parseClientMessage = (data: RawData): BrowserControlClientMessage | null =
       clientId,
       capabilities,
     };
+  }
+
+  if (message["type"] === "ping") {
+    const requestId = readNonEmptyString(message["requestId"]);
+
+    return requestId === undefined
+      ? null
+      : {
+          type: "ping",
+          requestId,
+        };
   }
 
   if (message["type"] === "response") {

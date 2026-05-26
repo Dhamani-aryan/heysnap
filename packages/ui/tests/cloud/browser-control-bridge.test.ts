@@ -139,6 +139,18 @@ describe("browser-control bridge protocol", () => {
       },
     });
   });
+
+  it("parses heartbeat pong frames", () => {
+    expect(parseBrowserControlServerMessage(JSON.stringify({
+      type: "pong",
+      requestId: "heartbeat-1",
+      serverTime: "2026-05-26T10:00:00.000Z",
+    }))).toEqual({
+      type: "pong",
+      requestId: "heartbeat-1",
+      serverTime: "2026-05-26T10:00:00.000Z",
+    });
+  });
 });
 
 describe("browser-control bridge reconnects", () => {

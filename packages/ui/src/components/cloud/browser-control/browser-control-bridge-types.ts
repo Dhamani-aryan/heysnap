@@ -52,6 +52,11 @@ export type BrowserControlServerMessage =
       readonly reason?: string;
     }
   | {
+      readonly type: "pong";
+      readonly requestId: string;
+      readonly serverTime: string;
+    }
+  | {
       readonly type: "attachment.chunk";
       readonly requestId: string;
       readonly chunkRequestId: string;

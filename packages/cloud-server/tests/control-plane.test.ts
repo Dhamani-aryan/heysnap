@@ -6,6 +6,7 @@ import { createApp } from "../src/server.js";
 import type { ComputerProvisioner } from "../src/provisioning/types.js";
 import type { ComputerRecord } from "../src/db/types.js";
 import type { TunnelStatusRegistry } from "../src/gateway/tunnel.js";
+import { DEFAULT_GATEWAY_ACCESS_SCOPES } from "../src/gateway/access-sessions.js";
 import { InMemoryCloudStore } from "./in-memory-store.js";
 
 const config: CloudServerConfig = {
@@ -545,6 +546,7 @@ describe("cloud server computer access sessions", () => {
     expect(body.accessSession).toMatchObject({
       computerId: computer.id,
       token: expect.any(String),
+      scopes: DEFAULT_GATEWAY_ACCESS_SCOPES,
     });
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
@@ -580,15 +582,22 @@ describe("cloud server computer access sessions", () => {
     const requestedPaths: string[] = [];
     const tunnelRegistry: TunnelStatusRegistry = {
       isConnected: () => true,
-      proxyHttpRequest: async (_computerId, input) => {
+      proxyStreamingHttpRequest: async (_computerId, input) => {
         requestedPaths.push(input.path);
         return {
           statusCode: 200,
           headers: {
             "content-type": "application/zip",
             "content-disposition": "attachment; filename=\"Project.zip\"",
+            "content-length": "9",
           },
-          body: Buffer.from("zip-bytes", "utf8"),
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("zip-bytes"));
+              controller.close();
+            },
+          }),
+          cancel() {},
         };
       },
     };
@@ -608,8 +617,134 @@ describe("cloud server computer access sessions", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/zip");
     expect(response.headers.get("content-disposition")).toBe("attachment; filename=\"Project.zip\"");
+    expect(response.headers.get("content-length")).toBe("9");
     expect(await response.text()).toBe("zip-bytes");
     expect(requestedPaths).toEqual(["/filesystem/download?path=Project"]);
+  });
+
+  it("proxies filesystem upload chunks through authenticated gateway access sessions", async () => {
+    const requested: Array<{
+      readonly path: string;
+      readonly method?: string;
+      readonly headers?: Record<string, string>;
+      readonly body?: string;
+    }> = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async (_computerId, input) => {
+        requested.push({
+          path: input.path,
+          method: input.method,
+          headers: input.headers,
+          body: input.body?.toString("utf8"),
+        });
+        return {
+          statusCode: 200,
+          headers: { "content-type": "application/json" },
+          body: Buffer.from(JSON.stringify({
+            fileId: "0",
+            offset: 0,
+            bytesReceived: 5,
+            size: 10,
+            done: false,
+          }), "utf8"),
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "upload-user@example.com");
+    const computer = await createComputer(app, auth.token, "Upload VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/uploads/upload-1/files/0?accessToken=${accessBody.accessSession.token}&offset=0`,
+      {
+        method: "PATCH",
+        body: "hello",
+        headers: { "content-type": "application/octet-stream", "content-length": "5" },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      fileId: "0",
+      bytesReceived: 5,
+    });
+    expect(requested).toEqual([{
+      path: "/filesystem/uploads/upload-1/files/0?offset=0",
+      method: "PATCH",
+      headers: { "content-type": "application/octet-stream" },
+      body: "hello",
+    }]);
+  });
+
+  it("returns machine filesystem upload errors instead of replacing them with gateway 502s", async () => {
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async () => ({
+        statusCode: 400,
+        headers: { "content-type": "application/json" },
+        body: Buffer.from(JSON.stringify({
+          code: "INVALID_UPLOAD",
+          message: "Upload request items must be an array.",
+        }), "utf8"),
+      }),
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "upload-error-user@example.com");
+    const computer = await createComputer(app, auth.token, "Upload Error VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/uploads?accessToken=${accessBody.accessSession.token}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "content-length": "2" },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      code: "INVALID_UPLOAD",
+      message: "Upload request items must be an array.",
+    });
+  });
+
+  it("rejects gateway filesystem upload chunks over the bounded chunk size", async () => {
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async () => {
+        throw new Error("should not proxy oversized chunks");
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "upload-large-user@example.com");
+    const computer = await createComputer(app, auth.token, "Large Upload VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/uploads/upload-1/files/0?accessToken=${accessBody.accessSession.token}&offset=0`,
+      {
+        method: "PATCH",
+        body: "",
+        headers: { "content-length": String(4 * 1024 * 1024 + 1) },
+      },
+    );
+
+    expect(response.status).toBe(413);
   });
 
   it("proxies standalone preview assets through authenticated gateway access sessions", async () => {
@@ -801,6 +936,77 @@ describe("cloud server computer access sessions", () => {
     const response = await app.request(`/gateway/computers/${computer.id}/filesystem/download?path=Project`);
 
     expect(response.status).toBe(401);
+  });
+
+  it("rejects gateway requests when the access session lacks the required scope", async () => {
+    const { app, store } = createTestApp({
+      tunnelRegistry: {
+        isConnected: () => true,
+        proxyStreamingHttpRequest: async () => {
+          throw new Error("should not proxy requests without the required scope");
+        },
+      },
+    });
+    const auth = await registerUser(app, "download-wrong-scope@example.com");
+    const computer = await createComputer(app, auth.token, "Scoped Download VM");
+    const accessToken = "filesystem-ws-only";
+    await store.createComputerAccessSession({
+      userId: auth.userId,
+      computerId: computer.id,
+      tokenHash: hashToken(accessToken, config.sessionSecret),
+      scopes: ["filesystem:ws"],
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/download?accessToken=${accessToken}&path=Project`,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
+  });
+
+  it("keeps legacy wildcard access sessions valid for scoped gateway routes", async () => {
+    const requestedPaths: string[] = [];
+    const { app, store } = createTestApp({
+      tunnelRegistry: {
+        isConnected: () => true,
+        proxyStreamingHttpRequest: async (_computerId, input) => {
+          requestedPaths.push(input.path);
+          return {
+            statusCode: 200,
+            headers: { "content-type": "text/plain" },
+            body: new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("ok"));
+                controller.close();
+              },
+            }),
+            cancel() {},
+          };
+        },
+      },
+    });
+    const auth = await registerUser(app, "download-wildcard@example.com");
+    const computer = await createComputer(app, auth.token, "Wildcard Download VM");
+    const accessToken = "wildcard-access";
+    await store.createComputerAccessSession({
+      userId: auth.userId,
+      computerId: computer.id,
+      tokenHash: hashToken(accessToken, config.sessionSecret),
+      scopes: ["*"],
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/filesystem/download?accessToken=${accessToken}&path=Project`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("ok");
+    expect(requestedPaths).toEqual(["/filesystem/download?path=Project"]);
   });
 
   it("rejects capabilities REST without gateway access tokens", async () => {
@@ -1285,6 +1491,7 @@ interface AccessSessionResponse {
     readonly id: string;
     readonly computerId: string;
     readonly token: string;
+    readonly scopes: readonly string[];
     readonly expiresAt: string;
   };
   readonly routes: {

@@ -3,17 +3,36 @@ import type { IncomingMessage } from "node:http";
 import { ReadableStream } from "node:stream/web";
 import type { Duplex } from "node:stream";
 
+import {
+  decodeTunnelBinaryFrame,
+  encodeTunnelBinaryFrame,
+  normalizeWebSocketCloseCode,
+  parseTunnelControlMessage,
+  profileForTrafficClass,
+  profileForWebSocketRoute,
+  stringifyTunnelControlMessage,
+  TunnelSendScheduler,
+  TUNNEL_OVERLOAD_CLOSE_CODE,
+  TUNNEL_OVERLOAD_CLOSE_REASON,
+  type TunnelControlMessage,
+  type TunnelQueueProfile,
+  type TunnelRoute,
+  type TunnelTrafficClass,
+} from "@ank1015-app/tunnel-protocol";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerAccessSessionRecord, MachineIdentityRecord } from "../db/types.js";
 import { errorToLog, logger, sanitizeUrlPath } from "../shared/logger.js";
-import type { GatewayAccessService } from "./access-sessions.js";
+import { hasAccessScope, type GatewayAccessScope, type GatewayAccessService } from "./access-sessions.js";
 
-export type GatewayRoute = "filesystem" | "browser-control" | "preview";
+export type GatewayRoute = TunnelRoute;
+export { normalizeWebSocketCloseCode };
 
 const PREVIEW_ACCESS_COOKIE_NAME = "heysnap_preview_access";
+const DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS = 30_000;
+const DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS = 10_000;
 
 export interface GatewayRouteMetadata {
   readonly userId: string;
@@ -32,6 +51,7 @@ export interface GatewayHttpRequest {
   readonly method?: string;
   readonly headers?: Record<string, string>;
   readonly body?: Buffer;
+  readonly trafficClass?: TunnelTrafficClass;
 }
 
 export interface GatewayHttpResponse {
@@ -52,6 +72,8 @@ export interface GatewayTunnelServerOptions {
   readonly config: CloudServerConfig;
   readonly gatewayAccessService: GatewayAccessService;
   readonly registry?: MachineTunnelRegistry;
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
 }
 
 export interface UpgradeServer {
@@ -67,6 +89,8 @@ export class MachineTunnelRegistry {
   set(computerId: string, tunnel: MachineTunnel): void {
     const previous = this.tunnels.get(computerId);
 
+    this.tunnels.set(computerId, tunnel);
+
     if (previous !== undefined) {
       logger.warn({
         event: "machine_tunnel.replaced",
@@ -76,8 +100,6 @@ export class MachineTunnelRegistry {
       }, "Machine tunnel replaced by a newer tunnel");
       previous.close(1012, "Replaced by a newer tunnel");
     }
-
-    this.tunnels.set(computerId, tunnel);
   }
 
   get(computerId: string): MachineTunnel | undefined {
@@ -142,7 +164,10 @@ export const attachGatewayTunnelServer = (
           }
 
           machineSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
-            const tunnel = new MachineTunnel(machine.computerId, webSocket, registry);
+            const tunnel = new MachineTunnel(machine.computerId, webSocket, registry, {
+              heartbeatIntervalMs: options.heartbeatIntervalMs,
+              heartbeatTimeoutMs: options.heartbeatTimeoutMs,
+            });
             registry.set(machine.computerId, tunnel);
           });
         })
@@ -177,6 +202,18 @@ export const attachGatewayTunnelServer = (
       routeMatch,
     )
       .then((accessSession) => {
+        if (accessSession === "forbidden") {
+          logger.warn({
+            event: "gateway_ws.upgrade_rejected",
+            reason: "forbidden_scope",
+            computerId: routeMatch.computerId,
+            route: routeMatch.route,
+            path: sanitizeUrlPath(request.url),
+          }, "Rejected gateway websocket upgrade");
+          rejectUpgrade(socket, 403, "Gateway access token does not allow this route");
+          return;
+        }
+
         if (accessSession === null) {
           logger.warn({
             event: "gateway_ws.upgrade_rejected",
@@ -238,8 +275,11 @@ export class MachineTunnel {
   private readonly gatewayConnectionStats = new Map<string, GatewayConnectionStats>();
   private readonly pendingHttpRequests = new Map<string, PendingHttpRequest>();
   private readonly pendingHttpStreams = new Map<string, PendingHttpStream>();
-  private readonly activeHttpStreams = new Map<string, ActiveHttpStream>();
+  private readonly activeHttpResponses = new Map<string, ActiveHttpResponse>();
   private readonly openedAt = Date.now();
+  private readonly sendScheduler: TunnelSendScheduler;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private messagesFromMachine = 0;
   private messagesToMachine = 0;
 
@@ -247,17 +287,38 @@ export class MachineTunnel {
     readonly computerId: string,
     private readonly machineWebSocket: WebSocket,
     private readonly registry: MachineTunnelRegistry,
+    private readonly heartbeatOptions: MachineTunnelHeartbeatOptions = {},
   ) {
+    this.sendScheduler = new TunnelSendScheduler({
+      socket: this.machineWebSocket,
+      isOpen: () => this.machineWebSocket.readyState === WebSocket.OPEN,
+      onConnectionOverflow: (connectionId, profile, reason) => {
+        this.closeLogicalConnectionForOverload(connectionId, profile, reason);
+      },
+      onSendError: (error) => {
+        logger.warn({
+          event: "machine_tunnel.send_error",
+          computerId: this.computerId,
+          tunnelId: this.tunnelId,
+          err: errorToLog(error),
+        }, "Machine tunnel send failed");
+      },
+    });
     logger.info({
       event: "machine_tunnel.open",
       computerId: this.computerId,
       tunnelId: this.tunnelId,
     }, "Machine tunnel opened");
-    this.machineWebSocket.on("message", (data) => {
+    this.startHeartbeat();
+    this.machineWebSocket.on("message", (data, isBinary) => {
       this.messagesFromMachine += 1;
-      this.handleMachineMessage(data);
+      this.handleMachineMessage(data, isBinary);
+    });
+    this.machineWebSocket.on("pong", () => {
+      this.clearHeartbeatTimeout();
     });
     this.machineWebSocket.on("close", (code, reason) => {
+      this.clearHeartbeat();
       logger.warn({
         event: "machine_tunnel.close",
         computerId: this.computerId,
@@ -268,16 +329,18 @@ export class MachineTunnel {
         gatewayConnectionCount: this.gatewayConnections.size,
         pendingHttpRequestCount: this.pendingHttpRequests.size,
         pendingHttpStreamCount: this.pendingHttpStreams.size,
-        activeHttpStreamCount: this.activeHttpStreams.size,
+        activeHttpStreamCount: this.activeHttpResponses.size,
         messagesFromMachine: this.messagesFromMachine,
         messagesToMachine: this.messagesToMachine,
       }, "Machine tunnel closed");
       this.closeGatewayConnections(1011, "Machine tunnel closed");
       this.rejectPendingHttpRequests(new Error("Machine tunnel closed"));
       this.rejectHttpStreams(new Error("Machine tunnel closed"));
+      this.sendScheduler.close(new Error("Machine tunnel closed"));
       this.registry.delete(this.computerId, this);
     });
     this.machineWebSocket.on("error", (error) => {
+      this.clearHeartbeat();
       logger.error({
         event: "machine_tunnel.error",
         computerId: this.computerId,
@@ -288,6 +351,7 @@ export class MachineTunnel {
       this.closeGatewayConnections(1011, "Machine tunnel errored");
       this.rejectPendingHttpRequests(new Error("Machine tunnel errored"));
       this.rejectHttpStreams(new Error("Machine tunnel errored"));
+      this.sendScheduler.close(new Error("Machine tunnel errored"));
       this.registry.delete(this.computerId, this);
     });
   }
@@ -301,9 +365,11 @@ export class MachineTunnel {
     },
   ): void {
     const connectionId = randomUUID();
+    const profile = profileForWebSocketRoute(input.route);
     const stats: GatewayConnectionStats = {
       openedAt: Date.now(),
       route: input.route,
+      profile,
       messagesFromGateway: 0,
       messagesToGateway: 0,
     };
@@ -322,15 +388,21 @@ export class MachineTunnel {
 
     gatewayWebSocket.on("message", (data, isBinary) => {
       stats.messagesFromGateway += 1;
-      this.sendToMachine({
-        type: "data",
+      this.observeTunnelSend(
+        this.sendBinaryToMachine({
+          type: "wsData",
+          connectionId,
+          payload: webSocketRawDataToBuffer(data),
+          isText: !isBinary,
+        }, profile),
         connectionId,
-        ...rawDataToTunnelPayload(data, isBinary),
-      });
+        profile,
+      );
     });
     gatewayWebSocket.on("close", (code, reason) => {
       this.gatewayConnections.delete(connectionId);
       this.gatewayConnectionStats.delete(connectionId);
+      this.sendScheduler.removeConnection(connectionId);
       logger.info({
         event: "gateway_ws.close",
         computerId: this.computerId,
@@ -343,16 +415,21 @@ export class MachineTunnel {
         messagesFromGateway: stats.messagesFromGateway,
         messagesToGateway: stats.messagesToGateway,
       }, "Gateway websocket closed");
-      this.sendToMachine({
-        type: "close",
+      this.observeTunnelSend(
+        this.sendControlToMachine({
+          type: "close",
+          connectionId,
+          code: normalizeWebSocketCloseCode(code),
+          reason: reason.toString("utf8"),
+        }, profile),
         connectionId,
-        code: normalizeWebSocketCloseCode(code),
-        reason: reason.toString("utf8"),
-      });
+        profile,
+      );
     });
     gatewayWebSocket.on("error", (error) => {
       this.gatewayConnections.delete(connectionId);
       this.gatewayConnectionStats.delete(connectionId);
+      this.sendScheduler.removeConnection(connectionId);
       logger.error({
         event: "gateway_ws.error",
         computerId: this.computerId,
@@ -362,92 +439,105 @@ export class MachineTunnel {
         err: errorToLog(error),
         ageMs: Date.now() - stats.openedAt,
       }, "Gateway websocket errored");
-      this.sendToMachine({
-        type: "close",
+      this.observeTunnelSend(
+        this.sendControlToMachine({
+          type: "close",
+          connectionId,
+          code: 1011,
+          reason: "Gateway socket errored",
+        }, profile),
         connectionId,
-        code: 1011,
-        reason: "Gateway socket errored",
-      });
+        profile,
+      );
     });
 
-    this.sendToMachine({
-      type: "open",
+    this.observeTunnelSend(
+      this.sendControlToMachine({
+        type: "open",
+        connectionId,
+        route: input.route,
+        path: input.targetPath,
+        metadata: input.metadata,
+        trafficClass: profile.trafficClass,
+      }, profile),
       connectionId,
-      route: input.route,
-      path: input.targetPath,
-      metadata: input.metadata,
-    });
+      profile,
+    );
   }
 
   close(code: number, reason: string): void {
     this.closeGatewayConnections(code, reason);
     this.rejectPendingHttpRequests(new Error(reason));
+    this.sendScheduler.close(new Error(reason));
     this.machineWebSocket.close(code, reason);
   }
 
   proxyHttpRequest(input: GatewayHttpRequest): Promise<GatewayHttpResponse> {
     const connectionId = randomUUID();
+    const profile = profileForTrafficClass(input.trafficClass ?? inferHttpTrafficClass(input.path));
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingHttpRequests.delete(connectionId);
+        this.activeHttpResponses.delete(connectionId);
+        this.sendScheduler.removeConnection(connectionId);
         reject(new Error("Machine HTTP tunnel request timed out"));
       }, HTTP_PROXY_TIMEOUT_MS);
 
-      this.pendingHttpRequests.set(connectionId, { resolve, reject, timeout });
-      this.sendToMachine({
-        type: "httpRequest",
-        connectionId,
-        path: input.path,
-        method: input.method,
-        headers: input.headers,
-        bodyBase64: input.body?.toString("base64"),
+      this.pendingHttpRequests.set(connectionId, { resolve, reject, timeout, profile });
+      void this.sendHttpRequest(connectionId, input, profile).catch((error) => {
+        clearTimeout(timeout);
+        this.pendingHttpRequests.delete(connectionId);
+        reject(error instanceof Error ? error : new Error(String(error)));
       });
     });
   }
 
   proxyStreamingHttpRequest(input: GatewayHttpRequest): Promise<GatewayHttpStreamResponse> {
     const connectionId = randomUUID();
+    const profile = profileForTrafficClass(input.trafficClass ?? inferHttpTrafficClass(input.path));
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingHttpStreams.delete(connectionId);
+        this.activeHttpResponses.delete(connectionId);
+        this.sendScheduler.removeConnection(connectionId);
         reject(new Error("Machine HTTP tunnel request timed out"));
       }, HTTP_PROXY_TIMEOUT_MS);
 
-      this.pendingHttpStreams.set(connectionId, { resolve, reject, timeout });
-      this.sendToMachine({
-        type: "httpRequest",
-        connectionId,
-        path: input.path,
-        method: input.method,
-        headers: input.headers,
-        bodyBase64: input.body?.toString("base64"),
-        stream: true,
+      this.pendingHttpStreams.set(connectionId, { resolve, reject, timeout, profile });
+      void this.sendHttpRequest(connectionId, { ...input, trafficClass: profile.trafficClass }, profile, true).catch((error) => {
+        clearTimeout(timeout);
+        this.pendingHttpStreams.delete(connectionId);
+        reject(error instanceof Error ? error : new Error(String(error)));
       });
     });
   }
 
-  private handleMachineMessage(data: RawData): void {
-    const message = parseMachineMessage(data);
+  private handleMachineMessage(data: RawData, isBinary: boolean): void {
+    if (this.registry.get(this.computerId) !== this) {
+      logger.warn({
+        event: "machine_tunnel.stale_message_dropped",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+      }, "Dropped message from a replaced machine tunnel");
+      return;
+    }
+
+    if (isBinary) {
+      this.handleMachineBinaryFrame(data);
+      return;
+    }
+
+    const message = parseTunnelControlMessage(rawDataToText(data));
 
     if (message === null) {
       this.machineWebSocket.close(1003, "Invalid tunnel message");
       return;
     }
 
-    if (message.type === "httpResponse") {
-      this.resolveHttpResponse(message);
-      return;
-    }
-
     if (message.type === "httpResponseStart") {
       this.resolveHttpStreamStart(message);
-      return;
-    }
-
-    if (message.type === "httpResponseChunk") {
-      this.writeHttpStreamChunk(message);
       return;
     }
 
@@ -470,15 +560,6 @@ export class MachineTunnel {
           this.gatewayConnectionStats.delete(message.connectionId);
         }
         break;
-      case "data":
-        if (gatewayWebSocket.readyState === WebSocket.OPEN) {
-          const stats = this.gatewayConnectionStats.get(message.connectionId);
-          if (stats !== undefined) {
-            stats.messagesToGateway += 1;
-          }
-          gatewayWebSocket.send(tunnelPayloadToRawData(message));
-        }
-        break;
       case "close":
         gatewayWebSocket.close(
           normalizeWebSocketCloseCode(message.code),
@@ -486,15 +567,150 @@ export class MachineTunnel {
         );
         this.gatewayConnections.delete(message.connectionId);
         this.gatewayConnectionStats.delete(message.connectionId);
+        this.sendScheduler.removeConnection(message.connectionId);
         break;
     }
   }
 
-  private sendToMachine(message: CloudTunnelMessage): void {
-    if (this.machineWebSocket.readyState === WebSocket.OPEN) {
-      this.messagesToMachine += 1;
-      this.machineWebSocket.send(JSON.stringify(message));
+  private handleMachineBinaryFrame(data: RawData): void {
+    const frame = decodeTunnelBinaryFrame(rawDataToBinaryBuffer(data));
+
+    if (frame === null) {
+      this.machineWebSocket.close(1003, "Invalid tunnel binary frame");
+      return;
     }
+
+    if (frame.type === "httpResponseBody") {
+      this.writeHttpStreamChunk(frame.connectionId, frame.payload);
+      return;
+    }
+
+    if (frame.type !== "wsData") {
+      this.machineWebSocket.close(1003, "Unexpected tunnel binary frame");
+      return;
+    }
+
+    const gatewayWebSocket = this.gatewayConnections.get(frame.connectionId);
+
+    if (gatewayWebSocket === undefined || gatewayWebSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const stats = this.gatewayConnectionStats.get(frame.connectionId);
+    if (stats !== undefined) {
+      if (gatewayWebSocket.bufferedAmount + frame.payload.byteLength > stats.profile.maxQueuedBytes) {
+        this.closeLogicalConnectionForOverload(frame.connectionId, stats.profile, TUNNEL_OVERLOAD_CLOSE_REASON);
+        return;
+      }
+
+      stats.messagesToGateway += 1;
+    }
+
+    gatewayWebSocket.send(frame.isText ? frame.payload.toString("utf8") : frame.payload);
+  }
+
+  private sendControlToMachine(message: TunnelControlMessage, profile: TunnelQueueProfile): Promise<void> {
+    if (this.machineWebSocket.readyState !== WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+
+    this.messagesToMachine += 1;
+    return this.sendScheduler.enqueue({
+      connectionId: message.connectionId,
+      data: stringifyTunnelControlMessage(message),
+      profile,
+    });
+  }
+
+  private sendBinaryToMachine(
+    frame: Parameters<typeof encodeTunnelBinaryFrame>[0],
+    profile: TunnelQueueProfile,
+  ): Promise<void> {
+    if (this.machineWebSocket.readyState !== WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+
+    this.messagesToMachine += 1;
+    return this.sendScheduler.enqueue({
+      connectionId: frame.connectionId,
+      data: encodeTunnelBinaryFrame(frame),
+      profile,
+    });
+  }
+
+  private async sendHttpRequest(
+    connectionId: string,
+    input: GatewayHttpRequest,
+    profile: TunnelQueueProfile,
+    stream = false,
+  ): Promise<void> {
+    await this.sendControlToMachine({
+      type: "httpRequestStart",
+      connectionId,
+      path: input.path,
+      method: input.method,
+      headers: input.headers,
+      stream,
+      trafficClass: profile.trafficClass,
+    }, profile);
+
+    if (input.body !== undefined && input.body.byteLength > 0) {
+      await this.sendBinaryToMachine({
+        type: "httpRequestBody",
+        connectionId,
+        payload: input.body,
+        isText: false,
+      }, profile);
+    }
+
+    await this.sendControlToMachine({ type: "httpRequestEnd", connectionId }, profile);
+  }
+
+  private startHeartbeat(): void {
+    const heartbeatIntervalMs = this.heartbeatOptions.heartbeatIntervalMs ?? DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatTimer = setInterval(() => {
+      this.sendHeartbeat();
+    }, heartbeatIntervalMs);
+  }
+
+  private sendHeartbeat(): void {
+    if (this.machineWebSocket.readyState !== WebSocket.OPEN || this.heartbeatTimeoutTimer !== null) {
+      return;
+    }
+
+    const heartbeatTimeoutMs = this.heartbeatOptions.heartbeatTimeoutMs ?? DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS;
+    this.heartbeatTimeoutTimer = setTimeout(() => {
+      logger.warn({
+        event: "machine_tunnel.heartbeat_timeout",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        ageMs: Date.now() - this.openedAt,
+        heartbeatTimeoutMs,
+        gatewayConnectionCount: this.gatewayConnections.size,
+        pendingHttpRequestCount: this.pendingHttpRequests.size,
+        pendingHttpStreamCount: this.pendingHttpStreams.size,
+        activeHttpStreamCount: this.activeHttpResponses.size,
+      }, "Machine tunnel heartbeat timed out");
+      this.machineWebSocket.terminate();
+    }, heartbeatTimeoutMs);
+
+    this.machineWebSocket.ping();
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (this.heartbeatTimeoutTimer !== null) {
+      clearTimeout(this.heartbeatTimeoutTimer);
+      this.heartbeatTimeoutTimer = null;
+    }
+  }
+
+  private clearHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+
+    this.clearHeartbeatTimeout();
   }
 
   private closeGatewayConnections(code: number, reason: string): void {
@@ -506,23 +722,76 @@ export class MachineTunnel {
     this.gatewayConnectionStats.clear();
   }
 
-  private resolveHttpResponse(message: MachineHttpResponseMessage): void {
-    const pending = this.pendingHttpRequests.get(message.connectionId);
+  private closeLogicalConnectionForOverload(
+    connectionId: string,
+    profile: TunnelQueueProfile,
+    reason: string,
+  ): void {
+    logger.warn({
+      event: "machine_tunnel.connection_overloaded",
+      computerId: this.computerId,
+      tunnelId: this.tunnelId,
+      connectionId,
+      trafficClass: profile.trafficClass,
+      reason,
+      queuedBytes: this.sendScheduler.getConnectionQueuedBytes(connectionId),
+    }, "Logical tunnel connection exceeded its queue limit");
 
-    if (pending === undefined) {
+    this.gatewayConnections.get(connectionId)?.close(TUNNEL_OVERLOAD_CLOSE_CODE, reason);
+    this.gatewayConnections.delete(connectionId);
+    this.gatewayConnectionStats.delete(connectionId);
+
+    const error = new Error(reason);
+    const pendingRequest = this.pendingHttpRequests.get(connectionId);
+    if (pendingRequest !== undefined) {
+      clearTimeout(pendingRequest.timeout);
+      pendingRequest.reject(error);
+      this.pendingHttpRequests.delete(connectionId);
+    }
+
+    const pendingStream = this.pendingHttpStreams.get(connectionId);
+    if (pendingStream !== undefined) {
+      clearTimeout(pendingStream.timeout);
+      pendingStream.reject(error);
+      this.pendingHttpStreams.delete(connectionId);
+    }
+
+    const activeResponse = this.activeHttpResponses.get(connectionId);
+    if (activeResponse !== undefined) {
+      if (activeResponse.kind === "buffer") {
+        activeResponse.pending.reject(error);
+      } else {
+        activeResponse.controller.error(error);
+      }
+      this.activeHttpResponses.delete(connectionId);
+    }
+
+    if (this.machineWebSocket.readyState === WebSocket.OPEN) {
+      this.machineWebSocket.send(stringifyTunnelControlMessage({
+        type: "close",
+        connectionId,
+        code: TUNNEL_OVERLOAD_CLOSE_CODE,
+        reason: TUNNEL_OVERLOAD_CLOSE_REASON,
+      }));
+    }
+  }
+
+  private resolveHttpStreamStart(message: Extract<TunnelControlMessage, { readonly type: "httpResponseStart" }>): void {
+    const buffered = this.pendingHttpRequests.get(message.connectionId);
+
+    if (buffered !== undefined) {
+      this.activeHttpResponses.set(message.connectionId, {
+        kind: "buffer",
+        statusCode: message.statusCode,
+        headers: message.headers,
+        chunks: [],
+        pending: buffered,
+        profile: buffered.profile,
+        bytesQueued: 0,
+      });
       return;
     }
 
-    clearTimeout(pending.timeout);
-    this.pendingHttpRequests.delete(message.connectionId);
-    pending.resolve({
-      statusCode: message.statusCode,
-      headers: message.headers,
-      body: Buffer.from(message.bodyBase64, "base64"),
-    });
-  }
-
-  private resolveHttpStreamStart(message: MachineHttpResponseStartMessage): void {
     const pending = this.pendingHttpStreams.get(message.connectionId);
 
     if (pending === undefined) {
@@ -533,19 +802,28 @@ export class MachineTunnel {
     this.pendingHttpStreams.delete(message.connectionId);
 
     let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-    const body = new ReadableStream<Uint8Array>({
-      start: (streamController) => {
-        controller = streamController;
-      },
-      cancel: () => {
-        this.sendToMachine({
+    const cancel = (): void => {
+      this.observeTunnelSend(
+        this.sendControlToMachine({
           type: "close",
           connectionId: message.connectionId,
           code: 1000,
           reason: "HTTP stream cancelled",
-        });
-        this.activeHttpStreams.delete(message.connectionId);
+        }, pending.profile),
+        message.connectionId,
+        pending.profile,
+      );
+      this.activeHttpResponses.delete(message.connectionId);
+      this.sendScheduler.removeConnection(message.connectionId);
+    };
+    const body = new ReadableStream<Uint8Array>({
+      start: (streamController) => {
+        controller = streamController;
       },
+      cancel,
+    }, {
+      highWaterMark: pending.profile.maxQueuedBytes,
+      size: (chunk) => chunk.byteLength,
     });
 
     if (controller === null) {
@@ -553,38 +831,60 @@ export class MachineTunnel {
       return;
     }
 
-    this.activeHttpStreams.set(message.connectionId, { controller });
+    this.activeHttpResponses.set(message.connectionId, { kind: "stream", controller, profile: pending.profile });
     pending.resolve({
       statusCode: message.statusCode,
       headers: message.headers,
       body,
-      cancel: () => {
-        this.sendToMachine({
-          type: "close",
-          connectionId: message.connectionId,
-          code: 1000,
-          reason: "HTTP stream cancelled",
-        });
-        this.activeHttpStreams.delete(message.connectionId);
-      },
+      cancel,
     });
   }
 
-  private writeHttpStreamChunk(message: MachineHttpResponseChunkMessage): void {
-    this.activeHttpStreams
-      .get(message.connectionId)
-      ?.controller.enqueue(Buffer.from(message.bodyBase64, "base64"));
-  }
+  private writeHttpStreamChunk(connectionId: string, chunk: Buffer): void {
+    const response = this.activeHttpResponses.get(connectionId);
 
-  private closeHttpStream(connectionId: string): void {
-    const stream = this.activeHttpStreams.get(connectionId);
-
-    if (stream === undefined) {
+    if (response === undefined) {
       return;
     }
 
-    stream.controller.close();
-    this.activeHttpStreams.delete(connectionId);
+    if (response.kind === "buffer") {
+      response.bytesQueued += chunk.byteLength;
+      if (response.bytesQueued > response.profile.maxQueuedBytes) {
+        this.closeLogicalConnectionForOverload(connectionId, response.profile, TUNNEL_OVERLOAD_CLOSE_REASON);
+        return;
+      }
+
+      response.chunks.push(chunk);
+      return;
+    }
+
+    response.controller.enqueue(chunk);
+    if (response.controller.desiredSize !== null && response.controller.desiredSize < 0) {
+      this.closeLogicalConnectionForOverload(connectionId, response.profile, TUNNEL_OVERLOAD_CLOSE_REASON);
+    }
+  }
+
+  private closeHttpStream(connectionId: string): void {
+    const response = this.activeHttpResponses.get(connectionId);
+
+    if (response === undefined) {
+      return;
+    }
+
+    if (response.kind === "buffer") {
+      clearTimeout(response.pending.timeout);
+      this.pendingHttpRequests.delete(connectionId);
+      response.pending.resolve({
+        statusCode: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(response.chunks),
+      });
+    } else {
+      response.controller.close();
+    }
+
+    this.activeHttpResponses.delete(connectionId);
+    this.sendScheduler.removeConnection(connectionId);
   }
 
   private rejectPendingHttpRequests(error: Error): void {
@@ -592,6 +892,8 @@ export class MachineTunnel {
       clearTimeout(pending.timeout);
       pending.reject(error);
       this.pendingHttpRequests.delete(connectionId);
+      this.activeHttpResponses.delete(connectionId);
+      this.sendScheduler.removeConnection(connectionId);
     }
   }
 
@@ -600,90 +902,77 @@ export class MachineTunnel {
       clearTimeout(pending.timeout);
       pending.reject(error);
       this.pendingHttpStreams.delete(connectionId);
+      this.activeHttpResponses.delete(connectionId);
+      this.sendScheduler.removeConnection(connectionId);
     }
 
-    for (const [connectionId, stream] of this.activeHttpStreams.entries()) {
-      stream.controller.error(error);
-      this.activeHttpStreams.delete(connectionId);
+    for (const [connectionId, response] of this.activeHttpResponses.entries()) {
+      if (response.kind === "buffer") {
+        response.pending.reject(error);
+      } else {
+        response.controller.error(error);
+      }
+      this.activeHttpResponses.delete(connectionId);
+      this.sendScheduler.removeConnection(connectionId);
     }
   }
+
+  private observeTunnelSend(promise: Promise<void>, connectionId: string, profile: TunnelQueueProfile): void {
+    promise.catch((error) => {
+      logger.warn({
+        event: "machine_tunnel.logical_send_failed",
+        computerId: this.computerId,
+        tunnelId: this.tunnelId,
+        connectionId,
+        trafficClass: profile.trafficClass,
+        err: errorToLog(error),
+      }, "Logical tunnel send failed");
+    });
+  }
+}
+
+interface MachineTunnelHeartbeatOptions {
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
 }
 
 interface PendingHttpRequest {
   readonly resolve: (response: GatewayHttpResponse) => void;
   readonly reject: (error: Error) => void;
   readonly timeout: ReturnType<typeof setTimeout>;
+  readonly profile: TunnelQueueProfile;
 }
 
 interface PendingHttpStream {
   readonly resolve: (response: GatewayHttpStreamResponse) => void;
   readonly reject: (error: Error) => void;
   readonly timeout: ReturnType<typeof setTimeout>;
+  readonly profile: TunnelQueueProfile;
 }
 
-interface ActiveHttpStream {
-  readonly controller: ReadableStreamDefaultController<Uint8Array>;
-}
+type ActiveHttpResponse =
+  | {
+      readonly kind: "buffer";
+      readonly statusCode: number;
+      readonly headers: Record<string, string>;
+      readonly chunks: Buffer[];
+      readonly pending: PendingHttpRequest;
+      readonly profile: TunnelQueueProfile;
+      bytesQueued: number;
+    }
+  | {
+      readonly kind: "stream";
+      readonly controller: ReadableStreamDefaultController<Uint8Array>;
+      readonly profile: TunnelQueueProfile;
+    };
 
 interface GatewayConnectionStats {
   readonly openedAt: number;
   readonly route: GatewayRoute;
+  readonly profile: TunnelQueueProfile;
   messagesFromGateway: number;
   messagesToGateway: number;
 }
-
-type CloudTunnelMessage =
-  | {
-      readonly type: "open";
-      readonly connectionId: string;
-      readonly route: GatewayRoute;
-      readonly path: string;
-      readonly metadata?: GatewayRouteMetadata;
-    }
-  | {
-      readonly type: "httpRequest";
-      readonly connectionId: string;
-      readonly path: string;
-      readonly method?: string;
-      readonly headers?: Record<string, string>;
-      readonly bodyBase64?: string;
-      readonly stream?: boolean;
-    }
-  | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType?: TunnelPayloadType }
-  | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
-
-type MachineTunnelMessage =
-  | { readonly type: "openResult"; readonly connectionId: string; readonly ok: true }
-  | { readonly type: "openResult"; readonly connectionId: string; readonly ok: false; readonly error?: string }
-  | MachineHttpResponseMessage
-  | MachineHttpResponseStartMessage
-  | MachineHttpResponseChunkMessage
-  | { readonly type: "httpResponseEnd"; readonly connectionId: string }
-  | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType?: TunnelPayloadType }
-  | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
-
-type TunnelPayloadType = "text" | "binary";
-
-type MachineHttpResponseMessage = {
-  readonly type: "httpResponse";
-  readonly connectionId: string;
-  readonly statusCode: number;
-  readonly headers: Record<string, string>;
-  readonly bodyBase64: string;
-};
-
-type MachineHttpResponseStartMessage = {
-  readonly type: "httpResponseStart";
-  readonly connectionId: string;
-  readonly statusCode: number;
-  readonly headers: Record<string, string>;
-};
-
-type MachineHttpResponseChunkMessage = {
-  readonly type: "httpResponseChunk";
-  readonly connectionId: string;
-  readonly bodyBase64: string;
-};
 
 const authenticateMachineTunnel = async (
   store: CloudStore,
@@ -711,8 +1000,8 @@ const authenticateGatewayRoute = async (
   requestUrl: URL,
   authorization: string | undefined,
   cookieHeader: string | undefined,
-  routeMatch: { readonly computerId: string; readonly route: GatewayRoute },
-): Promise<ComputerAccessSessionRecord | null> => {
+  routeMatch: { readonly computerId: string; readonly route: GatewayRoute; readonly suffix: string },
+): Promise<ComputerAccessSessionRecord | "forbidden" | null> => {
   const token = readBearerToken(authorization)
     ?? requestUrl.searchParams.get("accessToken")
     ?? requestUrl.searchParams.get("token")
@@ -723,7 +1012,15 @@ const authenticateGatewayRoute = async (
     return null;
   }
 
-  return await options.gatewayAccessService.authenticateAccessToken({ token, computerId: routeMatch.computerId });
+  const accessSession = await options.gatewayAccessService.authenticateAccessToken({ token, computerId: routeMatch.computerId });
+
+  if (accessSession === null) {
+    return null;
+  }
+
+  return hasAccessScope(accessSession, scopeForGatewayWebSocketRoute(routeMatch.route, routeMatch.suffix))
+    ? accessSession
+    : "forbidden";
 };
 
 const matchGatewayRoute = (
@@ -761,85 +1058,19 @@ const buildMachineTargetPath = (
   return `/${routeMatch.route}${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
 
-const parseMachineMessage = (data: RawData): MachineTunnelMessage | null => {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(rawDataToText(data)) as unknown;
-  } catch {
-    return null;
+const scopeForGatewayWebSocketRoute = (
+  route: GatewayRoute,
+  suffix: string,
+): GatewayAccessScope => {
+  if (route === "browser-control") {
+    return "browser-control:ws";
   }
 
-  if (typeof parsed !== "object" || parsed === null) {
-    return null;
+  if (route === "preview" && (suffix === "ws" || suffix.startsWith("ws/"))) {
+    return "preview:ws";
   }
 
-  const message = parsed as Record<string, unknown>;
-
-  if (typeof message["connectionId"] !== "string" || typeof message["type"] !== "string") {
-    return null;
-  }
-
-  switch (message["type"]) {
-    case "openResult":
-      if (message["ok"] === true) {
-        return { type: "openResult", connectionId: message["connectionId"], ok: true };
-      }
-
-      return {
-        type: "openResult",
-        connectionId: message["connectionId"],
-        ok: false,
-        error: typeof message["error"] === "string" ? message["error"] : undefined,
-      };
-    case "data":
-      return typeof message["data"] === "string"
-        ? {
-            type: "data",
-            connectionId: message["connectionId"],
-            data: message["data"],
-            dataType: parseTunnelPayloadType(message["dataType"]),
-          }
-        : null;
-    case "httpResponse":
-      return isHttpResponseMessage(message)
-        ? {
-            type: "httpResponse",
-            connectionId: message["connectionId"],
-            statusCode: message["statusCode"],
-            headers: message["headers"],
-            bodyBase64: message["bodyBase64"],
-          }
-        : null;
-    case "httpResponseStart":
-      return isHttpResponseStartMessage(message)
-        ? {
-            type: "httpResponseStart",
-            connectionId: message["connectionId"],
-            statusCode: message["statusCode"],
-            headers: message["headers"],
-          }
-        : null;
-    case "httpResponseChunk":
-      return typeof message["bodyBase64"] === "string"
-        ? {
-            type: "httpResponseChunk",
-            connectionId: message["connectionId"],
-            bodyBase64: message["bodyBase64"],
-          }
-        : null;
-    case "httpResponseEnd":
-      return { type: "httpResponseEnd", connectionId: message["connectionId"] };
-    case "close":
-      return {
-        type: "close",
-        connectionId: message["connectionId"],
-        code: typeof message["code"] === "number" ? message["code"] : undefined,
-        reason: typeof message["reason"] === "string" ? message["reason"] : undefined,
-      };
-    default:
-      return null;
-  }
+  return "filesystem:ws";
 };
 
 const readCookie = (cookieHeader: string | undefined, name: string): string | undefined => {
@@ -862,42 +1093,6 @@ const readCookie = (cookieHeader: string | undefined, name: string): string | un
   }
 
   return undefined;
-};
-
-const isHttpResponseMessage = (message: Record<string, unknown>): message is {
-  readonly connectionId: string;
-  readonly statusCode: number;
-  readonly headers: Record<string, string>;
-  readonly bodyBase64: string;
-} => (
-  typeof message["connectionId"] === "string" &&
-  typeof message["statusCode"] === "number" &&
-  Number.isInteger(message["statusCode"]) &&
-  message["statusCode"] >= 100 &&
-  message["statusCode"] <= 599 &&
-  typeof message["bodyBase64"] === "string" &&
-  isStringRecord(message["headers"])
-);
-
-const isHttpResponseStartMessage = (message: Record<string, unknown>): message is {
-  readonly connectionId: string;
-  readonly statusCode: number;
-  readonly headers: Record<string, string>;
-} => (
-  typeof message["connectionId"] === "string" &&
-  typeof message["statusCode"] === "number" &&
-  Number.isInteger(message["statusCode"]) &&
-  message["statusCode"] >= 100 &&
-  message["statusCode"] <= 599 &&
-  isStringRecord(message["headers"])
-);
-
-const isStringRecord = (value: unknown): value is Record<string, string> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  return Object.values(value).every((entry) => typeof entry === "string");
 };
 
 const readBearerToken = (authorization: string | undefined): string | undefined => {
@@ -930,54 +1125,51 @@ const rawDataToText = (data: RawData): string => {
   return Buffer.concat(data).toString("utf8");
 };
 
-const rawDataToBase64 = (data: RawData): string => {
-  if (typeof data === "string") {
-    return Buffer.from(data, "utf8").toString("base64");
-  }
+const rawDataToBinaryBuffer = (data: RawData): Buffer =>
+  typeof data === "string" ? Buffer.from(data, "utf8") : webSocketRawDataToBuffer(data);
 
+const webSocketRawDataToBuffer = (data: RawData): Buffer => {
   if (Buffer.isBuffer(data)) {
-    return data.toString("base64");
+    return data;
   }
 
   if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("base64");
+    return Buffer.from(data);
   }
 
-  return Buffer.concat(data).toString("base64");
+  if (typeof data === "string") {
+    return Buffer.from(data, "utf8");
+  }
+
+  return Buffer.concat(data);
 };
 
-const rawDataToTunnelPayload = (
-  data: RawData,
-  isBinary: boolean,
-): { readonly data: string; readonly dataType: TunnelPayloadType } => ({
-  data: rawDataToBase64(data),
-  dataType: isBinary ? "binary" : "text",
-});
-
-const tunnelPayloadToRawData = (
-  message: { readonly data: string; readonly dataType?: TunnelPayloadType },
-): string | Buffer => {
-  const buffer = Buffer.from(message.data, "base64");
-  return message.dataType === "text" ? buffer.toString("utf8") : buffer;
-};
-
-const parseTunnelPayloadType = (value: unknown): TunnelPayloadType | undefined =>
-  value === "text" || value === "binary" ? value : undefined;
-
-export const normalizeWebSocketCloseCode = (code: number | undefined): number => {
-  if (code === undefined) {
-    return 1000;
+const inferHttpTrafficClass = (path: string): TunnelTrafficClass => {
+  if (path.startsWith("/filesystem/download")) {
+    return "filesystem:download";
   }
 
-  if (code === 1000 || (code >= 3000 && code <= 4999)) {
-    return code;
+  if (path.startsWith("/filesystem/uploads")) {
+    return "filesystem:upload";
   }
 
-  if (code >= 1001 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) {
-    return code;
+  if (path.startsWith("/agent")) {
+    return "agent:http";
   }
 
-  return 1000;
+  if (path.startsWith("/capabilities")) {
+    return "capabilities:http";
+  }
+
+  if (path.startsWith("/preview")) {
+    return "preview:http";
+  }
+
+  if (path.startsWith("/feedback")) {
+    return "feedback:http";
+  }
+
+  return "generic:http";
 };
 
 const HTTP_PROXY_TIMEOUT_MS = 120_000;

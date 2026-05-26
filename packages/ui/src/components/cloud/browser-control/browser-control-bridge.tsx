@@ -28,6 +28,8 @@ import type {
 
 const EXTENSION_RETRY_DELAY_MS = 2500;
 const BROWSER_CONTROL_RECONNECT_DELAY_MS = 1000;
+const BROWSER_CONTROL_HEARTBEAT_INTERVAL_MS = 15_000;
+const BROWSER_CONTROL_HEARTBEAT_TIMEOUT_MS = 45_000;
 
 interface PendingBrowserControlRequest {
   readonly abortController: AbortController;
@@ -85,6 +87,9 @@ export function BrowserControlBridge({
     const pendingOutputWrites = new Map<string, PendingBrowserControlOutputWrite>();
     let extensionRetryTimer: number | undefined;
     let websocketReconnectTimer: number | undefined;
+    let heartbeatTimer: number | undefined;
+    let pendingHeartbeatRequestId: string | null = null;
+    let pendingHeartbeatStartedAt = 0;
     const setStatus = (status: BrowserControlStatus): void => {
       if (!isCancelled) {
         onStatusChange?.(status);
@@ -102,6 +107,55 @@ export function BrowserControlBridge({
         pendingAttachmentReads.delete(chunkRequestId);
         pendingRead.reject(new BrowserControlExtensionCommandError("BROWSER_ATTACHMENT_CANCELLED", reason));
       }
+    };
+
+    const stopHeartbeat = (): void => {
+      if (heartbeatTimer !== undefined) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
+
+      pendingHeartbeatRequestId = null;
+      pendingHeartbeatStartedAt = 0;
+    };
+
+    const sendHeartbeat = (socket: WebSocket): void => {
+      if (socket !== webSocket || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      if (
+        pendingHeartbeatRequestId !== null &&
+        Date.now() - pendingHeartbeatStartedAt >= BROWSER_CONTROL_HEARTBEAT_TIMEOUT_MS
+      ) {
+        emitClientDiagnostic("browser_control_ws.heartbeat_timeout", {
+          computerId: diagnosticComputerId,
+          url: normalizeDiagnosticUrl(resolvedWebsocketUrl),
+          clientId,
+          pendingHeartbeatRequestId,
+          heartbeatAgeMs: Date.now() - pendingHeartbeatStartedAt,
+          timeoutMs: BROWSER_CONTROL_HEARTBEAT_TIMEOUT_MS,
+        }, { source: "browser-control-bridge", message: "Browser-control websocket heartbeat timed out" });
+        socket.close();
+        return;
+      }
+
+      if (pendingHeartbeatRequestId !== null) {
+        return;
+      }
+
+      pendingHeartbeatRequestId = createBrowserControlClientId();
+      pendingHeartbeatStartedAt = Date.now();
+      messagesOut += 1;
+      socket.send(JSON.stringify({ type: "ping", requestId: pendingHeartbeatRequestId }));
+    };
+
+    const startHeartbeat = (socket: WebSocket): void => {
+      stopHeartbeat();
+      sendHeartbeat(socket);
+      heartbeatTimer = window.setInterval(() => {
+        sendHeartbeat(socket);
+      }, BROWSER_CONTROL_HEARTBEAT_INTERVAL_MS);
     };
     const closePendingOutputWrites = (reason: string): void => {
       for (const [writeRequestId, pendingWrite] of pendingOutputWrites) {
@@ -225,6 +279,7 @@ export function BrowserControlBridge({
           clientId,
           capabilities: ["chrome.runtime"],
         }));
+        startHeartbeat(socket);
       });
 
       socket.addEventListener("message", (event) => {
@@ -243,6 +298,14 @@ export function BrowserControlBridge({
 
         if (message.type === "attachment.chunk" || message.type === "attachment.error") {
           settleAttachmentRead(pendingAttachmentReads, message);
+          return;
+        }
+
+        if (message.type === "pong") {
+          if (message.requestId === pendingHeartbeatRequestId) {
+            pendingHeartbeatRequestId = null;
+            pendingHeartbeatStartedAt = 0;
+          }
           return;
         }
 
@@ -293,6 +356,7 @@ export function BrowserControlBridge({
           webSocket = null;
         }
 
+        stopHeartbeat();
         closePendingRequests("Browser-control socket closed");
         closePendingAttachmentReads("Browser-control socket closed");
         closePendingOutputWrites("Browser-control socket closed");
@@ -340,6 +404,7 @@ export function BrowserControlBridge({
       if (websocketReconnectTimer !== undefined) {
         window.clearTimeout(websocketReconnectTimer);
       }
+      stopHeartbeat();
       closePendingRequests("Browser-control bridge unmounted");
       closePendingAttachmentReads("Browser-control bridge unmounted");
       closePendingOutputWrites("Browser-control bridge unmounted");

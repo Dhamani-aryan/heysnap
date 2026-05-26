@@ -20,6 +20,22 @@ afterEach(async () => {
 });
 
 describe("browser-control service", () => {
+  it("responds to browser-control heartbeat pings", async () => {
+    const { baseUrl } = await startBrowserControlServer();
+    const client = await openBrowserControlClient(baseUrl, "user-1");
+
+    client.send(JSON.stringify({ type: "ping", requestId: "heartbeat-1" }));
+
+    const response = await waitForJsonMessage<{ readonly type: string; readonly requestId: string; readonly serverTime: string }>(client);
+    expect(response).toMatchObject({
+      type: "pong",
+      requestId: "heartbeat-1",
+      serverTime: expect.any(String),
+    });
+
+    client.close();
+  });
+
   it("routes CLI requests to the connected target user client", async () => {
     const { baseUrl } = await startBrowserControlServer();
     const client = await openBrowserControlClient(baseUrl, "user-1");

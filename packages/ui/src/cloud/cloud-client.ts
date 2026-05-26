@@ -50,6 +50,7 @@ export interface ComputerAccessSession {
   readonly id: string;
   readonly computerId: string;
   readonly token: string;
+  readonly scopes?: readonly string[];
   readonly expiresAt: string;
 }
 
