@@ -50,6 +50,7 @@ export class InMemoryCloudStore implements CloudStore {
       email: input.email,
       username: input.username,
       passwordHash: input.passwordHash,
+      allowPiModels: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -84,6 +85,21 @@ export class InMemoryCloudStore implements CloudStore {
     }
 
     const updated = { ...user, passwordHash: input.passwordHash, updatedAt: new Date() };
+    this.users.set(input.userId, updated);
+    return updated;
+  }
+
+  async updateUserModelAccess(input: {
+    readonly userId: string;
+    readonly allowPiModels: boolean;
+  }): Promise<UserRecord | null> {
+    const user = this.users.get(input.userId);
+
+    if (user === undefined) {
+      return null;
+    }
+
+    const updated = { ...user, allowPiModels: input.allowPiModels, updatedAt: new Date() };
     this.users.set(input.userId, updated);
     return updated;
   }

@@ -15,6 +15,7 @@ export interface UserRecord {
   readonly email: string;
   readonly username: string;
   readonly passwordHash: string;
+  readonly allowPiModels: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -203,6 +204,10 @@ export interface CloudStore {
   updateUserPassword(input: {
     readonly userId: string;
     readonly passwordHash: string;
+  }): Promise<UserRecord | null>;
+  updateUserModelAccess(input: {
+    readonly userId: string;
+    readonly allowPiModels: boolean;
   }): Promise<UserRecord | null>;
   deleteUserById(userId: string): Promise<boolean>;
 

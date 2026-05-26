@@ -83,6 +83,19 @@ export class DrizzleCloudStore implements CloudStore {
     return user ?? null;
   }
 
+  async updateUserModelAccess(input: {
+    readonly userId: string;
+    readonly allowPiModels: boolean;
+  }): Promise<UserRecord | null> {
+    const updatedAt = new Date();
+    const [user] = await this.db
+      .update(users)
+      .set({ allowPiModels: input.allowPiModels, updatedAt })
+      .where(eq(users.id, input.userId))
+      .returning();
+    return user ?? null;
+  }
+
   async deleteUserById(userId: string): Promise<boolean> {
     const deleted = await this.db
       .delete(users)
