@@ -8,8 +8,8 @@ import {
 } from "@ank1015-app/previewer";
 import { WebSocketServer } from "ws";
 
-import { CodexAgentHarness } from "./agent/harnesses/codex/codex-agent-harness.js";
-import { ensureCodexUserConfig } from "./agent/harnesses/codex/config.js";
+import { PiAgentHarness } from "./agent/harnesses/pi/pi-agent-harness.js";
+import { ensurePiUserConfig } from "./agent/harnesses/pi/config.js";
 import { createAgentHttpService } from "./agent/http.js";
 import {
   attachBrowserControlWebSocketServer,
@@ -87,12 +87,11 @@ export const startServer = async (options: StartServerOptions = {}): Promise<Run
   const markActivity = (): void => {
     lastActivityAt = new Date();
   };
-  await ensureCodexUserConfig();
+  await ensurePiUserConfig();
   const capabilities = new AgentCapabilitiesService();
   await capabilities.initialize();
-  const agentHarness = new CodexAgentHarness({
+  const agentHarness = new PiAgentHarness({
     filesystemRoot: filesystemRoot.absolutePath,
-    codexBin: options.codexBin ?? process.env.CODEX_BIN ?? capabilities.getCodexBin(),
   });
   const agentHttpService = createAgentHttpService({ harness: agentHarness, onActivity: markActivity });
   const capabilitiesHttpService = createCapabilitiesHttpService({ service: capabilities });
