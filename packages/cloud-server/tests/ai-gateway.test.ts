@@ -22,6 +22,9 @@ const baseConfig: CloudServerConfig = {
   aiGatewayAzureBaseUrl: "https://azure.example.com/openai/v1",
   aiGatewayAzureImagesBaseUrl: "https://images.azure.example.com/openai/deployments/gpt-image-2",
   aiGatewayAzureApiKey: "azure-real-key",
+  aiGatewayAnthropicBaseUrl: "https://anthropic.example.com",
+  aiGatewayAnthropicApiKey: "anthropic-real-key",
+  aiGatewayAnthropicWorkspaceId: "workspace-123",
   allowedOrigins: ["https://app.example.com"],
   adminToken: "test-admin-token",
 };
@@ -125,6 +128,196 @@ describe("AI gateway", () => {
         },
       });
       expect(store.aiUsagePayloads.size).toBe(0);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("proxies Anthropic messages requests and logs streamed usage", async () => {
+    const { app, store, machineToken, user, computer, identity } = await createTestApp({
+      aiGatewayCaptureBodies: true,
+      aiGatewayCaptureBodyMaxBytes: 2048,
+    });
+    const requestBody = {
+      model: "claude-sonnet-4-6",
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 1024,
+      stream: true,
+    };
+    const upstreamText = [
+      "event: message_start",
+      `data: ${JSON.stringify({
+        type: "message_start",
+        message: {
+          model: "claude-sonnet-4-6",
+          usage: {
+            input_tokens: 10,
+            cache_creation_input_tokens: 2,
+            cache_read_input_tokens: 3,
+          },
+        },
+      })}`,
+      "",
+      "event: message_delta",
+      `data: ${JSON.stringify({
+        type: "message_delta",
+        usage: {
+          output_tokens: 7,
+        },
+      })}`,
+      "",
+      "",
+    ].join("\n");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(upstreamText, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "content-length": "999",
+      },
+    }));
+
+    try {
+      const response = await app.request("/llm/anthropic/v1/messages", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+        headers: {
+          "x-api-key": machineToken,
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-length")).toBeNull();
+      expect(await response.text()).toBe(upstreamText);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://anthropic.example.com/v1/messages");
+
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      const headers = new Headers(init.headers);
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(await new Response(init.body).text())).toEqual(requestBody);
+      expect(headers.get("x-api-key")).toBe("anthropic-real-key");
+      expect(headers.get("api-key")).toBeNull();
+      expect(headers.get("anthropic-workspace-id")).toBe("workspace-123");
+      expect(headers.get("anthropic-version")).toBe("2023-06-01");
+      expect(headers.get("anthropic-beta")).toBe("fine-grained-tool-streaming-2025-05-14");
+      expect(headers.get("anthropic-dangerous-direct-browser-access")).toBeNull();
+      expect(headers.get("content-length")).toBeNull();
+
+      const usage = await waitForLatestUsage(store, (row) => row.status === "succeeded");
+      expect(usage).toMatchObject({
+        userId: user.id,
+        computerId: computer.id,
+        machineIdentityId: identity.id,
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        method: "POST",
+        upstreamPath: "/v1/messages",
+        status: "succeeded",
+        httpStatus: 200,
+        inputTokens: 15,
+        outputTokens: 7,
+        cachedInputTokens: 3,
+        reasoningOutputTokens: 0,
+        totalTokens: 22,
+        metadata: {
+          gatewayPath: "/llm/anthropic/v1/messages",
+          gatewayRouteKind: "anthropic-messages",
+          upstreamUsage: {
+            input_tokens: 10,
+            cache_creation_input_tokens: 2,
+            cache_read_input_tokens: 3,
+            output_tokens: 7,
+          },
+          usageParseError: null,
+        },
+      });
+
+      const payload = await store.getAiUsagePayloadByRequestId(usage.id);
+      expect(payload).toMatchObject({
+        requestBody: JSON.stringify(requestBody),
+        requestBodyTruncated: false,
+        responseBody: upstreamText,
+        responseBodyTruncated: false,
+      });
+      expect(payload?.requestHeaders).toMatchObject({
+        "x-api-key": "[redacted]",
+        "anthropic-workspace-id": "workspace-123",
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("rejects Anthropic models that Pi should not route through this gateway", async () => {
+    const { app, store, machineToken } = await createTestApp();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    try {
+      const response = await app.request("/llm/anthropic/v1/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "claude-haiku-4-5",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1024,
+          stream: true,
+        }),
+        headers: {
+          "x-api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "ANTHROPIC_MODEL_NOT_ALLOWED",
+          message: "Anthropic model is not allowed",
+        },
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      const usage = await waitForLatestUsage(store, (row) => row.status === "failed");
+      expect(usage).toMatchObject({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        method: "POST",
+        upstreamPath: "/v1/messages",
+        status: "failed",
+        errorMessage: "Anthropic model is not allowed: claude-haiku-4-5",
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("honors a configured Anthropic v1 base URL without appending v1 twice", async () => {
+    const { app, machineToken } = await createTestApp({
+      aiGatewayAnthropicBaseUrl: "https://anthropic.example.com/v1",
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    try {
+      const response = await app.request("/llm/anthropic/v1/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "claude-opus-4-7",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1024,
+          stream: true,
+        }),
+        headers: {
+          "x-api-key": machineToken,
+          "content-type": "application/json",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      await response.text();
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://anthropic.example.com/v1/messages");
     } finally {
       fetchMock.mockRestore();
     }
