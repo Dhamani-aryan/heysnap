@@ -1379,6 +1379,53 @@
   white-space: nowrap;
 }
 
+.prompt-model-picker {
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  align-items: center;
+}
+
+.prompt-model-picker select {
+  height: 28px;
+  min-width: 82px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.66);
+  cursor: pointer;
+  outline: none;
+  padding: 0 24px 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.prompt-model-picker select:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.78);
+}
+
+.prompt-model-picker select:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.prompt-model-picker select:focus-visible {
+  outline: 2px solid rgba(0, 0, 0, 0.12);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .prompt-attachment-button:focus-visible,
 .prompt-send-button:focus-visible {
   outline: 2px solid rgba(0, 0, 0, 0.12);
@@ -1399,6 +1446,20 @@
 
 :root.dark .prompt-folder-chip:hover {
   background: rgba(138, 167, 214, 0.16);
+}
+
+:root.dark .prompt-model-picker select {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+:root.dark .prompt-model-picker select:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.84);
+}
+
+:root.dark .prompt-model-picker select:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.12);
 }
 
 :root.dark .prompt-attachment-button:focus-visible,
