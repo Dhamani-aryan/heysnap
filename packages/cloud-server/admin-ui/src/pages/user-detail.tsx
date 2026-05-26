@@ -1,4 +1,4 @@
-import { ArrowLeft, KeyRound, RefreshCw, ShieldOff, Trash2 } from "lucide-react";
+import { ArrowLeft, KeyRound, RefreshCw, ShieldOff, Sparkles, Trash2 } from "lucide-react";
 import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -46,6 +46,8 @@ export const UserDetailPage = () => {
   const [resetOpen, setResetOpen] = React.useState(false);
   const [revokeBusy, setRevokeBusy] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [modelAccessBusy, setModelAccessBusy] = React.useState(false);
+  const user = detail.data?.user;
 
   const handleDeleteConfirm = async () => {
     setDeleteBusy(true);
@@ -73,6 +75,23 @@ export const UserDetailPage = () => {
     }
   };
 
+  const handleTogglePiModels = async () => {
+    if (user === undefined) {
+      return;
+    }
+
+    setModelAccessBusy(true);
+    try {
+      await adminApi.setUserModelAccess(userId, !user.allowPiModels);
+      toast.success(user.allowPiModels ? "Pi models disabled" : "Pi models enabled");
+      detail.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Failed to update model access");
+    } finally {
+      setModelAccessBusy(false);
+    }
+  };
+
   if (detail.error !== null) {
     return (
       <>
@@ -91,7 +110,6 @@ export const UserDetailPage = () => {
     );
   }
 
-  const user = detail.data?.user;
   const computers = detail.data?.computers ?? [];
   const sessions = detail.data?.sessions ?? [];
   const activeSessions = sessions.filter(
@@ -130,6 +148,16 @@ export const UserDetailPage = () => {
             <Button variant="outline" size="sm" onClick={() => setResetOpen(true)} className="gap-2">
               <KeyRound className="h-3.5 w-3.5" /> Reset password
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTogglePiModels}
+              disabled={user === undefined || modelAccessBusy}
+              className="gap-2"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {user?.allowPiModels === true ? "Disable Pi models" : "Enable Pi models"}
+            </Button>
             <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)} className="gap-2">
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
@@ -137,7 +165,7 @@ export const UserDetailPage = () => {
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Machines</CardDescription>
@@ -160,6 +188,26 @@ export const UserDetailPage = () => {
           </CardHeader>
           <CardContent>
             <RelativeTime value={user?.createdAt ?? null} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Pi models</CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <Badge variant={user?.allowPiModels === true ? "success" : "secondary"}>
+              {user?.allowPiModels === true ? "Allowed" : "Off"}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTogglePiModels}
+              disabled={user === undefined || modelAccessBusy}
+              className="gap-2"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {user?.allowPiModels === true ? "Disable" : "Enable"}
+            </Button>
           </CardContent>
         </Card>
       </div>
