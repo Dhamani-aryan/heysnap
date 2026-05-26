@@ -419,6 +419,7 @@ export class InMemoryCloudStore implements CloudStore {
     readonly userId: string;
     readonly computerId: string;
     readonly tokenHash: string;
+    readonly scopes: unknown;
     readonly expiresAt: Date;
   }): Promise<ComputerAccessSessionRecord> {
     const accessSession = {
@@ -426,6 +427,7 @@ export class InMemoryCloudStore implements CloudStore {
       userId: input.userId,
       computerId: input.computerId,
       tokenHash: input.tokenHash,
+      scopes: input.scopes,
       expiresAt: input.expiresAt,
       revokedAt: null,
       createdAt: new Date(),

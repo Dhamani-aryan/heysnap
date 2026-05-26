@@ -60,6 +60,7 @@ export interface ComputerAccessSessionRecord {
   readonly userId: string;
   readonly computerId: string;
   readonly tokenHash: string;
+  readonly scopes: unknown;
   readonly expiresAt: Date;
   readonly revokedAt: Date | null;
   readonly createdAt: Date;
@@ -292,6 +293,7 @@ export interface CloudStore {
     readonly userId: string;
     readonly computerId: string;
     readonly tokenHash: string;
+    readonly scopes: unknown;
     readonly expiresAt: Date;
   }): Promise<ComputerAccessSessionRecord>;
   getComputerAccessSessionByTokenHash(tokenHash: string): Promise<ComputerAccessSessionRecord | null>;

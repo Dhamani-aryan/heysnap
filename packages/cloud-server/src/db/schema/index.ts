@@ -72,6 +72,7 @@ export const computerAccessSessions = pgTable("computer_access_sessions", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   computerId: uuid("computer_id").notNull().references(() => computers.id, { onDelete: "cascade" }),
   tokenHash: text("token_hash").notNull(),
+  scopes: jsonb("scopes").notNull().default(["*"]),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

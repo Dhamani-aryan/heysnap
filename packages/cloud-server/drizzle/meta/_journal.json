@@ -64,6 +64,13 @@
       "when": 1779818403436,
       "tag": "0008_loose_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779835188340,
+      "tag": "0009_clammy_toad_men",
+      "breakpoints": true
     }
   ]
 }
