@@ -99,6 +99,7 @@ export const runLocalReleasePublisher = async () => {
   serverPackageJson.dependencies = {
     ...serverPackageJson.dependencies,
     "@ank1015-app/previewer": "file:previewer",
+    "@ank1015-app/tunnel-protocol": "file:tunnel-protocol",
   };
   writeFileSync(join(plan.stageDir, "package.json"), `${JSON.stringify(serverPackageJson, null, 2)}\n`);
   cpSync(resolve(repoRoot, "packages/server/dist"), join(plan.stageDir, "dist"), { recursive: true });
@@ -106,6 +107,9 @@ export const runLocalReleasePublisher = async () => {
   mkdirSync(join(plan.stageDir, "previewer"), { recursive: true });
   cpSync(resolve(repoRoot, "packages/previewer/package.json"), join(plan.stageDir, "previewer/package.json"));
   cpSync(resolve(repoRoot, "packages/previewer/dist"), join(plan.stageDir, "previewer/dist"), { recursive: true });
+  mkdirSync(join(plan.stageDir, "tunnel-protocol"), { recursive: true });
+  cpSync(resolve(repoRoot, "packages/tunnel-protocol/package.json"), join(plan.stageDir, "tunnel-protocol/package.json"));
+  cpSync(resolve(repoRoot, "packages/tunnel-protocol/dist"), join(plan.stageDir, "tunnel-protocol/dist"), { recursive: true });
   const migrationsDir = resolve(repoRoot, "packages/server/migrations");
   if (existsSync(migrationsDir)) {
     cpSync(migrationsDir, join(plan.stageDir, "migrations"), { recursive: true });
