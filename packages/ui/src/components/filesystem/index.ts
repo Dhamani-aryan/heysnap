@@ -4,6 +4,7 @@ export { FinderBody, FinderToolbar, Spinner, isEditableKeyboardTarget } from "./
 export { formatBytes } from "./shared";
 export {
   buildFilesystemDownloadUrl,
+  buildFilesystemUploadUrl,
   createInitialNavigationHistory,
   getParentPath,
   isFilesystemEntry,
@@ -14,12 +15,15 @@ export {
   toOpenFileTab,
 } from "./shared";
 export {
+  FILESYSTEM_UPLOAD_CHUNK_SIZE_BYTES,
   folderPickerAttributes,
   getBrowserRelativePath,
   getDirectoryUploadSources,
   getUploadSelectionPaths,
   isAbortError,
   toFilesystemUploadFile,
+  toFilesystemUploadItem,
+  uploadBrowserSourcesToFilesystem,
 } from "./shared";
 export { FilesystemVoiceOverlay, appendPromptTranscript, useFilesystemVoicePrompt } from "./voice";
 export {
@@ -40,5 +44,10 @@ export type {
   BrowserWindowTab,
 } from "./browser";
 export type { ActiveLeftPaneSurface, OpenFileTab } from "./finder";
-export type { BrowserUploadSource, DirectoryPickerWindow } from "./shared";
+export type {
+  BrowserUploadSource,
+  DirectoryPickerWindow,
+  FilesystemBrowserUploadProgress,
+  UploadBrowserSourcesToFilesystemOptions,
+} from "./shared";
 export type { WorkspacePanel } from "./workspace";
