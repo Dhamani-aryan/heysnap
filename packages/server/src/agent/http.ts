@@ -231,7 +231,8 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
     (input["threadId"] !== undefined && typeof input["threadId"] !== "string") ||
     typeof input["path"] !== "string" ||
     !isAgentContent(input["content"]) ||
-    (input["clientRunId"] !== undefined && typeof input["clientRunId"] !== "string")
+    (input["clientRunId"] !== undefined && typeof input["clientRunId"] !== "string") ||
+    !isProviderModelSelection(input["provider"], input["model"])
   ) {
     throw new Error("Invalid run request");
   }
@@ -241,6 +242,8 @@ const parseStartRunInput = (body: unknown): StartAgentRunInput => {
     path: input["path"],
     content: input["content"] as AgentContent,
     uiContext: parseAgentUiContext(input["uiContext"]),
+    provider: typeof input["provider"] === "string" ? input["provider"].trim() : undefined,
+    model: typeof input["model"] === "string" ? input["model"].trim() : undefined,
     clientRunId: input["clientRunId"] as string | undefined,
   };
 };
@@ -342,6 +345,17 @@ const parseAgentUiContext = (value: unknown): AgentUiContext | undefined => {
       };
     }),
   };
+};
+
+const isProviderModelSelection = (provider: unknown, model: unknown): boolean => {
+  if (provider === undefined && model === undefined) {
+    return true;
+  }
+
+  return typeof provider === "string" &&
+    provider.trim().length > 0 &&
+    typeof model === "string" &&
+    model.trim().length > 0;
 };
 
 const withStreamingState = (

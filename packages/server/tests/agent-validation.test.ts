@@ -35,10 +35,24 @@ describe("agent validation", () => {
       requestId: "send-1",
       path: "Projects",
       content: [{ type: "text", content: "Build this" }],
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
     }))).toMatchObject({
       type: "sendMessage",
       requestId: "send-1",
       path: "Projects",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
     });
+  });
+
+  it("rejects partial provider/model selections", () => {
+    expect(() => parseAgentClientMessage(JSON.stringify({
+      type: "sendMessage",
+      requestId: "send-1",
+      path: "Projects",
+      content: [{ type: "text", content: "Build this" }],
+      provider: "anthropic",
+    }))).toThrow(AgentError);
   });
 });

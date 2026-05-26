@@ -200,6 +200,8 @@ export interface SendMessageInput {
   readonly threadId?: string;
   readonly path: string;
   readonly content: AgentContent;
+  readonly provider?: string;
+  readonly model?: string;
 }
 
 export interface CancelRunInput {
@@ -373,6 +375,8 @@ export type AgentClientMessage =
       readonly threadId?: string;
       readonly path: string;
       readonly content: AgentContent;
+      readonly provider?: string;
+      readonly model?: string;
     }
   | { readonly type: "cancelRun"; readonly requestId: string; readonly threadId: string; readonly runId: string };
 
