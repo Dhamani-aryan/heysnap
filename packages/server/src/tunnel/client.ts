@@ -1,9 +1,26 @@
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
+import {
+  decodeTunnelBinaryFrame,
+  encodeTunnelBinaryFrame,
+  normalizeWebSocketCloseCode,
+  parseTunnelControlMessage,
+  profileForTrafficClass,
+  profileForWebSocketRoute,
+  stringifyTunnelControlMessage,
+  TunnelSendScheduler,
+  TUNNEL_OVERLOAD_CLOSE_CODE,
+  TUNNEL_OVERLOAD_CLOSE_REASON,
+  type TunnelControlMessage,
+  type TunnelQueueProfile,
+  type TunnelTrafficClass,
+} from "@ank1015-app/tunnel-protocol";
 import { WebSocket, type RawData } from "ws";
 
 import { errorToLog, logger, sanitizeUrlPath } from "../shared/logger.js";
+
+export { normalizeWebSocketCloseCode };
 
 export interface MachineTunnelClientOptions {
   readonly cloudServerPublicUrl: string;
@@ -25,6 +42,8 @@ export class MachineTunnelClient {
   private cloudWebSocket: WebSocket | null = null;
   private readonly localConnections = new Map<string, LocalTunnelConnection>();
   private readonly httpAbortControllers = new Map<string, AbortController>();
+  private readonly pendingHttpRequests = new Map<string, PendingHttpRequest>();
+  private sendScheduler: TunnelSendScheduler | null = null;
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -49,6 +68,8 @@ export class MachineTunnelClient {
     this.clearHeartbeat();
     this.abortHttpRequests("Machine tunnel client stopped");
     this.closeLocalConnections(1000, "Machine tunnel client stopped");
+    this.sendScheduler?.close(new Error("Machine tunnel client stopped"));
+    this.pendingHttpRequests.clear();
     this.cloudWebSocket?.close(1000, "Machine tunnel client stopped");
     this.cloudWebSocket = null;
   }
@@ -104,6 +125,21 @@ export class MachineTunnelClient {
       },
     });
     this.cloudWebSocket = webSocket;
+    this.sendScheduler = new TunnelSendScheduler({
+      socket: webSocket,
+      isOpen: () => this.cloudWebSocket === webSocket && webSocket.readyState === WebSocket.OPEN,
+      onConnectionOverflow: (connectionId, profile, reason) => {
+        this.closeLogicalConnectionForOverload(connectionId, profile, reason);
+      },
+      onSendError: (error) => {
+        logger.warn({
+          event: "machine_tunnel_client.send_error",
+          computerId: this.options.computerId,
+          cloudTunnelId,
+          err: errorToLog(error),
+        }, "Machine tunnel send failed");
+      },
+    });
 
     webSocket.on("open", () => {
       logger.info({
@@ -113,9 +149,9 @@ export class MachineTunnelClient {
       }, "Machine tunnel connected");
       this.startHeartbeat(webSocket, cloudTunnelId);
     });
-    webSocket.on("message", (data) => {
+    webSocket.on("message", (data, isBinary) => {
       this.cloudMessagesIn += 1;
-      this.handleCloudMessage(data);
+      this.handleCloudMessage(data, isBinary);
     });
     webSocket.on("pong", () => {
       this.clearHeartbeatTimeout();
@@ -136,6 +172,11 @@ export class MachineTunnelClient {
       }, "Machine tunnel closed");
       this.closeLocalConnections(1011, "Cloud tunnel closed");
       this.abortHttpRequests("Cloud tunnel closed");
+      this.sendScheduler?.close(new Error("Cloud tunnel closed"));
+      this.pendingHttpRequests.clear();
+      if (this.cloudWebSocket === webSocket) {
+        this.sendScheduler = null;
+      }
       this.cloudWebSocket = null;
       this.connectSoon(this.options.reconnectMs ?? 5000);
     });
@@ -148,6 +189,7 @@ export class MachineTunnelClient {
         err: errorToLog(error),
       }, "Machine tunnel error");
       this.abortHttpRequests("Cloud tunnel errored");
+      this.sendScheduler?.close(new Error("Cloud tunnel errored"));
       webSocket.close();
     });
   }
@@ -161,8 +203,13 @@ export class MachineTunnelClient {
     }
   }
 
-  private handleCloudMessage(data: RawData): void {
-    const message = parseCloudMessage(data);
+  private handleCloudMessage(data: RawData, isBinary: boolean): void {
+    if (isBinary) {
+      this.handleCloudBinaryFrame(data);
+      return;
+    }
+
+    const message = parseTunnelControlMessage(rawDataToText(data));
 
     if (message === null) {
       this.cloudWebSocket?.close(1003, "Invalid tunnel message");
@@ -171,29 +218,24 @@ export class MachineTunnelClient {
 
     switch (message.type) {
       case "open":
-        this.openLocalConnection(message.connectionId, message.path, message.metadata);
+        this.openLocalConnection(message.connectionId, message.path, message.route, message.metadata, message.trafficClass);
         break;
-      case "httpRequest":
-        void this.handleHttpRequest(message);
+      case "httpRequestStart":
+        this.startHttpRequest(message);
         break;
-      case "data": {
-        const localConnection = this.localConnections.get(message.connectionId);
-
-        if (localConnection === undefined) {
-          break;
-        }
-
-        if (localConnection.opened && localConnection.webSocket.readyState === WebSocket.OPEN) {
-          localConnection.messagesOut += 1;
-          localConnection.webSocket.send(tunnelPayloadToRawData(message));
-        } else {
-          localConnection.pendingData.push(message);
-        }
+      case "httpRequestEnd":
+        void this.finishHttpRequest(message.connectionId);
         break;
-      }
+      case "openResult":
+      case "httpResponseStart":
+      case "httpResponseEnd":
+        this.cloudWebSocket?.close(1003, "Unexpected tunnel control message");
+        break;
       case "close":
         this.httpAbortControllers.get(message.connectionId)?.abort();
         this.httpAbortControllers.delete(message.connectionId);
+        this.pendingHttpRequests.delete(message.connectionId);
+        this.sendScheduler?.removeConnection(message.connectionId);
         this.localConnections.get(message.connectionId)?.webSocket.close(
           normalizeWebSocketCloseCode(message.code),
           message.reason,
@@ -203,11 +245,77 @@ export class MachineTunnelClient {
     }
   }
 
-  private async handleHttpRequest(message: Extract<CloudTunnelMessage, { readonly type: "httpRequest" }>): Promise<void> {
+  private handleCloudBinaryFrame(data: RawData): void {
+    const frame = decodeTunnelBinaryFrame(rawDataToBinaryBuffer(data));
+
+    if (frame === null) {
+      this.cloudWebSocket?.close(1003, "Invalid tunnel binary frame");
+      return;
+    }
+
+    switch (frame.type) {
+      case "httpRequestBody":
+        this.pendingHttpRequests.get(frame.connectionId)?.chunks.push(frame.payload);
+        break;
+      case "wsData": {
+        const localConnection = this.localConnections.get(frame.connectionId);
+
+        if (localConnection === undefined) {
+          break;
+        }
+
+        if (localConnection.opened && localConnection.webSocket.readyState === WebSocket.OPEN) {
+          if (localConnection.webSocket.bufferedAmount + frame.payload.byteLength > localConnection.profile.maxQueuedBytes) {
+            this.closeLogicalConnectionForOverload(frame.connectionId, localConnection.profile, TUNNEL_OVERLOAD_CLOSE_REASON);
+            break;
+          }
+
+          localConnection.messagesOut += 1;
+          localConnection.webSocket.send(frame.isText ? frame.payload.toString("utf8") : frame.payload);
+        } else {
+          if (localConnection.pendingDataBytes + frame.payload.byteLength > localConnection.profile.maxQueuedBytes) {
+            this.closeLogicalConnectionForOverload(frame.connectionId, localConnection.profile, TUNNEL_OVERLOAD_CLOSE_REASON);
+            break;
+          }
+
+          localConnection.pendingData.push(frame);
+          localConnection.pendingDataBytes += frame.payload.byteLength;
+        }
+        break;
+      }
+      case "httpResponseBody":
+        this.cloudWebSocket?.close(1003, "Unexpected tunnel binary frame");
+        break;
+    }
+  }
+
+  private startHttpRequest(message: Extract<TunnelControlMessage, { readonly type: "httpRequestStart" }>): void {
     const abortController = new AbortController();
-    const requestBody = message.bodyBase64 === undefined ? undefined : Buffer.from(message.bodyBase64, "base64");
-    const requestHeaders = toLocalHttpRequestHeaders(message.headers);
+    const profile = profileForTrafficClass(message.trafficClass);
     this.httpAbortControllers.set(message.connectionId, abortController);
+    this.pendingHttpRequests.set(message.connectionId, {
+      message,
+      abortController,
+      chunks: [],
+      profile,
+    });
+  }
+
+  private async finishHttpRequest(connectionId: string): Promise<void> {
+    const pending = this.pendingHttpRequests.get(connectionId);
+
+    if (pending === undefined) {
+      return;
+    }
+
+    this.pendingHttpRequests.delete(connectionId);
+    await this.handleHttpRequest(pending);
+  }
+
+  private async handleHttpRequest(pending: PendingHttpRequest): Promise<void> {
+    const { message, abortController, profile } = pending;
+    const requestBody = pending.chunks.length === 0 ? undefined : Buffer.concat(pending.chunks);
+    const requestHeaders = toLocalHttpRequestHeaders(message.headers);
 
     try {
       const response = await fetch(`http://127.0.0.1:${String(this.options.localPort)}${message.path}`, {
@@ -218,18 +326,19 @@ export class MachineTunnelClient {
       });
 
       if (message.stream === true) {
-        await this.streamHttpResponse(message.connectionId, response);
+        await this.streamHttpResponse(message.connectionId, response, profile);
         return;
       }
 
       const body = Buffer.from(await response.arrayBuffer());
-      this.sendToCloud({
-        type: "httpResponse",
+      await this.sendHttpResponseStart(message.connectionId, response, profile);
+      await this.sendBinaryToCloud({
+        type: "httpResponseBody",
         connectionId: message.connectionId,
-        statusCode: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
-        bodyBase64: body.toString("base64"),
-      });
+        payload: body,
+        isText: false,
+      }, profile);
+      await this.sendControlToCloud({ type: "httpResponseEnd", connectionId: message.connectionId }, profile);
     } catch (error) {
       if (abortController.signal.aborted) {
         return;
@@ -256,27 +365,29 @@ export class MachineTunnelClient {
           message: errorMessage,
         },
       }), "utf8");
-      this.sendToCloud({
-        type: "httpResponse",
+      await this.sendControlToCloud({
+        type: "httpResponseStart",
         connectionId: message.connectionId,
         statusCode: 502,
         headers: {
           "content-type": "application/json",
         },
-        bodyBase64: body.toString("base64"),
-      });
+      }, profile);
+      await this.sendBinaryToCloud({
+        type: "httpResponseBody",
+        connectionId: message.connectionId,
+        payload: body,
+        isText: false,
+      }, profile);
+      await this.sendControlToCloud({ type: "httpResponseEnd", connectionId: message.connectionId }, profile);
     } finally {
       this.httpAbortControllers.delete(message.connectionId);
+      this.sendScheduler?.removeConnection(message.connectionId);
     }
   }
 
-  private async streamHttpResponse(connectionId: string, response: Response): Promise<void> {
-    this.sendToCloud({
-      type: "httpResponseStart",
-      connectionId,
-      statusCode: response.status,
-      headers: Object.fromEntries(response.headers.entries()),
-    });
+  private async streamHttpResponse(connectionId: string, response: Response, profile: TunnelQueueProfile): Promise<void> {
+    await this.sendHttpResponseStart(connectionId, response, profile);
 
     if (response.body !== null) {
       const reader = response.body.getReader();
@@ -288,22 +399,35 @@ export class MachineTunnelClient {
           break;
         }
 
-        this.sendToCloud({
-          type: "httpResponseChunk",
+        await this.sendBinaryToCloud({
+          type: "httpResponseBody",
           connectionId,
-          bodyBase64: Buffer.from(value).toString("base64"),
-        });
+          payload: Buffer.from(value),
+          isText: false,
+        }, profile);
       }
     }
 
-    this.sendToCloud({ type: "httpResponseEnd", connectionId });
+    await this.sendControlToCloud({ type: "httpResponseEnd", connectionId }, profile);
+  }
+
+  private sendHttpResponseStart(connectionId: string, response: Response, profile: TunnelQueueProfile): Promise<void> {
+    return this.sendControlToCloud({
+      type: "httpResponseStart",
+      connectionId,
+      statusCode: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+    }, profile);
   }
 
   private openLocalConnection(
     connectionId: string,
     path: string,
+    route: "filesystem" | "browser-control" | "preview",
     metadata: CloudTunnelOpenMetadata | undefined,
+    trafficClass: TunnelTrafficClass | undefined,
   ): void {
+    const profile = trafficClass === undefined ? profileForWebSocketRoute(route) : profileForTrafficClass(trafficClass);
     const localWebSocket = new WebSocket(`ws://127.0.0.1:${String(this.options.localPort)}${path}`, {
       headers: buildLocalConnectionHeaders(metadata),
     });
@@ -312,9 +436,11 @@ export class MachineTunnelClient {
       opened: false,
       openedAt: Date.now(),
       path,
+      profile,
       messagesIn: 0,
       messagesOut: 0,
       pendingData: [],
+      pendingDataBytes: 0,
     };
 
     this.localConnections.set(connectionId, localConnection);
@@ -336,23 +462,39 @@ export class MachineTunnelClient {
         connectionId,
         path: sanitizeUrlPath(path),
       }, "Local websocket opened");
-      this.sendToCloud({ type: "openResult", connectionId, ok: true });
+      this.observeTunnelSend(
+        this.sendControlToCloud({ type: "openResult", connectionId, ok: true }, profile),
+        connectionId,
+        profile,
+      );
 
       for (const message of localConnection.pendingData.splice(0)) {
+        if (localWebSocket.bufferedAmount + message.payload.byteLength > profile.maxQueuedBytes) {
+          this.closeLogicalConnectionForOverload(connectionId, profile, TUNNEL_OVERLOAD_CLOSE_REASON);
+          break;
+        }
+
         localConnection.messagesOut += 1;
-        localWebSocket.send(tunnelPayloadToRawData(message));
+        localWebSocket.send(message.isText ? message.payload.toString("utf8") : message.payload);
       }
+      localConnection.pendingDataBytes = 0;
     });
     localWebSocket.on("message", (data, isBinary) => {
       localConnection.messagesIn += 1;
-      this.sendToCloud({
-        type: "data",
+      this.observeTunnelSend(
+        this.sendBinaryToCloud({
+          type: "wsData",
+          connectionId,
+          payload: webSocketRawDataToBuffer(data),
+          isText: !isBinary,
+        }, profile),
         connectionId,
-        ...rawDataToTunnelPayload(data, isBinary),
-      });
+        profile,
+      );
     });
     localWebSocket.on("close", (code, reason) => {
       this.localConnections.delete(connectionId);
+      this.sendScheduler?.removeConnection(connectionId);
       logger.info({
         event: "machine_tunnel_client.local_ws.close",
         computerId: this.options.computerId,
@@ -365,15 +507,20 @@ export class MachineTunnelClient {
         messagesIn: localConnection.messagesIn,
         messagesOut: localConnection.messagesOut,
       }, "Local websocket closed");
-      this.sendToCloud({
-        type: "close",
+      this.observeTunnelSend(
+        this.sendControlToCloud({
+          type: "close",
+          connectionId,
+          code: normalizeWebSocketCloseCode(code),
+          reason: reason.toString("utf8"),
+        }, profile),
         connectionId,
-        code: normalizeWebSocketCloseCode(code),
-        reason: reason.toString("utf8"),
-      });
+        profile,
+      );
     });
     localWebSocket.on("error", (error) => {
       this.localConnections.delete(connectionId);
+      this.sendScheduler?.removeConnection(connectionId);
       logger.error({
         event: "machine_tunnel_client.local_ws.error",
         computerId: this.options.computerId,
@@ -385,21 +532,91 @@ export class MachineTunnelClient {
       }, "Local websocket error");
 
       if (!localConnection.opened) {
-        this.sendToCloud({
-          type: "openResult",
+        this.observeTunnelSend(
+          this.sendControlToCloud({
+            type: "openResult",
+            connectionId,
+            ok: false,
+            error: error instanceof Error ? error.message : "Failed to open local route",
+          }, profile),
           connectionId,
-          ok: false,
-          error: error instanceof Error ? error.message : "Failed to open local route",
-        });
+          profile,
+        );
       }
     });
   }
 
-  private sendToCloud(message: MachineTunnelMessage): void {
-    if (this.cloudWebSocket?.readyState === WebSocket.OPEN) {
-      this.cloudMessagesOut += 1;
-      this.cloudWebSocket.send(JSON.stringify(message));
+  private sendControlToCloud(message: TunnelControlMessage, profile: TunnelQueueProfile): Promise<void> {
+    if (this.cloudWebSocket?.readyState !== WebSocket.OPEN || this.sendScheduler === null) {
+      return Promise.resolve();
     }
+
+    this.cloudMessagesOut += 1;
+    return this.sendScheduler.enqueue({
+      connectionId: message.connectionId,
+      data: stringifyTunnelControlMessage(message),
+      profile,
+    });
+  }
+
+  private sendBinaryToCloud(
+    frame: Parameters<typeof encodeTunnelBinaryFrame>[0],
+    profile: TunnelQueueProfile,
+  ): Promise<void> {
+    if (this.cloudWebSocket?.readyState !== WebSocket.OPEN || this.sendScheduler === null) {
+      return Promise.resolve();
+    }
+
+    this.cloudMessagesOut += 1;
+    return this.sendScheduler.enqueue({
+      connectionId: frame.connectionId,
+      data: encodeTunnelBinaryFrame(frame),
+      profile,
+    });
+  }
+
+  private closeLogicalConnectionForOverload(
+    connectionId: string,
+    profile: TunnelQueueProfile,
+    reason: string,
+  ): void {
+    logger.warn({
+      event: "machine_tunnel_client.connection_overloaded",
+      computerId: this.options.computerId,
+      cloudTunnelId: this.cloudTunnelId,
+      connectionId,
+      trafficClass: profile.trafficClass,
+      reason,
+      queuedBytes: this.sendScheduler?.getConnectionQueuedBytes(connectionId) ?? 0,
+    }, "Logical tunnel connection exceeded its queue limit");
+
+    this.localConnections.get(connectionId)?.webSocket.close(TUNNEL_OVERLOAD_CLOSE_CODE, reason);
+    this.localConnections.delete(connectionId);
+    this.httpAbortControllers.get(connectionId)?.abort();
+    this.httpAbortControllers.delete(connectionId);
+    this.pendingHttpRequests.delete(connectionId);
+
+    if (this.cloudWebSocket?.readyState === WebSocket.OPEN) {
+      this.cloudWebSocket.send(stringifyTunnelControlMessage({
+        type: "close",
+        connectionId,
+        code: TUNNEL_OVERLOAD_CLOSE_CODE,
+        reason: TUNNEL_OVERLOAD_CLOSE_REASON,
+      }));
+    }
+  }
+
+  private observeTunnelSend(promise: Promise<void>, connectionId: string, profile: TunnelQueueProfile): void {
+    promise.catch((error) => {
+      logger.warn({
+        event: "machine_tunnel_client.logical_send_failed",
+        computerId: this.options.computerId,
+        cloudTunnelId: this.cloudTunnelId,
+        connectionId,
+        trafficClass: profile.trafficClass,
+        err: errorToLog(error),
+      }, "Logical tunnel send failed");
+    });
   }
 
   private startHeartbeat(webSocket: WebSocket, cloudTunnelId: string): void {
@@ -464,6 +681,7 @@ export class MachineTunnelClient {
     }
 
     this.httpAbortControllers.clear();
+    this.pendingHttpRequests.clear();
   }
 }
 
@@ -475,57 +693,27 @@ interface LocalTunnelConnection {
   opened: boolean;
   readonly openedAt: number;
   readonly path: string;
+  readonly profile: TunnelQueueProfile;
   messagesIn: number;
   messagesOut: number;
-  readonly pendingData: Extract<CloudTunnelMessage, { readonly type: "data" }>[];
+  readonly pendingData: Array<{
+    readonly payload: Buffer;
+    readonly isText: boolean;
+  }>;
+  pendingDataBytes: number;
 }
-
-type CloudTunnelMessage =
-  | {
-      readonly type: "open";
-      readonly connectionId: string;
-      readonly path: string;
-      readonly metadata?: CloudTunnelOpenMetadata;
-    }
-  | {
-      readonly type: "httpRequest";
-      readonly connectionId: string;
-      readonly path: string;
-      readonly method?: string;
-      readonly headers?: Record<string, string>;
-      readonly bodyBase64?: string;
-      readonly stream?: boolean;
-    }
-  | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType?: TunnelPayloadType }
-  | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
-
-type MachineTunnelMessage =
-  | { readonly type: "openResult"; readonly connectionId: string; readonly ok: true }
-  | { readonly type: "openResult"; readonly connectionId: string; readonly ok: false; readonly error: string }
-  | {
-      readonly type: "httpResponse";
-      readonly connectionId: string;
-      readonly statusCode: number;
-      readonly headers: Record<string, string>;
-      readonly bodyBase64: string;
-    }
-  | {
-      readonly type: "httpResponseStart";
-      readonly connectionId: string;
-      readonly statusCode: number;
-      readonly headers: Record<string, string>;
-    }
-  | { readonly type: "httpResponseChunk"; readonly connectionId: string; readonly bodyBase64: string }
-  | { readonly type: "httpResponseEnd"; readonly connectionId: string }
-  | { readonly type: "data"; readonly connectionId: string; readonly data: string; readonly dataType: TunnelPayloadType }
-  | { readonly type: "close"; readonly connectionId: string; readonly code?: number; readonly reason?: string };
-
-type TunnelPayloadType = "text" | "binary";
 
 interface CloudTunnelOpenMetadata {
   readonly userId?: string;
   readonly accessSessionId?: string;
   readonly computerId?: string;
+}
+
+interface PendingHttpRequest {
+  readonly message: Extract<TunnelControlMessage, { readonly type: "httpRequestStart" }>;
+  readonly abortController: AbortController;
+  readonly chunks: Buffer[];
+  readonly profile: TunnelQueueProfile;
 }
 
 const buildLocalConnectionHeaders = (
@@ -589,68 +777,6 @@ const getErrorCauseMessage = (cause: unknown): string =>
 const getErrorCauseLog = (error: unknown): Record<string, unknown> | undefined =>
   error instanceof Error && error.cause !== undefined ? errorToLog(error.cause) : undefined;
 
-const parseCloudMessage = (data: RawData): CloudTunnelMessage | null => {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(rawDataToText(data)) as unknown;
-  } catch {
-    return null;
-  }
-
-  if (typeof parsed !== "object" || parsed === null) {
-    return null;
-  }
-
-  const message = parsed as Record<string, unknown>;
-
-  if (typeof message["connectionId"] !== "string" || typeof message["type"] !== "string") {
-    return null;
-  }
-
-  switch (message["type"]) {
-    case "open":
-      return typeof message["path"] === "string"
-        ? {
-            type: "open",
-            connectionId: message["connectionId"],
-            path: message["path"],
-            metadata: parseOpenMetadata(message["metadata"]),
-          }
-        : null;
-    case "httpRequest":
-      return typeof message["path"] === "string"
-        ? {
-            type: "httpRequest",
-            connectionId: message["connectionId"],
-            path: message["path"],
-            method: typeof message["method"] === "string" ? message["method"] : undefined,
-            headers: isStringRecord(message["headers"]) ? message["headers"] : undefined,
-            bodyBase64: typeof message["bodyBase64"] === "string" ? message["bodyBase64"] : undefined,
-            stream: message["stream"] === true,
-          }
-        : null;
-    case "data":
-      return typeof message["data"] === "string"
-        ? {
-            type: "data",
-            connectionId: message["connectionId"],
-            data: message["data"],
-            dataType: parseTunnelPayloadType(message["dataType"]),
-          }
-        : null;
-    case "close":
-      return {
-        type: "close",
-        connectionId: message["connectionId"],
-        code: typeof message["code"] === "number" ? message["code"] : undefined,
-        reason: typeof message["reason"] === "string" ? message["reason"] : undefined,
-      };
-    default:
-      return null;
-  }
-};
-
 const rawDataToText = (data: RawData): string => {
   if (typeof data === "string") {
     return data;
@@ -667,73 +793,21 @@ const rawDataToText = (data: RawData): string => {
   return Buffer.concat(data).toString("utf8");
 };
 
-const isStringRecord = (value: unknown): value is Record<string, string> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
+const rawDataToBinaryBuffer = (data: RawData): Buffer =>
+  typeof data === "string" ? Buffer.from(data, "utf8") : webSocketRawDataToBuffer(data);
 
-  return Object.values(value).every((entry) => typeof entry === "string");
-};
-
-const rawDataToBase64 = (data: RawData): string => {
-  if (typeof data === "string") {
-    return Buffer.from(data, "utf8").toString("base64");
-  }
-
+const webSocketRawDataToBuffer = (data: RawData): Buffer => {
   if (Buffer.isBuffer(data)) {
-    return data.toString("base64");
+    return data;
   }
 
   if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("base64");
+    return Buffer.from(data);
   }
 
-  return Buffer.concat(data).toString("base64");
-};
-
-const rawDataToTunnelPayload = (
-  data: RawData,
-  isBinary: boolean,
-): { readonly data: string; readonly dataType: TunnelPayloadType } => ({
-  data: rawDataToBase64(data),
-  dataType: isBinary ? "binary" : "text",
-});
-
-const tunnelPayloadToRawData = (
-  message: { readonly data: string; readonly dataType?: TunnelPayloadType },
-): string | Buffer => {
-  const buffer = Buffer.from(message.data, "base64");
-  return message.dataType === "text" ? buffer.toString("utf8") : buffer;
-};
-
-const parseTunnelPayloadType = (value: unknown): TunnelPayloadType | undefined =>
-  value === "text" || value === "binary" ? value : undefined;
-
-const parseOpenMetadata = (value: unknown): CloudTunnelOpenMetadata | undefined => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return undefined;
+  if (typeof data === "string") {
+    return Buffer.from(data, "utf8");
   }
 
-  const record = value as Record<string, unknown>;
-  return {
-    userId: typeof record["userId"] === "string" ? record["userId"] : undefined,
-    accessSessionId: typeof record["accessSessionId"] === "string" ? record["accessSessionId"] : undefined,
-    computerId: typeof record["computerId"] === "string" ? record["computerId"] : undefined,
-  };
-};
-
-export const normalizeWebSocketCloseCode = (code: number | undefined): number => {
-  if (code === undefined) {
-    return 1000;
-  }
-
-  if (code === 1000 || (code >= 3000 && code <= 4999)) {
-    return code;
-  }
-
-  if (code >= 1001 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) {
-    return code;
-  }
-
-  return 1000;
+  return Buffer.concat(data);
 };
