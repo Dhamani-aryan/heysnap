@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { SessionManager, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -12,8 +13,17 @@ import {
   renderPiSettings,
 } from "../src/agent/harnesses/pi/config.js";
 import { PiAgentHarness } from "../src/agent/harnesses/pi/pi-agent-harness.js";
-import { formatHeySnapContext } from "../src/agent/harnesses/pi/pi-agent-harness.js";
+import {
+  branchPiSessionForEdit,
+  formatHeySnapContext,
+  PiLiveTurnMapper,
+} from "../src/agent/harnesses/pi/pi-agent-harness.js";
 import { PI_SYSTEM_PROMPT } from "../src/agent/harnesses/pi/system-prompt.js";
+import type {
+  AgentRuntimeEventBase,
+  AgentRuntimeEventType,
+  AgentRunEvent,
+} from "../src/agent/types.js";
 
 const tempRoots: string[] = [];
 
@@ -450,6 +460,237 @@ describe("Pi user config", () => {
     expect(context).toContain("\"filepath\": \"chrome\"");
   });
 
+  it("branches before the latest user message when editing a Pi turn", async () => {
+    const home = await createTempRoot();
+    const sessionManager = SessionManager.create(join(home, "app"), join(home, ".pi", "agent", "sessions"));
+    const firstUserId = appendPiUserMessage(sessionManager, "First prompt");
+    const firstAssistantId = appendPiAssistantMessage(sessionManager, "First response");
+    const secondUserId = appendPiUserMessage(sessionManager, "Second prompt");
+    appendPiAssistantMessage(sessionManager, "Second response");
+
+    branchPiSessionForEdit(sessionManager, 1);
+
+    expect(sessionManager.getLeafId()).toBe(firstAssistantId);
+
+    const editedUserId = appendPiUserMessage(sessionManager, "Edited second prompt");
+
+    expect(sessionManager.getBranch().map((entry) => entry.id)).toEqual([
+      firstUserId,
+      firstAssistantId,
+      editedUserId,
+    ]);
+    expect(sessionManager.getEntry(secondUserId)).toBeDefined();
+  });
+
+  it("resets the Pi leaf when editing the root user message", async () => {
+    const home = await createTempRoot();
+    const sessionManager = SessionManager.create(join(home, "app"), join(home, ".pi", "agent", "sessions"));
+    const firstUserId = appendPiUserMessage(sessionManager, "First prompt");
+    appendPiAssistantMessage(sessionManager, "First response");
+
+    branchPiSessionForEdit(sessionManager, 1);
+
+    expect(sessionManager.getLeafId()).toBeNull();
+
+    const editedUserId = appendPiUserMessage(sessionManager, "Edited first prompt");
+
+    expect(sessionManager.getBranch().map((entry) => entry.id)).toEqual([editedUserId]);
+    expect(sessionManager.getEntry(firstUserId)).toBeDefined();
+  });
+
+  it("can branch back multiple user turns for Pi edit rollbacks", async () => {
+    const home = await createTempRoot();
+    const sessionManager = SessionManager.create(join(home, "app"), join(home, ".pi", "agent", "sessions"));
+    appendPiUserMessage(sessionManager, "First prompt");
+    appendPiAssistantMessage(sessionManager, "First response");
+    appendPiUserMessage(sessionManager, "Second prompt");
+    appendPiAssistantMessage(sessionManager, "Second response");
+
+    branchPiSessionForEdit(sessionManager, 2);
+
+    expect(sessionManager.getLeafId()).toBeNull();
+  });
+
+  it("keeps retrying Pi stream errors alive as reconnect warnings", () => {
+    let turnCompletedCount = 0;
+    const mapper = createPiLiveTurnMapper(() => {
+      turnCompletedCount += 1;
+    });
+    const retryError = createPiAssistantMessage({
+      stopReason: "error",
+      errorMessage: "stream ended before message_stop",
+      timestamp: 1,
+    });
+    const success = createPiAssistantMessage({
+      stopReason: "stop",
+      text: "Recovered",
+      timestamp: 2,
+    });
+    const events = [
+      ...mapper.handle({ type: "message_start", message: retryError } as AgentSessionEvent),
+      ...mapper.handle({ type: "message_end", message: retryError } as AgentSessionEvent),
+      ...mapper.handle({ type: "turn_end", message: retryError, toolResults: [] } as AgentSessionEvent),
+      ...mapper.handle({ type: "agent_end", messages: [retryError], willRetry: true } as AgentSessionEvent),
+      ...mapper.handle({
+        type: "auto_retry_start",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2000,
+        errorMessage: "stream ended before message_stop",
+      }),
+      ...mapper.handle({ type: "message_start", message: success } as AgentSessionEvent),
+      ...mapper.handle({
+        type: "message_update",
+        message: success,
+        assistantMessageEvent: {
+          type: "text_delta",
+          contentIndex: 0,
+          delta: "Recovered",
+          partial: success,
+        },
+      } as AgentSessionEvent),
+      ...mapper.handle({ type: "message_end", message: success } as AgentSessionEvent),
+      ...mapper.handle({ type: "turn_end", message: success, toolResults: [] } as AgentSessionEvent),
+    ];
+
+    expect(events.map((event) => event.type)).toEqual([
+      "runtime.warning",
+      "message.started",
+      "content.delta",
+      "message.completed",
+      "turn.completed",
+    ]);
+    expect(events[0]).toMatchObject({
+      type: "runtime.warning",
+      warning: {
+        phase: "model",
+        message: "Pi retry 1/3: stream ended before message_stop",
+        canRetry: true,
+        attempts: 1,
+      },
+    });
+    expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(events.find((event) => event.type === "turn.completed")).toMatchObject({
+      status: "completed",
+    });
+    expect(turnCompletedCount).toBe(1);
+  });
+
+  it("flushes Pi stream errors when no retry will happen", () => {
+    let turnCompletedCount = 0;
+    const mapper = createPiLiveTurnMapper(() => {
+      turnCompletedCount += 1;
+    });
+    const finalError = createPiAssistantMessage({
+      stopReason: "error",
+      errorMessage: "429 rate limit",
+      timestamp: 1,
+    });
+    const events = [
+      ...mapper.handle({ type: "message_start", message: finalError } as AgentSessionEvent),
+      ...mapper.handle({ type: "message_end", message: finalError } as AgentSessionEvent),
+      ...mapper.handle({ type: "turn_end", message: finalError, toolResults: [] } as AgentSessionEvent),
+      ...mapper.handle({ type: "agent_end", messages: [finalError], willRetry: false } as AgentSessionEvent),
+    ];
+
+    expect(events.map((event) => event.type)).toEqual([
+      "message.started",
+      "message.completed",
+      "turn.completed",
+    ]);
+    expect(events[2]).toMatchObject({
+      type: "turn.completed",
+      status: "failed",
+      error: {
+        phase: "model",
+        message: "429 rate limit",
+        canRetry: true,
+      },
+    });
+    expect(turnCompletedCount).toBe(1);
+  });
+
+  it("maps live Pi compaction events to context compaction items", () => {
+    const mapper = createPiLiveTurnMapper(() => {});
+    const events = [
+      ...mapper.handle({
+        type: "compaction_start",
+        reason: "threshold",
+      }),
+      ...mapper.handle({
+        type: "compaction_end",
+        reason: "threshold",
+        result: {
+          summary: "Earlier work was summarized.",
+          firstKeptEntryId: "kept-1",
+          tokensBefore: 120000,
+          details: { files: ["src/app.ts"] },
+        },
+        aborted: false,
+        willRetry: false,
+      }),
+    ];
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "item.started",
+        item: expect.objectContaining({
+          id: "pi-turn:compaction",
+          itemType: "context_compaction",
+          status: "running",
+          title: "Context compacted",
+          summary: "Compacting conversation and continuing",
+        }),
+      }),
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({
+          id: "pi-turn:compaction",
+          itemType: "context_compaction",
+          status: "completed",
+          title: "Context compacted",
+          summary: "Earlier work was summarized.",
+          result: expect.objectContaining({
+            summary: "Earlier work was summarized.",
+            firstKeptEntryId: "kept-1",
+            tokensBefore: 120000,
+          }),
+          isError: false,
+          raw: expect.objectContaining({
+            type: "compaction_end",
+            reason: "threshold",
+          }),
+        }),
+      }),
+    ]);
+  });
+
+  it("maps failed Pi compaction events to failed context compaction items", () => {
+    const mapper = createPiLiveTurnMapper(() => {});
+    const events = mapper.handle({
+      type: "compaction_end",
+      reason: "overflow",
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+      errorMessage: "Compaction model quota exceeded",
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({
+          id: "pi-turn:compaction",
+          itemType: "context_compaction",
+          status: "failed",
+          title: "Context compacted",
+          summary: "Compaction model quota exceeded",
+          isError: true,
+        }),
+      }),
+    ]);
+  });
+
   it("throws when a Pi thread is missing", async () => {
     const home = await createTempRoot();
     const harness = new PiAgentHarness({ home });
@@ -480,3 +721,89 @@ const writePiSession = async (
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, filename), `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 };
+
+const appendPiUserMessage = (sessionManager: SessionManager, content: string): string =>
+  sessionManager.appendMessage({
+    role: "user",
+    content,
+    timestamp: Date.now(),
+  });
+
+const appendPiAssistantMessage = (sessionManager: SessionManager, content: string): string =>
+  sessionManager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: content }],
+    api: "anthropic-messages",
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    usage: emptyPiUsage(),
+    stopReason: "stop",
+    timestamp: Date.now(),
+  });
+
+const emptyPiUsage = () => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 0,
+  },
+});
+
+const createPiLiveTurnMapper = (onTurnCompleted: () => void): PiLiveTurnMapper => {
+  let sequence = 0;
+
+  return new PiLiveTurnMapper({
+    runId: "pi-run",
+    threadId: "pi-thread",
+    turnId: "pi-turn",
+    path: "app",
+    nextBase: <TType extends AgentRuntimeEventType>(
+      type: TType,
+      options: {
+        readonly createdAt?: number;
+        readonly providerItemId?: string;
+        readonly providerRequestId?: string;
+      } = {},
+    ): AgentRuntimeEventBase & { readonly type: TType } => ({
+      version: 2,
+      type,
+      runId: "pi-run",
+      threadId: "pi-thread",
+      turnId: "pi-turn",
+      sequence: ++sequence,
+      createdAt: options.createdAt ?? 1,
+      provider: "pi",
+      providerRefs: {
+        providerThreadId: "pi-thread",
+        providerTurnId: "pi-turn",
+        ...(options.providerItemId !== undefined ? { providerItemId: options.providerItemId } : {}),
+        ...(options.providerRequestId !== undefined ? { providerRequestId: options.providerRequestId } : {}),
+      },
+    }),
+    onTurnCompleted,
+  });
+};
+
+const createPiAssistantMessage = (input: {
+  readonly stopReason: "stop" | "error";
+  readonly text?: string;
+  readonly errorMessage?: string;
+  readonly timestamp: number;
+}): Record<string, unknown> => ({
+  role: "assistant",
+  content: input.text === undefined ? [] : [{ type: "text", text: input.text }],
+  api: "anthropic-messages",
+  provider: "anthropic",
+  model: "claude-sonnet-4-6",
+  usage: emptyPiUsage(),
+  stopReason: input.stopReason,
+  ...(input.errorMessage !== undefined ? { errorMessage: input.errorMessage } : {}),
+  timestamp: input.timestamp,
+});

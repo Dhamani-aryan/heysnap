@@ -8,6 +8,7 @@ import {
   ModelRegistry,
   SessionManager,
   type AgentSessionEvent,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 
 import { resolveClientPath } from "../../../filesystem/paths.js";
@@ -85,6 +86,23 @@ interface NormalizedSetupInput {
   readonly model: string;
 }
 
+interface PiTurnInput {
+  readonly threadId?: string;
+  readonly path: string;
+  readonly content: AgentContent;
+  readonly uiContext?: AgentUiContext;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly emitThreadCreated: boolean;
+  readonly useSessionModelFallback?: boolean;
+  readonly prepareSessionManager?: (sessionManager: SessionManager) => void;
+}
+
+interface ProviderModelInput {
+  readonly provider?: string;
+  readonly model?: string;
+}
+
 export class PiAgentHarness implements IAgentHarness {
   private readonly filesystemRoot: string;
   private readonly home?: string;
@@ -152,16 +170,65 @@ export class PiAgentHarness implements IAgentHarness {
     throw new AgentError("PI_THREAD_NOT_FOUND", "Pi thread not found.");
   }
 
-  async *sendMessage(_input: SendMessageInput): AsyncIterable<AgentRunEvent> {
-    const selection = normalizeProviderModelSelection(_input) ?? {
-      provider: PI_DEFAULT_PROVIDER,
-      model: PI_DEFAULT_MODEL,
-    };
-    const cwd = resolveClientPath(this.filesystemRoot, _input.path);
-    const isNewThread = _input.threadId === undefined;
+  async *sendMessage(input: SendMessageInput): AsyncIterable<AgentRunEvent> {
+    yield* this.startTurn({
+      threadId: input.threadId,
+      path: input.path,
+      content: input.content,
+      uiContext: input.uiContext,
+      provider: input.provider,
+      model: input.model,
+      emitThreadCreated: input.threadId === undefined,
+    });
+  }
+
+  async *editThreadUserMessage(input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent> {
+    yield* this.startTurn({
+      threadId: input.threadId,
+      path: input.path,
+      content: input.content,
+      uiContext: input.uiContext,
+      emitThreadCreated: false,
+      useSessionModelFallback: true,
+      prepareSessionManager: (sessionManager) => {
+        branchPiSessionForEdit(sessionManager, input.numTurns);
+      },
+    });
+  }
+
+  async cancelRun(input: CancelRunInput): Promise<void> {
+    const activeRun = this.requireActiveRun(input.threadId, input.runId);
+    await activeRun.session.abort();
+  }
+
+  async steerRun(input: SteerRunInput): Promise<SteerRunResult> {
+    const activeRun = this.requireActiveRun(input.threadId, input.runId);
+    const userAttachedFilePaths = await saveUserAttachments(input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: input.path,
+    });
+    const prompt = agentContentToPiPrompt(input.content, {
+      filesystemRoot: this.filesystemRoot,
+      path: input.path,
+      uiContext: input.uiContext,
+      userAttachedFilePaths,
+    });
+
+    await activeRun.session.steer(
+      prompt.text,
+      prompt.images.length > 0 ? [...prompt.images] : undefined,
+    );
+
+    return { turnId: input.runId };
+  }
+
+  private async *startTurn(input: PiTurnInput): AsyncIterable<AgentRunEvent> {
+    const baseSelection = normalizeProviderModelSelection(input);
+    const cwd = resolveClientPath(this.filesystemRoot, input.path);
+    const isNewThread = input.threadId === undefined;
     const sessionFile = isNewThread
       ? null
-      : await findPiSessionById(this.sessionsDir(), _input.threadId);
+      : await findPiSessionById(this.sessionsDir(), input.threadId);
 
     if (!isNewThread && sessionFile === null) {
       throw new AgentError("PI_THREAD_NOT_FOUND", "Pi thread not found.");
@@ -169,10 +236,19 @@ export class PiAgentHarness implements IAgentHarness {
 
     await mkdir(this.sessionsDir(), { recursive: true });
 
-    const model = this.findModel(selection.provider, selection.model);
     const sessionManager = sessionFile === null
       ? SessionManager.create(cwd, this.sessionsDir())
       : SessionManager.open(sessionFile.path, this.sessionsDir(), cwd);
+    const sessionModelSelection = input.useSessionModelFallback === true
+      ? modelSelectionFromSessionModel(sessionManager.buildSessionContext().model)
+      : undefined;
+    const selection = baseSelection ?? sessionModelSelection ?? {
+      provider: PI_DEFAULT_PROVIDER,
+      model: PI_DEFAULT_MODEL,
+    };
+    input.prepareSessionManager?.(sessionManager);
+
+    const model = this.findModel(selection.provider, selection.model);
     const currentSessionModel = sessionManager.buildSessionContext().model;
     const shouldPersistModelSelection = model !== undefined &&
       (currentSessionModel === null ||
@@ -194,17 +270,17 @@ export class PiAgentHarness implements IAgentHarness {
     const runId = randomUUID();
     const threadId = session.sessionId;
     const turnId = runId;
-    const userAttachedFilePaths = await saveUserAttachments(_input.content, {
+    const userAttachedFilePaths = await saveUserAttachments(input.content, {
       filesystemRoot: this.filesystemRoot,
-      path: _input.path,
+      path: input.path,
     });
-    const prompt = agentContentToPiPrompt(_input.content, {
+    const prompt = agentContentToPiPrompt(input.content, {
       filesystemRoot: this.filesystemRoot,
-      path: _input.path,
-      uiContext: _input.uiContext,
+      path: input.path,
+      uiContext: input.uiContext,
       userAttachedFilePaths,
     });
-    const pendingThread = createPendingThread(threadId, _input.path, _input.content);
+    const pendingThread = createPendingThread(threadId, input.path, input.content);
     let sequence = 0;
     let turnCompleted = false;
     const queue = new AsyncQueue<AgentRunEvent>();
@@ -212,7 +288,7 @@ export class PiAgentHarness implements IAgentHarness {
       runId,
       threadId,
       turnId,
-      path: _input.path,
+      path: input.path,
       nextBase: <TType extends AgentRuntimeEventType>(
         type: TType,
         options: {
@@ -301,17 +377,17 @@ export class PiAgentHarness implements IAgentHarness {
     })();
 
     try {
-      if (isNewThread) {
+      if (input.emitThreadCreated) {
         yield {
           ...mapper.nextBase("thread.created", { createdAt: Date.now() }),
-          thread: createPendingThreadSummary(threadId, _input.path, _input.content),
+          thread: createPendingThreadSummary(threadId, input.path, input.content),
         };
       }
 
       yield {
         ...mapper.nextBase("turn.started"),
-        input: _input.content,
-        path: _input.path,
+        input: input.content,
+        path: input.path,
       };
 
       for (;;) {
@@ -332,36 +408,6 @@ export class PiAgentHarness implements IAgentHarness {
       session.dispose();
       queue.close();
     }
-  }
-
-  async *editThreadUserMessage(_input: EditThreadUserMessageInput): AsyncIterable<AgentRunEvent> {
-    throw notImplemented();
-  }
-
-  async cancelRun(input: CancelRunInput): Promise<void> {
-    const activeRun = this.requireActiveRun(input.threadId, input.runId);
-    await activeRun.session.abort();
-  }
-
-  async steerRun(input: SteerRunInput): Promise<SteerRunResult> {
-    const activeRun = this.requireActiveRun(input.threadId, input.runId);
-    const userAttachedFilePaths = await saveUserAttachments(input.content, {
-      filesystemRoot: this.filesystemRoot,
-      path: input.path,
-    });
-    const prompt = agentContentToPiPrompt(input.content, {
-      filesystemRoot: this.filesystemRoot,
-      path: input.path,
-      uiContext: input.uiContext,
-      userAttachedFilePaths,
-    });
-
-    await activeRun.session.steer(
-      prompt.text,
-      prompt.images.length > 0 ? [...prompt.images] : undefined,
-    );
-
-    return { turnId: input.runId };
   }
 
   private resolveAnthropicApiKey(input: NormalizedSetupInput): string {
@@ -494,7 +540,7 @@ const optionalBoolean = (value: unknown, fieldName: string): boolean | undefined
 };
 
 const normalizeProviderModelSelection = (
-  input: SendMessageInput,
+  input: ProviderModelInput,
 ): { readonly provider: string; readonly model: string } | undefined => {
   if (input.provider === undefined && input.model === undefined) {
     return undefined;
@@ -513,8 +559,58 @@ const normalizeProviderModelSelection = (
   return { provider, model };
 };
 
-const notImplemented = (): AgentError =>
-  new AgentError("PI_HARNESS_NOT_IMPLEMENTED", "Pi harness runtime methods are not implemented yet.");
+const modelSelectionFromSessionModel = (
+  model: { readonly provider: string; readonly modelId: string } | null,
+): { readonly provider: string; readonly model: string } | undefined =>
+  model === null ? undefined : { provider: model.provider, model: model.modelId };
+
+export const branchPiSessionForEdit = (sessionManager: SessionManager, numTurns: number): void => {
+  if (!Number.isInteger(numTurns) || numTurns < 1) {
+    throw new AgentError("PI_EDIT_INVALID_TURN_COUNT", "Pi edit requires numTurns to be a positive integer.");
+  }
+
+  const target = findUserMessageFromEnd(sessionManager.getBranch(), numTurns);
+
+  if (target === undefined) {
+    throw new AgentError("PI_EDIT_MESSAGE_NOT_FOUND", "Pi could not find a user message to edit.");
+  }
+
+  if (target.parentId === null) {
+    sessionManager.resetLeaf();
+    return;
+  }
+
+  sessionManager.branch(target.parentId);
+};
+
+const findUserMessageFromEnd = (
+  entries: readonly SessionEntry[],
+  numTurns: number,
+): SessionEntry | undefined => {
+  let remaining = numTurns;
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+
+    if (entry !== undefined && isUserMessageEntry(entry)) {
+      remaining -= 1;
+
+      if (remaining === 0) {
+        return entry;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const isUserMessageEntry = (entry: SessionEntry): boolean => {
+  if (entry.type !== "message") {
+    return false;
+  }
+
+  return asRecord(entry.message)?.["role"] === "user";
+};
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -711,7 +807,7 @@ const isTextFile = (mimeType: string, filename: string): boolean =>
 const agentContentText = (content: AgentContent): string =>
   content.flatMap((block) => block.type === "text" ? [block.content] : []).join(" ");
 
-class PiLiveTurnMapper {
+export class PiLiveTurnMapper {
   private readonly runId: string;
   private readonly threadId: string;
   private readonly turnId: string;
@@ -728,6 +824,9 @@ class PiLiveTurnMapper {
   private readonly messageIds = new WeakMap<object, string>();
   private readonly messageIdsByStableKey = new Map<string, string>();
   private readonly activeMessageIdsByRole = new Map<string, string>();
+  private pendingAssistantStartEvent: Extract<AgentRunEvent, { readonly type: "message.started" }> | undefined;
+  private pendingRetryableFailureEvents: AgentRunEvent[] = [];
+  private pendingRetryableFailureCompletesTurn = false;
   private messageIndex = 0;
 
   constructor(options: {
@@ -749,12 +848,9 @@ class PiLiveTurnMapper {
   handle(event: AgentSessionEvent): AgentRunEvent[] {
     switch (event.type) {
       case "message_start":
-        return this.handleMessageEvent("message.started", event.message, { markActive: true });
+        return this.handleMessageStart(event.message);
       case "message_end":
-        return this.handleMessageEvent("message.completed", event.message, {
-          preferActive: true,
-          clearActive: true,
-        });
+        return this.handleMessageEnd(event.message);
       case "message_update":
         return this.handleMessageUpdate(event);
       case "tool_execution_start":
@@ -787,43 +883,22 @@ class PiLiveTurnMapper {
           ),
         }];
       case "turn_end":
-        this.onTurnCompleted();
-        return [{
-          ...this.nextBase("turn.completed"),
-          status: isAssistantError(event.message) ? "failed" : "completed",
-          ...(isAssistantError(event.message)
-            ? {
-              error: {
-                phase: "model" as const,
-                message: stringField(asRecord(event.message), "errorMessage") ?? "Pi model request failed.",
-                canRetry: true,
-              },
-            }
-            : {}),
-        }];
+        return this.handleTurnEnd(event.message);
+      case "agent_end":
+        return this.handleAgentEnd(event);
       case "compaction_start":
         return [{
           ...this.nextBase("item.started"),
-          item: {
-            id: `${this.turnId}:compaction`,
-            itemType: "context_compaction",
-            status: "running",
-            title: "Context compaction",
-            summary: event.reason,
-          },
+          item: toCompactionRuntimeItem(this.turnId, event, "running"),
         }];
       case "compaction_end":
         return [{
           ...this.nextBase("item.completed"),
-          item: {
-            id: `${this.turnId}:compaction`,
-            itemType: "context_compaction",
-            status: event.aborted || event.errorMessage !== undefined ? "failed" : "completed",
-            title: "Context compaction",
-            summary: event.result?.summary ?? event.errorMessage ?? event.reason,
-            result: event.result,
-            isError: event.aborted || event.errorMessage !== undefined,
-          },
+          item: toCompactionRuntimeItem(
+            this.turnId,
+            event,
+            event.aborted || event.errorMessage !== undefined ? "failed" : "completed",
+          ),
         }];
       case "auto_retry_start":
         return [{
@@ -873,6 +948,97 @@ class PiLiveTurnMapper {
     }];
   }
 
+  private handleMessageStart(piMessage: unknown): AgentRunEvent[] {
+    const events = this.handleMessageEvent("message.started", piMessage, { markActive: true });
+    const event = events[0];
+
+    if (event?.type === "message.started" && event.message.role === "assistant") {
+      this.pendingAssistantStartEvent = event;
+      return [];
+    }
+
+    return events;
+  }
+
+  private handleMessageEnd(piMessage: unknown): AgentRunEvent[] {
+    const events = this.handleMessageEvent("message.completed", piMessage, {
+      preferActive: true,
+      clearActive: true,
+    });
+    const event = events[0];
+
+    if (event?.type !== "message.completed" || event.message.role !== "assistant") {
+      return events;
+    }
+
+    const pendingStart = this.takePendingAssistantStartEvents();
+
+    if (isAssistantError(piMessage)) {
+      this.pendingRetryableFailureEvents.push(...pendingStart, ...events);
+      return [];
+    }
+
+    return [...pendingStart, ...events];
+  }
+
+  private handleTurnEnd(piMessage: unknown): AgentRunEvent[] {
+    const isError = isAssistantError(piMessage);
+    const event: AgentRunEvent = {
+      ...this.nextBase("turn.completed"),
+      status: isError ? "failed" : "completed",
+      ...(isError
+        ? {
+          error: {
+            phase: "model" as const,
+            message: stringField(asRecord(piMessage), "errorMessage") ?? "Pi model request failed.",
+            canRetry: true,
+          },
+        }
+        : {}),
+    };
+
+    if (isError) {
+      this.pendingRetryableFailureEvents.push(event);
+      this.pendingRetryableFailureCompletesTurn = true;
+      return [];
+    }
+
+    this.onTurnCompleted();
+    return [event];
+  }
+
+  private handleAgentEnd(event: Extract<AgentSessionEvent, { readonly type: "agent_end" }>): AgentRunEvent[] {
+    if (this.pendingRetryableFailureEvents.length === 0) {
+      return [];
+    }
+
+    if (event.willRetry) {
+      this.clearPendingRetryableFailure();
+      return [];
+    }
+
+    const events = this.pendingRetryableFailureEvents;
+    const completesTurn = this.pendingRetryableFailureCompletesTurn;
+    this.clearPendingRetryableFailure();
+
+    if (completesTurn) {
+      this.onTurnCompleted();
+    }
+
+    return events;
+  }
+
+  private takePendingAssistantStartEvents(): Extract<AgentRunEvent, { readonly type: "message.started" }>[] {
+    const event = this.pendingAssistantStartEvent;
+    this.pendingAssistantStartEvent = undefined;
+    return event === undefined ? [] : [event];
+  }
+
+  private clearPendingRetryableFailure(): void {
+    this.pendingRetryableFailureEvents = [];
+    this.pendingRetryableFailureCompletesTurn = false;
+  }
+
   private handleMessageUpdate(
     event: Extract<AgentSessionEvent, { readonly type: "message_update" }>,
   ): AgentRunEvent[] {
@@ -883,13 +1049,16 @@ class PiLiveTurnMapper {
       return [];
     }
 
-    return [{
+    return [
+      ...this.takePendingAssistantStartEvents(),
+      {
       ...this.nextBase("content.delta"),
       messageId: this.getMessageId(event.message, { preferActive: true }),
       contentIndex: numberField(update, "contentIndex") ?? 0,
       streamKind: toStreamKind(stringField(update, "type")),
       delta,
-    }];
+      },
+    ];
   }
 
   private getMessageId(piMessage: unknown, options: MessageIdOptions = {}): string {
@@ -1167,6 +1336,55 @@ const toRuntimeItem = (
   isError,
   raw: { toolName, args, result },
 });
+
+const toCompactionRuntimeItem = (
+  turnId: string,
+  event: Extract<AgentSessionEvent, { readonly type: "compaction_start" | "compaction_end" }>,
+  status: AgentRuntimeItem["status"],
+): AgentRuntimeItem => {
+  const endEvent = event.type === "compaction_end" ? event : undefined;
+  const isError = endEvent?.aborted === true || endEvent?.errorMessage !== undefined;
+
+  return {
+    id: `${turnId}:compaction`,
+    itemType: "context_compaction",
+    status,
+    title: "Context compacted",
+    summary: compactionSummary(event),
+    result: endEvent?.result,
+    isError,
+    raw: event,
+  };
+};
+
+const compactionSummary = (
+  event: Extract<AgentSessionEvent, { readonly type: "compaction_start" | "compaction_end" }>,
+): string | undefined => {
+  if (event.type === "compaction_start") {
+    return compactionReasonSummary(event.reason);
+  }
+
+  if (event.errorMessage !== undefined) {
+    return event.errorMessage;
+  }
+
+  if (event.aborted) {
+    return "Compaction aborted";
+  }
+
+  return event.result?.summary ?? compactionReasonSummary(event.reason);
+};
+
+const compactionReasonSummary = (reason: "manual" | "threshold" | "overflow"): string => {
+  switch (reason) {
+    case "manual":
+      return "Manual compaction";
+    case "threshold":
+      return "Compacting conversation and continuing";
+    case "overflow":
+      return "Recovering from context overflow";
+  }
+};
 
 const toRuntimeItemType = (toolName: string): AgentRuntimeItem["itemType"] => {
   switch (toolName) {
