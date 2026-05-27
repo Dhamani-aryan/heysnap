@@ -2,18 +2,23 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Moon02Icon, Sun01Icon } from '@hugeicons/core-free-icons'
 import { resolveTheme, useThemeStore } from '../stores/theme-store.ts'
 
-export function ThemeToggle() {
+type Props = {
+  compact?: boolean
+}
+
+export function ThemeToggle({ compact = false }: Props = {}) {
   const theme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
   const resolved = resolveTheme(theme)
   const isDark = resolved === 'dark'
+  const sizeClasses = compact ? 'h-7 w-7' : 'h-9 w-9'
 
   return (
     <button
       type="button"
       aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-md text-subheading transition-[transform,background-color,color] duration-150 ease-out hover:bg-secondary-hover hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ghost active:scale-[0.97]"
+      className={`inline-flex ${sizeClasses} items-center justify-center rounded-md text-subheading transition-[transform,background-color,color] duration-150 ease-out hover:bg-secondary-hover hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ghost active:scale-[0.97]`}
     >
       <HugeiconsIcon
         icon={isDark ? Sun01Icon : Moon02Icon}
