@@ -39,6 +39,14 @@
   animation: dot-bounce 1100ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+.send-button-idle {
+  background-color: color-mix(in srgb, var(--color-primary) 72%, transparent);
+}
+
+.dark .send-button-idle {
+  background-color: rgba(0, 100, 225, 0.24);
+}
+
 @layer base {
   :root {
     --color-sidebar: #f3f3f4;
