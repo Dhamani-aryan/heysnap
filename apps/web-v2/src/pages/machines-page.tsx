@@ -8,15 +8,24 @@ import {
   PlusSignIcon,
 } from '@hugeicons/core-free-icons'
 import { ThemeToggle } from '../components/theme-toggle.tsx'
-import { DottedGlowBackground } from '../components/dotted-glow-background.tsx'
 import { useLogoutMutation } from '../hooks/auth/use-auth-mutations.ts'
 import {
   machinesQueryOptions,
 } from '../lib/machines/machines-query.ts'
 import type { CloudComputer } from '../lib/machines/machines-api.ts'
 
+const DOT_BG_LIGHT =
+  'radial-gradient(circle, rgba(74, 80, 92, 0.55) 1.45px, transparent 1.65px)'
+const DOT_BG_DARK =
+  'radial-gradient(circle, rgba(148, 163, 184, 0.58) 1.45px, transparent 1.65px)'
 const DOT_MASK =
   'radial-gradient(circle at center, black 0%, black 56%, transparent 90%)'
+const GLOW_LIGHT =
+  'radial-gradient(circle at 50% 40%, rgba(143, 153, 178, 0.36), transparent 28%), radial-gradient(circle at 44% 54%, rgba(112, 144, 196, 0.18), transparent 36%)'
+const GLOW_DARK =
+  'radial-gradient(circle at 50% 40%, rgba(70, 130, 180, 0.24), transparent 28%), radial-gradient(circle at 44% 54%, rgba(153, 159, 222, 0.14), transparent 36%)'
+const GLOW_MASK =
+  'radial-gradient(circle at center, black 0%, black 46%, transparent 86%)'
 
 type DisplayStatus = {
   status: string
@@ -170,21 +179,48 @@ function MachineCard({ computer }: { computer: CloudComputer }) {
       </span>
 
       <div className="relative min-h-0 overflow-hidden p-[28px]">
-        <DottedGlowBackground
-          className="pointer-events-none opacity-[0.88] dark:opacity-100"
-          gap={10}
-          radius={1.6}
-          opacity={0.84}
-          color="rgba(74, 80, 92, 0.55)"
-          darkColor="rgba(148, 163, 184, 0.58)"
-          glowColor="rgba(112, 144, 196, 0.58)"
-          darkGlowColor="rgba(70, 130, 180, 0.58)"
-          speedMin={0.28}
-          speedMax={1.55}
-          speedScale={1}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-[0.38] dark:opacity-[0.68]"
           style={{
+            backgroundImage: 'var(--card-dot-bg)',
+            backgroundPosition: 'center',
+            backgroundSize: '14px 14px',
             maskImage: DOT_MASK,
             WebkitMaskImage: DOT_MASK,
+            // @ts-expect-error CSS custom property
+            '--card-dot-bg': DOT_BG_LIGHT,
+          }}
+        />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 hidden opacity-[0.68] dark:block"
+          style={{
+            backgroundImage: DOT_BG_DARK,
+            backgroundPosition: 'center',
+            backgroundSize: '14px 14px',
+            maskImage: DOT_MASK,
+            WebkitMaskImage: DOT_MASK,
+          }}
+        />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-[0.32] dark:opacity-[0.22]"
+          style={{
+            background: 'var(--card-glow)',
+            maskImage: GLOW_MASK,
+            WebkitMaskImage: GLOW_MASK,
+            // @ts-expect-error CSS custom property
+            '--card-glow': GLOW_LIGHT,
+          }}
+        />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 hidden opacity-[0.22] dark:block"
+          style={{
+            background: GLOW_DARK,
+            maskImage: GLOW_MASK,
+            WebkitMaskImage: GLOW_MASK,
           }}
         />
 
