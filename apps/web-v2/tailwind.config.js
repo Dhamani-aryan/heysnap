@@ -1,11 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   theme: {
     extend: {
       fontFamily: {
         sans: [
-          'Inter',
+          'Geist',
           'ui-sans-serif',
           'system-ui',
           '-apple-system',
@@ -13,6 +14,71 @@ export default {
           'Segoe UI',
           'sans-serif',
         ],
+        mono: [
+          'Geist Mono',
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'monospace',
+        ],
+      },
+      colors: {
+        sidebar: 'var(--color-sidebar)',
+        'sidebar-hover': 'var(--color-sidebar-hover)',
+        'sidebar-active': 'var(--color-sidebar-active)',
+        background: 'var(--color-background)',
+        card: 'var(--color-card)',
+        dialog: 'var(--color-dialog)',
+        tooltip: 'var(--color-tooltip)',
+        input: 'var(--color-input)',
+
+        heading: 'var(--color-heading)',
+        subheading: 'var(--color-subheading)',
+        'card-foreground': 'var(--color-card-foreground)',
+        'input-foreground': 'var(--color-input-foreground)',
+        'sidebar-active-foreground': 'var(--color-sidebar-active-foreground)',
+        'sidebar-inactive-foreground': 'var(--color-sidebar-inactive-foreground)',
+        placeholder: 'var(--color-placeholder)',
+
+        primary: 'var(--color-primary)',
+        'primary-hover': 'var(--color-primary-hover)',
+        secondary: 'var(--color-secondary)',
+        'secondary-hover': 'var(--color-secondary-hover)',
+        disabled: 'var(--color-disabled)',
+        ghost: 'var(--color-ghost)',
+
+        border: 'var(--color-border)',
+
+        success: 'var(--color-success)',
+        failure: 'var(--color-failure)',
+      },
+      borderRadius: {
+        xs: '6px',
+        sm: '8px',
+        md: '10px',
+        lg: '12px',
+        xl: '14px',
+        '2xl': '18px',
+        pill: '999px',
+      },
+      spacing: {
+        '2xs': '4px',
+        xs: '8px',
+        sm: '12px',
+        md: '16px',
+        lg: '20px',
+        xl: '24px',
+        '2xl': '32px',
+        '3xl': '40px',
+        '4xl': '48px',
+        '5xl': '64px',
+        '6xl': '80px',
+        '7xl': '96px',
+      },
+      transitionTimingFunction: {
+        out: 'cubic-bezier(0.23, 1, 0.32, 1)',
+        'in-out': 'cubic-bezier(0.77, 0, 0.175, 1)',
+        drawer: 'cubic-bezier(0.32, 0.72, 0, 1)',
       },
     },
   },
