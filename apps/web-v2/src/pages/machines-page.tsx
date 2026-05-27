@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   ArrowRight02Icon,
@@ -10,6 +10,7 @@ import {
 import { ThemeToggle } from '../components/theme-toggle.tsx'
 import { useLogoutMutation } from '../hooks/auth/use-auth-mutations.ts'
 import {
+  accessSessionQueryOptions,
   machinesQueryOptions,
 } from '../lib/machines/machines-query.ts'
 import type { CloudComputer } from '../lib/machines/machines-api.ts'
@@ -88,6 +89,7 @@ function compareForDisplay(a: CloudComputer, b: CloudComputer): number {
 export function MachinesPage() {
   const logoutMutation = useLogoutMutation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { data: machines } = useSuspenseQuery(machinesQueryOptions)
 
   useEffect(() => {
@@ -125,7 +127,21 @@ export function MachinesPage() {
 
           <div className="mt-[80px] grid w-full grid-cols-2 gap-[32px] max-[680px]:mt-[64px] max-[680px]:grid-cols-1 max-[680px]:gap-[24px]">
             {sorted.map((computer) => (
-              <MachineCard key={computer.id} computer={computer} />
+              <MachineCard
+                key={computer.id}
+                computer={computer}
+                onOpen={() =>
+                  navigate({
+                    to: '/machines/$computerId',
+                    params: { computerId: computer.id },
+                  })
+                }
+                onPrefetch={() => {
+                  void queryClient.prefetchQuery(
+                    accessSessionQueryOptions(computer.id),
+                  )
+                }}
+              />
             ))}
             {canCreate ? (
               <button
@@ -148,9 +164,23 @@ export function MachinesPage() {
   )
 }
 
-function MachineCard({ computer }: { computer: CloudComputer }) {
+function MachineCard({
+  computer,
+  onOpen,
+  onPrefetch,
+}: {
+  computer: CloudComputer
+  onOpen: () => void
+  onPrefetch: () => void
+}) {
   const display = getDisplayStatus(computer)
   const canOpen = display.canOpen
+  const canPrefetch =
+    canOpen && (computer.status === 'online' || computer.status === 'idle')
+
+  const handlePrefetch = () => {
+    if (canPrefetch) onPrefetch()
+  }
 
   return (
     <button
@@ -158,8 +188,10 @@ function MachineCard({ computer }: { computer: CloudComputer }) {
       data-can-open={canOpen ? 'true' : 'false'}
       onClick={() => {
         if (!canOpen) return
-        // Workspace route not implemented in web-v2 yet.
+        onOpen()
       }}
+      onMouseEnter={handlePrefetch}
+      onFocus={handlePrefetch}
       className="group relative grid aspect-[4/3] grid-rows-[minmax(0,1fr)_auto] cursor-pointer overflow-hidden rounded-none border border-[rgba(0,0,0,0.04)] bg-[#fbfbfb] p-0 text-left data-[can-open=false]:cursor-not-allowed dark:border-[rgba(255,255,255,0.06)] dark:bg-[#111113]"
     >
       <span

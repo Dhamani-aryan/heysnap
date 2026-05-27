@@ -49,3 +49,43 @@ export async function createComputer(input: {
   })
   return response.computer
 }
+
+export async function startComputer(computerId: string): Promise<CloudComputer> {
+  const response = await apiRequest<ComputerResponse>(
+    `/computers/${encodeURIComponent(computerId)}/start`,
+    { method: 'POST' },
+  )
+  return response.computer
+}
+
+export type AccessSession = {
+  id: string
+  computerId: string
+  token: string
+  scopes?: readonly string[]
+  expiresAt: string
+}
+
+export type AccessSessionRoutes = {
+  filesystemWebSocketUrl: string
+  filesystemPreviewBaseUrl?: string
+  filesystemPreviewWebSocketUrl?: string
+  browserControlWebSocketUrl?: string
+  agentBaseUrl: string
+  capabilitiesBaseUrl?: string
+}
+
+export type AccessSessionResponse = {
+  accessSession: AccessSession
+  routes: AccessSessionRoutes
+}
+
+export async function createAccessSession(
+  computerId: string,
+  signal?: AbortSignal,
+): Promise<AccessSessionResponse> {
+  return apiRequest<AccessSessionResponse>(
+    `/computers/${encodeURIComponent(computerId)}/access-session`,
+    { method: 'POST', signal },
+  )
+}

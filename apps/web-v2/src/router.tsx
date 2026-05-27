@@ -10,6 +10,7 @@ import {
 import type { AuthSnapshot } from './hooks/auth/use-auth.ts'
 import { MachinesPage } from './pages/machines-page.tsx'
 import { MachinesCreatePage } from './pages/machines-create-page.tsx'
+import { MachineWorkspacePage } from './pages/machine-workspace-page.tsx'
 import { LoginPage } from './pages/login-page.tsx'
 import { FullPageLoader } from './components/full-page-loader.tsx'
 import { machinesQueryOptions } from './lib/machines/machines-query.ts'
@@ -71,6 +72,16 @@ const machinesCreateRoute = createRoute({
   component: MachinesCreatePage,
 })
 
+const machineWorkspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/machines/$computerId',
+  beforeLoad: ({ context, location }) => requireAuth(context, location),
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(machinesQueryOptions)
+  },
+  component: MachineWorkspacePage,
+})
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -89,6 +100,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   machinesRoute,
   machinesCreateRoute,
+  machineWorkspaceRoute,
   loginRoute,
 ])
 

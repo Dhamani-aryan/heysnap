@@ -1,9 +1,16 @@
 import { queryOptions } from '@tanstack/react-query'
-import { listComputers, type CloudComputer } from './machines-api.ts'
+import {
+  createAccessSession,
+  listComputers,
+  type CloudComputer,
+} from './machines-api.ts'
+
+export const ACCESS_SESSION_REFRESH_BUFFER_MS = 60_000
 
 export const machinesKeys = {
   all: ['machines'] as const,
   list: ['machines', 'list'] as const,
+  accessSession: (id: string) => ['machines', 'access-session', id] as const,
 }
 
 const PENDING_STATUSES: ReadonlyArray<CloudComputer['status']> = [
@@ -28,3 +35,21 @@ export const machinesQueryOptions = queryOptions({
     return hasPendingMachine(data) ? PENDING_INTERVAL_MS : DEFAULT_INTERVAL_MS
   },
 })
+
+export function accessSessionQueryOptions(computerId: string) {
+  return queryOptions({
+    queryKey: machinesKeys.accessSession(computerId),
+    queryFn: ({ signal }) => createAccessSession(computerId, signal),
+    staleTime: (query) => {
+      const data = query.state.data
+      if (!data) return 0
+      const expiresAtMs = Date.parse(data.accessSession.expiresAt)
+      if (!Number.isFinite(expiresAtMs)) return 0
+      return Math.max(
+        0,
+        expiresAtMs - Date.now() - ACCESS_SESSION_REFRESH_BUFFER_MS,
+      )
+    },
+    refetchOnWindowFocus: true,
+  })
+}

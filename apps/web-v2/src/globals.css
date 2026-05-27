@@ -22,6 +22,23 @@
   animation: input-shake 220ms ease-in-out;
 }
 
+@keyframes dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-7px);
+    opacity: 1;
+  }
+}
+
+.animate-dot-bounce {
+  animation: dot-bounce 1100ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 @layer base {
   :root {
     --color-sidebar: #f3f3f4;
