@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes input-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+
+.animate-input-shake {
+  animation: input-shake 220ms ease-in-out;
+}
+
 @layer base {
   :root {
     --color-sidebar: #f3f3f4;
