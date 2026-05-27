@@ -10,7 +10,7 @@ export const createLocalCloudEnv = () => ({
   CLOUD_SERVER_PUBLIC_URL: process.env.CLOUD_SERVER_PUBLIC_URL || "http://localhost:4100",
   CLOUD_SERVER_ADMIN_TOKEN: process.env.CLOUD_SERVER_ADMIN_TOKEN || "development-admin-token",
   CLOUD_SERVER_ALLOWED_ORIGINS: process.env.CLOUD_SERVER_ALLOWED_ORIGINS ||
-    "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
+    "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175",
   COMPUTER_PROVISIONER: process.env.COMPUTER_PROVISIONER || "docker",
   LOCAL_DOCKER_MACHINE_IMAGE: process.env.LOCAL_DOCKER_MACHINE_IMAGE || "ank1015-machine-local:latest",
   LOCAL_DOCKER_NETWORK: process.env.LOCAL_DOCKER_NETWORK || "ank1015-local",

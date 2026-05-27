@@ -114,6 +114,8 @@ export const getDevelopmentCloudServerConfig = (
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
   ]),
   adminToken: env.CLOUD_SERVER_ADMIN_TOKEN?.trim() || "development-admin-token",
 });

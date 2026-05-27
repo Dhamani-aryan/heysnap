@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createLocalCloudEnv,
 } from "../../../scripts/local-dev/cloud.mjs";
+import { getDevelopmentCloudServerConfig } from "../src/config.js";
 import {
   createLocalReleasePlan,
   createManifestPayload,
@@ -21,6 +22,28 @@ describe("local machine-server release publisher", () => {
         delete process.env.AI_GATEWAY_CAPTURE_BODIES;
       } else {
         process.env.AI_GATEWAY_CAPTURE_BODIES = previous;
+      }
+    }
+  });
+
+  it("allows the web-v2 Vite dev origin in local CORS defaults", () => {
+    const previous = process.env.CLOUD_SERVER_ALLOWED_ORIGINS;
+    delete process.env.CLOUD_SERVER_ALLOWED_ORIGINS;
+
+    try {
+      const env = createLocalCloudEnv();
+      const origins = env.CLOUD_SERVER_ALLOWED_ORIGINS?.split(",");
+      expect(origins).toContain("http://localhost:5175");
+      expect(origins).toContain("http://127.0.0.1:5175");
+
+      const config = getDevelopmentCloudServerConfig(env);
+      expect(config.allowedOrigins).toContain("http://localhost:5175");
+      expect(config.allowedOrigins).toContain("http://127.0.0.1:5175");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CLOUD_SERVER_ALLOWED_ORIGINS;
+      } else {
+        process.env.CLOUD_SERVER_ALLOWED_ORIGINS = previous;
       }
     }
   });
