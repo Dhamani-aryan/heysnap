@@ -1,3 +1,5 @@
+import { Suspense } from 'react'
+import type { QueryClient } from '@tanstack/react-query'
 import {
   createRootRouteWithContext,
   createRoute,
@@ -7,14 +9,22 @@ import {
 } from '@tanstack/react-router'
 import type { AuthSnapshot } from './hooks/auth/use-auth.ts'
 import { MachinesPage } from './pages/machines-page.tsx'
+import { MachinesCreatePage } from './pages/machines-create-page.tsx'
 import { LoginPage } from './pages/login-page.tsx'
+import { FullPageLoader } from './components/full-page-loader.tsx'
+import { machinesQueryOptions } from './lib/machines/machines-query.ts'
 
 type RouterContext = {
   auth: AuthSnapshot
+  queryClient: QueryClient
 }
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
-  component: () => <Outlet />,
+  component: () => (
+    <Suspense fallback={<FullPageLoader />}>
+      <Outlet />
+    </Suspense>
+  ),
 })
 
 const indexRoute = createRoute({
@@ -27,18 +37,38 @@ const indexRoute = createRoute({
   },
 })
 
+const requireAuth = (
+  context: RouterContext,
+  location: { href: string },
+) => {
+  if (context.auth.status === 'unauthenticated') {
+    throw redirect({
+      to: '/login',
+      search: { redirect: location.href },
+    })
+  }
+}
+
 const machinesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/machines',
-  beforeLoad: ({ context, location }) => {
-    if (context.auth.status === 'unauthenticated') {
-      throw redirect({
-        to: '/login',
-        search: { redirect: location.href },
-      })
+  beforeLoad: ({ context, location }) => requireAuth(context, location),
+  loader: async ({ context }) => {
+    const machines = await context.queryClient.ensureQueryData(
+      machinesQueryOptions,
+    )
+    if (machines.length === 0) {
+      throw redirect({ to: '/machines/create', replace: true })
     }
   },
   component: MachinesPage,
+})
+
+const machinesCreateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/machines/create',
+  beforeLoad: ({ context, location }) => requireAuth(context, location),
+  component: MachinesCreatePage,
 })
 
 const loginRoute = createRoute({
@@ -55,13 +85,18 @@ const loginRoute = createRoute({
   component: LoginPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, machinesRoute, loginRoute])
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  machinesRoute,
+  machinesCreateRoute,
+  loginRoute,
+])
 
 export const router = createRouter({
   routeTree,
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
-  context: { auth: undefined! },
+  context: { auth: undefined!, queryClient: undefined! },
 })
 
 declare module '@tanstack/react-router' {
