@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "VITE_CLOUD_SERVER_URL=http://localhost:4100 vite --host 127.0.0.1 --port 5175 --strictPort",
+    "dev": "VITE_CLOUD_SERVER_URL=http://localhost:4100 VITE_CHROME_EXTENSION_ID=nobghmfhpcigiaocmpmehebbdklkmcdn vite --host 127.0.0.1 --port 5175 --strictPort",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
