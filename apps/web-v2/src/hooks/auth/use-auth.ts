@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/auth/auth-store.ts'
 import { me, type CloudUser } from '../../lib/auth/auth-api.ts'
@@ -22,13 +23,22 @@ export function useAuth(): AuthSnapshot {
     staleTime: 60_000,
   })
 
+  const isAuthFailure =
+    query.isError &&
+    query.error instanceof ApiError &&
+    query.error.isAuthFailure
+
+  useEffect(() => {
+    if (!isAuthFailure) return
+    useAuthStore.getState().clear()
+    queryClient.removeQueries({ queryKey: authKeys.me })
+  }, [isAuthFailure])
+
   if (!token) {
     return { status: 'unauthenticated', token: null, user: null }
   }
 
-  if (query.isError && query.error instanceof ApiError && query.error.isAuthFailure) {
-    useAuthStore.getState().clear()
-    queryClient.removeQueries({ queryKey: authKeys.me })
+  if (isAuthFailure) {
     return { status: 'unauthenticated', token: null, user: null }
   }
 
