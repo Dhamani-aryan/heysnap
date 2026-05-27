@@ -10,8 +10,17 @@ import type {
   CloudComputer,
   CloudComputerStatus,
 } from '../lib/machines/machines-api.ts'
+import type { AccessSessionResponse } from '../lib/machines/machines-api.ts'
 import { MachineStartingLoader } from '../components/machine-starting-loader.tsx'
 import { WorkspaceLayout } from '../components/workspace/layout/workspace-layout.tsx'
+import {
+  buildGatewayHttpUrl,
+  buildGatewayWebsocketUrl,
+} from '../lib/gateway-url.ts'
+import { env } from '../lib/env.ts'
+import { useFilesystemConnection } from '../hooks/filesystem/use-filesystem-connection.ts'
+import { useBrowserConnection } from '../hooks/browser/use-browser-connection.ts'
+import { WorkspaceSurfaceStack } from '../components/workspace/layout/workspace-surface-stack.tsx'
 
 function isConnectable(status: CloudComputerStatus): boolean {
   return status === 'online' || status === 'idle'
@@ -87,23 +96,40 @@ export function MachineWorkspacePage() {
 
   return (
     <WorkspaceLayout>
-      <WorkspaceContent computer={computer} />
+      <WorkspaceContent computer={computer} accessSession={accessQuery.data} />
     </WorkspaceLayout>
   )
 }
 
-function WorkspaceContent({ computer }: { computer: CloudComputer }) {
-  return (
-    <div className="grid h-full place-items-center px-xl">
-      <div className="flex flex-col items-center gap-sm text-center">
-        <h1 className="m-0 text-[28px] font-[350] leading-none tracking-normal text-[#252629] dark:text-[#e3e4e6]">
-          {computer.name}
-        </h1>
-        <p className="text-[15px] leading-[24px] text-subheading">
-          Workspace ready. UI coming soon.
-        </p>
-      </div>
-    </div>
-  )
+function WorkspaceContent({
+  accessSession,
+}: {
+  computer: CloudComputer
+  accessSession: AccessSessionResponse
+}) {
+  const wsUrl = buildGatewayWebsocketUrl({
+    baseUrl: env.cloudServerUrl,
+    path: accessSession.routes.filesystemWebSocketUrl,
+    token: accessSession.accessSession.token,
+  })
+  const previewBaseUrl = accessSession.routes.filesystemPreviewBaseUrl
+    ? buildGatewayHttpUrl({
+        baseUrl: env.cloudServerUrl,
+        path: accessSession.routes.filesystemPreviewBaseUrl,
+        token: accessSession.accessSession.token,
+      })
+    : undefined
+  const controlWebSocketUrl = accessSession.routes.browserControlWebSocketUrl
+    ? buildGatewayWebsocketUrl({
+        baseUrl: env.cloudServerUrl,
+        path: accessSession.routes.browserControlWebSocketUrl,
+        token: accessSession.accessSession.token,
+      })
+    : undefined
+
+  useFilesystemConnection({ wsUrl, previewBaseUrl })
+  useBrowserConnection({ controlWebSocketUrl })
+
+  return <WorkspaceSurfaceStack />
 }
 
