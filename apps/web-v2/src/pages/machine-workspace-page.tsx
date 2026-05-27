@@ -11,6 +11,7 @@ import type {
   CloudComputerStatus,
 } from '../lib/machines/machines-api.ts'
 import { MachineStartingLoader } from '../components/machine-starting-loader.tsx'
+import { WorkspaceLayout } from '../components/workspace/layout/workspace-layout.tsx'
 
 function isConnectable(status: CloudComputerStatus): boolean {
   return status === 'online' || status === 'idle'
@@ -85,38 +86,24 @@ export function MachineWorkspacePage() {
   }
 
   return (
-    <WorkspacePlaceholder
-      computer={computer}
-      onBack={() => navigate({ to: '/machines' })}
-    />
+    <WorkspaceLayout>
+      <WorkspaceContent computer={computer} />
+    </WorkspaceLayout>
   )
 }
 
-function WorkspacePlaceholder({
-  computer,
-  onBack,
-}: {
-  computer: CloudComputer
-  onBack: () => void
-}) {
+function WorkspaceContent({ computer }: { computer: CloudComputer }) {
   return (
-    <main className="grid min-h-[100dvh] place-items-center bg-background px-xl text-heading">
-      <div className="flex flex-col items-center gap-md text-center">
-        <h1 className="m-0 text-[32px] font-[500] leading-[38px] tracking-[-0.045em]">
+    <div className="grid h-full place-items-center px-xl">
+      <div className="flex flex-col items-center gap-sm text-center">
+        <h1 className="m-0 text-[28px] font-[350] leading-none tracking-normal text-[#252629] dark:text-[#e3e4e6]">
           {computer.name}
         </h1>
         <p className="text-[15px] leading-[24px] text-subheading">
           Workspace ready. UI coming soon.
         </p>
-        <button
-          type="button"
-          onClick={onBack}
-          className="mt-md inline-flex h-9 items-center justify-center rounded-md border border-border bg-secondary px-md text-[13px] font-[520] leading-[18px] text-heading transition-colors duration-150 hover:bg-secondary-hover"
-        >
-          Back to machines
-        </button>
       </div>
-    </main>
+    </div>
   )
 }
 
