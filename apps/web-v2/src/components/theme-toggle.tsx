@@ -17,7 +17,7 @@ export function ThemeToggle() {
     >
       <HugeiconsIcon
         icon={isDark ? Sun01Icon : Moon02Icon}
-        size={isDark ? 20 : 18}
+        size={isDark ? 19 : 18}
         strokeWidth={1.75}
       />
     </button>
