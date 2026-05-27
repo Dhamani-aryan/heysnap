@@ -27,8 +27,9 @@ export function login(input: { email: string; password: string }) {
   })
 }
 
-export function me(signal?: AbortSignal) {
-  return apiRequest<CloudUser>('/auth/me', { signal })
+export async function me(signal?: AbortSignal): Promise<CloudUser> {
+  const response = await apiRequest<{ user: CloudUser }>('/auth/me', { signal })
+  return response.user
 }
 
 export function logout() {

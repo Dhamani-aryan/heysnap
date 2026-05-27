@@ -1,7 +1,16 @@
-import { QueryClient } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query'
 import { ApiError } from './api-client.ts'
+import { useAuthStore } from '../stores/auth/auth-store.ts'
+
+function handleAuthFailure(error: unknown) {
+  if (error instanceof ApiError && error.isAuthFailure) {
+    useAuthStore.getState().clear()
+  }
+}
 
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: handleAuthFailure }),
+  mutationCache: new MutationCache({ onError: handleAuthFailure }),
   defaultOptions: {
     queries: {
       staleTime: 30_000,

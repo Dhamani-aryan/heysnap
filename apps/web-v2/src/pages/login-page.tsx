@@ -1,7 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { AnimatePresence, motion, type Transition } from 'motion/react'
-import { useLoginMutation } from '../hooks/auth/use-auth-mutations.ts'
+import {
+  applyAuthSession,
+  useLoginMutation,
+} from '../hooks/auth/use-auth-mutations.ts'
+import type { AuthResponse } from '../lib/auth/auth-api.ts'
 import { ApiError } from '../lib/api-client.ts'
 import { ThemeToggle } from '../components/theme-toggle.tsx'
 
@@ -37,6 +41,7 @@ export function LoginPage() {
   const [isInvalidFeedbackVisible, setIsInvalidFeedbackVisible] =
     useState(false)
   const [successPhase, setSuccessPhase] = useState<SuccessPhase>('idle')
+  const pendingAuthRef = useRef<AuthResponse | null>(null)
 
   const isSuccessAnimating = successPhase !== 'idle'
   const isExpanded = isSuccessAnimating
@@ -99,10 +104,12 @@ export function LoginPage() {
       () => setSuccessPhase('exiting'),
       EXIT_PHASE_DELAY_MS,
     )
-    const completeTimeout = window.setTimeout(
-      () => navigate({ to: search.redirect ?? '/machines' }),
-      EXIT_PHASE_DELAY_MS + EXIT_DURATION_MS,
-    )
+    const completeTimeout = window.setTimeout(() => {
+      const pending = pendingAuthRef.current
+      pendingAuthRef.current = null
+      if (pending) applyAuthSession(pending)
+      navigate({ to: search.redirect ?? '/machines' })
+    }, EXIT_PHASE_DELAY_MS + EXIT_DURATION_MS)
 
     return () => {
       window.clearTimeout(taglineTimeout)
@@ -115,7 +122,8 @@ export function LoginPage() {
     event.preventDefault()
     if (isSuccessAnimating) return
     try {
-      await loginMutation.mutateAsync({ email, password })
+      const data = await loginMutation.mutateAsync({ email, password })
+      pendingAuthRef.current = data
       setIsInvalidFeedbackVisible(false)
       setSuccessPhase('welcome')
     } catch {
