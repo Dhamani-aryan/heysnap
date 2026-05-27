@@ -1,4 +1,10 @@
-import type { ReactNode } from 'react'
+import {
+  useCallback,
+  useRef,
+  useState,
+  type Ref,
+  type ReactNode,
+} from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   LayoutAlignRightIcon,
@@ -9,6 +15,10 @@ import { ThemeToggle } from '../../theme-toggle.tsx'
 import { useWorkspaceLayout } from './use-workspace-layout.ts'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
 import { WorkspaceTabsStrip } from './workspace-tabs.tsx'
+import { ThreadHistoryPopover } from '../../agent/thread-history-popover.tsx'
+import { useAgentChatStore } from '../../../stores/agent/agent-chat-store.ts'
+import { useAgentThreadRoute } from '../../../hooks/agent/use-agent-thread-route.ts'
+import type { AgentThreadSummary } from '../../../lib/agent/types.ts'
 
 export function WorkspaceToolbar() {
   const { isRightSidebarOpen, toggleRightSidebar } = useWorkspaceLayout()
@@ -18,6 +28,29 @@ export function WorkspaceToolbar() {
   const canGoForward = useFilesystemStore(
     (s) => s.historyIndex < s.history.length - 1,
   )
+  const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
+  const { navigateToThread, navigateToNewThread } = useAgentThreadRoute()
+
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+
+  const closeHistory = useCallback(() => setIsHistoryOpen(false), [])
+  const toggleHistory = useCallback(
+    () => setIsHistoryOpen((current) => !current),
+    [],
+  )
+  const handleSelectThread = useCallback(
+    (thread: AgentThreadSummary) => {
+      navigateToThread(thread.id)
+      setIsHistoryOpen(false)
+    },
+    [navigateToThread],
+  )
+  const handleNewThread = useCallback(() => {
+    navigateToNewThread()
+  }, [navigateToNewThread])
+
   const sidebarLabel = isRightSidebarOpen
     ? 'Close right sidebar'
     : 'Open right sidebar'
@@ -32,8 +65,29 @@ export function WorkspaceToolbar() {
       />
       <WorkspaceTabsStrip />
       <ThemeToggle compact />
-      <ToolbarIconButton icon={WorkHistoryIcon} label="History" />
-      <ToolbarIconButton icon={PlusSignIcon} label="New" />
+      <div className="relative">
+        <ToolbarIconButton
+          ref={historyButtonRef}
+          icon={WorkHistoryIcon}
+          label="History"
+          onClick={toggleHistory}
+          pressed={isHistoryOpen}
+        />
+        {isHistoryOpen && agentBaseUrl !== null ? (
+          <ThreadHistoryPopover
+            agentBaseUrl={agentBaseUrl}
+            selectedThreadId={selectedThreadId}
+            onClose={closeHistory}
+            onSelectThread={handleSelectThread}
+            anchorRef={historyButtonRef}
+          />
+        ) : null}
+      </div>
+      <ToolbarIconButton
+        icon={PlusSignIcon}
+        label="New"
+        onClick={handleNewThread}
+      />
       <ToolbarIconButton
         icon={LayoutAlignRightIcon}
         label={sidebarLabel}
@@ -135,6 +189,7 @@ type ToolbarIconButtonProps = {
   label: string
   onClick?: () => void
   pressed?: boolean
+  ref?: Ref<HTMLButtonElement>
 }
 
 function ToolbarIconButton({
@@ -142,15 +197,17 @@ function ToolbarIconButton({
   label,
   onClick,
   pressed,
+  ref,
 }: ToolbarIconButtonProps) {
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       aria-label={label}
       aria-pressed={pressed}
       title={label}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-subheading transition-[transform,background-color,color] duration-150 ease-out hover:bg-sidebar-hover hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ghost active:scale-[0.97]"
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-subheading transition-[transform,background-color,color] duration-150 ease-out hover:bg-sidebar-hover hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ghost active:scale-[0.97] aria-pressed:bg-sidebar-active aria-pressed:text-heading"
     >
       <HugeiconsIcon icon={icon} size={18} strokeWidth={1.75} />
     </button>

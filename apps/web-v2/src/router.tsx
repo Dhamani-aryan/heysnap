@@ -72,7 +72,7 @@ const machinesCreateRoute = createRoute({
   component: MachinesCreatePage,
 })
 
-const machineWorkspaceRoute = createRoute({
+const machineWorkspaceLayoutRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/machines/$computerId',
   beforeLoad: ({ context, location }) => requireAuth(context, location),
@@ -80,6 +80,18 @@ const machineWorkspaceRoute = createRoute({
     await context.queryClient.ensureQueryData(machinesQueryOptions)
   },
   component: MachineWorkspacePage,
+})
+
+const machineWorkspaceIndexRoute = createRoute({
+  getParentRoute: () => machineWorkspaceLayoutRoute,
+  path: '/',
+  component: () => null,
+})
+
+const machineWorkspaceThreadRoute = createRoute({
+  getParentRoute: () => machineWorkspaceLayoutRoute,
+  path: '$threadId',
+  component: () => null,
 })
 
 const loginRoute = createRoute({
@@ -100,7 +112,10 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   machinesRoute,
   machinesCreateRoute,
-  machineWorkspaceRoute,
+  machineWorkspaceLayoutRoute.addChildren([
+    machineWorkspaceIndexRoute,
+    machineWorkspaceThreadRoute,
+  ]),
   loginRoute,
 ])
 
