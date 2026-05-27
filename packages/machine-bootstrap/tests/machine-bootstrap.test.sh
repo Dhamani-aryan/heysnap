@@ -36,6 +36,7 @@ ARCHIVE_NO_MIGRATIONS="$TEMP_DIR/machine-server-1.1.0.tar.gz"
 ARCHIVE_FAILING="$TEMP_DIR/machine-server-2.0.0.tar.gz"
 CAPTURED_HEARTBEAT="$TEMP_DIR/heartbeat-payload.json"
 MIGRATION_LOG="$MACHINE_ROOT/migration-order.log"
+HEALTH_ATTEMPTS="$TEMP_DIR/health-attempts"
 mkdir -p "$FAKE_BIN" "$MACHINE_ROOT" "$RELEASE_SOURCE/dist/capabilities" "$RELEASE_SOURCE/migrations"
 printf 'console.log("machine server")\n' >"$RELEASE_SOURCE/dist/index.js"
 printf 'console.log("helper")\n' >"$RELEASE_SOURCE/dist/capabilities/helper.js"
@@ -129,6 +130,15 @@ JSON
 JSON
     ;;
   "http://127.0.0.1:4000/health")
+    attempts=0
+    if [ -f "$HEALTH_ATTEMPTS" ]; then
+      attempts="\$(cat "$HEALTH_ATTEMPTS")"
+    fi
+    attempts=\$((attempts + 1))
+    printf '%s\n' "\$attempts" >"$HEALTH_ATTEMPTS"
+    if [ -n "\${FAKE_HEALTH_FAILURES:-}" ] && [ "\$attempts" -le "\$FAKE_HEALTH_FAILURES" ]; then
+      exit 7
+    fi
     cat <<'JSON'
 {"ok":true}
 JSON
@@ -157,6 +167,12 @@ cat >"$FAKE_BIN/systemctl" <<'SCRIPT'
 exit 0
 SCRIPT
 chmod +x "$FAKE_BIN/systemctl"
+
+cat >"$FAKE_BIN/sleep" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+chmod +x "$FAKE_BIN/sleep"
 
 ENV_FILE="$MACHINE_ROOT/machine.env"
 mkdir -p "$MACHINE_ROOT" "$TEMP_DIR/sudoers"
@@ -218,10 +234,12 @@ sed -i.bak '/^MACHINE_SERVER_VERSION=/d' "$ENV_FILE"
 test "$(cat "$MIGRATION_LOG")" = "$before_migration_log"
 grep -q '^MACHINE_SERVER_VERSION=1.0.0$' "$ENV_FILE"
 
-"$ROOT_DIR/scripts/ank1015-machine-release" update
+rm -f "$HEALTH_ATTEMPTS"
+FAKE_HEALTH_FAILURES=2 "$ROOT_DIR/scripts/ank1015-machine-release" update
 grep -q '^MACHINE_SERVER_VERSION=1.1.0$' "$ENV_FILE"
 test "$(readlink -f "$MACHINE_ROOT/machine-server/current")" = "$(readlink -f "$MACHINE_ROOT/machine-server/releases/1.1.0")"
 test ! -d "$MACHINE_ROOT/machine-migrations/applied/1.1.0"
+test "$(cat "$HEALTH_ATTEMPTS")" = "3"
 
 if "$ROOT_DIR/scripts/ank1015-machine-release" update; then
   echo "Expected failing migration to block release" >&2
