@@ -1,5 +1,6 @@
 import { useCallback, type PointerEvent as ReactPointerEvent } from 'react'
 import { useWorkspaceLayout } from './use-workspace-layout.ts'
+import { AgentPanel } from '../../agent/agent-panel.tsx'
 
 type Props = {
   insetPx: number
@@ -73,7 +74,9 @@ export function WorkspaceRightSidebar({
           />
         </div>
       ) : null}
-      {/* sidebar content lands here */}
+      <div className="pointer-events-auto flex flex-1 flex-col overflow-hidden">
+        <AgentPanel />
+      </div>
     </aside>
   )
 }

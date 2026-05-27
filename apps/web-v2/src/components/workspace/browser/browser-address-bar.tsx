@@ -32,11 +32,14 @@ export function BrowserAddressBar() {
   const [isFocused, setIsFocused] = useState(false)
 
   useEffect(() => {
-    if (isNewTab) {
-      setValue('')
-      return
+    if (!isNewTab && isFocused) return
+    const nextValue = isNewTab ? '' : (activeTabUrl ?? '')
+    const frame = window.requestAnimationFrame(() => {
+      setValue(nextValue)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
     }
-    if (!isFocused) setValue(activeTabUrl ?? '')
   }, [activeTabUrl, isNewTab, isFocused])
 
   useEffect(() => {

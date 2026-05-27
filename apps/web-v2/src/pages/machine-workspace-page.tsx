@@ -20,6 +20,8 @@ import {
 import { env } from '../lib/env.ts'
 import { useFilesystemConnection } from '../hooks/filesystem/use-filesystem-connection.ts'
 import { useBrowserConnection } from '../hooks/browser/use-browser-connection.ts'
+import { useAgentConnection } from '../hooks/agent/use-agent-connection.ts'
+import { useAgentThreadRoute } from '../hooks/agent/use-agent-thread-route.ts'
 import { WorkspaceSurfaceStack } from '../components/workspace/layout/workspace-surface-stack.tsx'
 
 function isConnectable(status: CloudComputerStatus): boolean {
@@ -127,8 +129,16 @@ function WorkspaceContent({
       })
     : undefined
 
+  const agentBaseUrl = buildGatewayHttpUrl({
+    baseUrl: env.cloudServerUrl,
+    path: accessSession.routes.agentBaseUrl,
+    token: accessSession.accessSession.token,
+  })
+
   useFilesystemConnection({ wsUrl, previewBaseUrl })
   useBrowserConnection({ controlWebSocketUrl })
+  useAgentConnection({ agentBaseUrl })
+  useAgentThreadRoute()
 
   return <WorkspaceSurfaceStack />
 }

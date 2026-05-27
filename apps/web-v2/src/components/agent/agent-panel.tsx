@@ -1,0 +1,76 @@
+import { useCallback } from 'react'
+import { useAgentEditMessage } from '../../hooks/agent/use-agent-edit-message.ts'
+import { useAgentThread } from '../../hooks/agent/use-agent-thread.ts'
+import { useAgentThreadRoute } from '../../hooks/agent/use-agent-thread-route.ts'
+import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
+import { useFilesystemStore } from '../../stores/filesystem/filesystem-store.ts'
+import { AgentPromptInputContainer } from './agent-prompt-input-container.tsx'
+import { AgentTimeline } from './agent-timeline.tsx'
+
+export function AgentPanel() {
+  const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
+  const hasMessages = useAgentChatStore((s) => s.messageOrder.length > 0)
+  const activeRun = useAgentChatStore((s) => s.activeRun)
+  const loadStatus = useAgentChatStore((s) => s.loadStatus)
+  const loadError = useAgentChatStore((s) => s.loadError)
+  const currentPath = useFilesystemStore((s) => s.currentPath)
+  const { navigateToThread } = useAgentThreadRoute()
+
+  const handleThreadResolved = useCallback(
+    (threadId: string) => {
+      if (selectedThreadId !== threadId) {
+        navigateToThread(threadId, { replace: true })
+      }
+    },
+    [navigateToThread, selectedThreadId],
+  )
+
+  useAgentThread(selectedThreadId, {
+    agentBaseUrl: agentBaseUrl ?? '',
+    onThreadResolved: handleThreadResolved,
+  })
+
+  const editMessage = useAgentEditMessage({
+    agentBaseUrl: agentBaseUrl ?? '',
+    currentPath,
+    selectedThreadId,
+    onThreadResolved: handleThreadResolved,
+  })
+
+  const isRunning = activeRun !== null
+
+  if (selectedThreadId === null && !hasMessages && !isRunning) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="pointer-events-auto flex flex-1 items-center justify-center px-[20px]">
+          <p className="m-0 text-center text-[20px] font-medium leading-[1.35] tracking-[-0.01em] text-heading">
+            Let's get some shit done today
+          </p>
+        </div>
+        <div className="pointer-events-auto px-[10px] pb-[10px] pt-[8px]">
+          <AgentPromptInputContainer onThreadResolved={handleThreadResolved} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="right-prompt-surface">
+      <div className="agent-thread-scroll">
+        {loadError !== null ? (
+          <div className="agent-panel-state error">{loadError}</div>
+        ) : null}
+        {loadStatus !== 'loading' && loadError === null ? (
+          <AgentTimeline
+            currentPath={currentPath}
+            onSubmitUserMessageEdit={editMessage.submit}
+          />
+        ) : null}
+      </div>
+      <div className="pointer-events-auto px-[10px] pb-[10px] pt-[8px]">
+        <AgentPromptInputContainer onThreadResolved={handleThreadResolved} />
+      </div>
+    </div>
+  )
+}
