@@ -258,6 +258,23 @@ restart_machine_server() {
   esac
 }
 
+wait_for_machine_health() {
+  local timeout_seconds elapsed
+  timeout_seconds="${ANK1015_MACHINE_HEALTH_TIMEOUT_SECONDS:-30}"
+  elapsed=0
+
+  while [ "$elapsed" -lt "$timeout_seconds" ]; do
+    if curl -fsS "$(ank1015_machine_health_url)" >/dev/null; then
+      return 0
+    fi
+
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  return 1
+}
+
 install_update_if_idle() {
   local update_available next_version next_url next_sha256 status_json previous_target
   ank1015_machine_set_update_state "checking"
@@ -302,8 +319,7 @@ install_update_if_idle() {
     return 1
   fi
 
-  sleep 2
-  if ! curl -fsS "$(ank1015_machine_health_url)" >/dev/null; then
+  if ! wait_for_machine_health; then
     ank1015_machine_set_update_state "failed" "Machine-server health check failed after installing $next_version"
     rollback_release "$previous_target"
     return 1
