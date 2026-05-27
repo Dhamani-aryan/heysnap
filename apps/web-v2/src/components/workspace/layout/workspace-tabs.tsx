@@ -1,12 +1,14 @@
 import { HugeiconsIcon } from '@hugeicons/react'
-import { File02Icon } from '@hugeicons/core-free-icons'
+import { File02Icon, InternetIcon } from '@hugeicons/core-free-icons'
+import { useEffect } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
+import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 
 const LONG_NAME_THRESHOLD = 24
 
-export function FilesystemTabsStrip() {
+export function WorkspaceTabsStrip() {
   const directoryName = useFilesystemStore((s) => s.listing?.name ?? '')
   const activeSurface = useFilesystemStore((s) => s.activeLeftPaneSurface)
   const openFileTabs = useFilesystemStore((s) => s.openFileTabs)
@@ -14,6 +16,31 @@ export function FilesystemTabsStrip() {
   const selectFileTab = useFilesystemStore((s) => s.selectFileTab)
   const closeFileTab = useFilesystemStore((s) => s.closeFileTab)
   const showDirectory = useFilesystemStore((s) => s.showDirectory)
+  const showBrowser = useFilesystemStore((s) => s.showBrowser)
+  const extensionStatus = useBrowserStore((s) => s.extensionStatus)
+  const windowId = useBrowserStore((s) => s.windowId)
+  const isOpeningWindow = useBrowserStore((s) => s.isOpeningWindow)
+  const ensureBrowserWindow = useBrowserStore((s) => s.ensureBrowserWindow)
+  const closeBrowserWindow = useBrowserStore((s) => s.closeBrowserWindow)
+  const windowError = useBrowserStore((s) => s.windowError)
+
+  const handleOpenBrowser = (): void => {
+    showBrowser()
+    if (windowId === null && !isOpeningWindow) {
+      void ensureBrowserWindow()
+    }
+  }
+
+  useEffect(() => {
+    if (
+      activeSurface === 'browser' &&
+      windowId === null &&
+      !isOpeningWindow &&
+      windowError === null
+    ) {
+      showDirectory()
+    }
+  }, [activeSurface, windowId, isOpeningWindow, windowError, showDirectory])
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-[8px] overflow-hidden">
@@ -22,6 +49,24 @@ export function FilesystemTabsStrip() {
         isActive={activeSurface === 'directory'}
         onSelect={showDirectory}
       />
+      {extensionStatus === 'available' ? (
+        windowId === null ? (
+          <BrowserCollapsedTab
+            isActive={activeSurface === 'browser'}
+            isOpening={isOpeningWindow}
+            onSelect={handleOpenBrowser}
+          />
+        ) : (
+          <BrowserExpandedTab
+            isActive={activeSurface === 'browser'}
+            onSelect={handleOpenBrowser}
+            onClose={() => {
+              showDirectory()
+              void closeBrowserWindow()
+            }}
+          />
+        )
+      ) : null}
       <div
         role="tablist"
         aria-label="Open files"
@@ -66,6 +111,94 @@ function DirectoryTab({
     >
       <span className="min-w-0 overflow-hidden text-ellipsis">{title}</span>
     </button>
+  )
+}
+
+function BrowserCollapsedTab({
+  isActive,
+  isOpening,
+  onSelect,
+}: {
+  isActive: boolean
+  isOpening: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      title={isOpening ? 'Opening browser…' : 'Open browser'}
+      aria-label="Open browser"
+      aria-pressed={isActive}
+      onClick={onSelect}
+      className={`group inline-flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors duration-[120ms] ${
+        isActive
+          ? 'bg-black/[0.06] text-black/[0.82] dark:bg-white/[0.10] dark:text-white/[0.86]'
+          : 'text-black/[0.55] hover:bg-black/[0.045] hover:text-black/[0.82] dark:text-white/[0.55] dark:hover:bg-white/[0.08] dark:hover:text-white/[0.86]'
+      } ${isOpening ? 'animate-pulse' : ''}`}
+    >
+      <HugeiconsIcon
+        icon={InternetIcon}
+        size={14}
+        color="currentColor"
+        strokeWidth={1.8}
+      />
+    </button>
+  )
+}
+
+function BrowserExpandedTab({
+  isActive,
+  onSelect,
+  onClose,
+}: {
+  isActive: boolean
+  onSelect: () => void
+  onClose: () => void
+}) {
+  return (
+    <div
+      role="tab"
+      aria-selected={isActive}
+      className={`group relative flex h-[32px] min-w-[64px] max-w-[160px] flex-shrink-0 items-center gap-[8px] overflow-hidden rounded-[8px] pl-[10px] pr-[12px] transition-colors duration-[120ms] ${
+        isActive
+          ? 'bg-black/[0.045] text-black/[0.82] dark:bg-white/[0.08] dark:text-white/[0.86]'
+          : 'text-black/[0.58] hover:bg-black/[0.045] hover:text-black/[0.82] dark:text-white/[0.58] dark:hover:bg-white/[0.08] dark:hover:text-white/[0.86]'
+      }`}
+    >
+      <span className="relative inline-flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center">
+        <span className="pointer-events-none inline-flex items-center justify-center opacity-[0.86] transition-opacity duration-[120ms] group-hover:opacity-0">
+          <HugeiconsIcon
+            icon={InternetIcon}
+            size={14}
+            color="currentColor"
+            strokeWidth={1.8}
+          />
+        </span>
+        <button
+          type="button"
+          aria-label="Close browser"
+          title="Close browser"
+          onClick={(event: ReactMouseEvent) => {
+            event.stopPropagation()
+            onClose()
+          }}
+          className="pointer-events-none absolute inset-[1px] inline-flex h-[16px] w-[16px] items-center justify-center rounded-full bg-black/[0.22] text-white opacity-0 transition-[background-color,opacity,color] duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 hover:!bg-black/[0.32] dark:bg-white/[0.48] dark:text-[#111] dark:hover:!bg-white/[0.62]"
+        >
+          <CloseGlyph />
+        </button>
+      </span>
+      <button
+        type="button"
+        title="Browser"
+        onClick={onSelect}
+        tabIndex={isActive ? 0 : -1}
+        className="flex min-w-0 flex-shrink basis-auto items-center self-stretch p-0 text-left text-inherit"
+      >
+        <span className="block min-w-0 overflow-hidden whitespace-nowrap text-[12px] font-medium leading-[16px]">
+          Browser
+        </span>
+      </button>
+    </div>
   )
 }
 

@@ -9,7 +9,7 @@ import type {
 
 const HISTORY_LIMIT = 64
 
-export type LeftPaneSurface = 'directory' | 'file'
+export type LeftPaneSurface = 'directory' | 'file' | 'browser'
 
 let activeManager: FilesystemConnectionManager | null = null
 
@@ -48,6 +48,7 @@ type FilesystemActions = {
   closeFileTab: (path: string) => void
   selectFileTab: (path: string) => void
   showDirectory: () => void
+  showBrowser: () => void
   reset: () => void
 }
 
@@ -251,6 +252,10 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
 
     showDirectory: () => {
       set({ activeLeftPaneSurface: 'directory' })
+    },
+
+    showBrowser: () => {
+      set({ activeLeftPaneSurface: 'browser' })
     },
 
     reset: () => {

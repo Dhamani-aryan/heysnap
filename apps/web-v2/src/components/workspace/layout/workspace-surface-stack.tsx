@@ -1,12 +1,13 @@
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import {
   getActiveFilesystemManager,
   useFilesystemStore,
 } from '../../../stores/filesystem/filesystem-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
-import { FilesystemPane } from './filesystem-pane.tsx'
+import { FilesystemPane } from '../filesystem/filesystem-pane.tsx'
+import { BrowserSurface } from '../browser/browser-surface.tsx'
 
-export function FilesystemSurfaceStack() {
+export function WorkspaceSurfaceStack() {
   const openFileTabs = useFilesystemStore((s) => s.openFileTabs)
   const activeFilePath = useFilesystemStore((s) => s.activeFilePath)
   const activeSurface = useFilesystemStore((s) => s.activeLeftPaneSurface)
@@ -24,6 +25,9 @@ export function FilesystemSurfaceStack() {
           <FileSurface entry={tab} />
         </Surface>
       ))}
+      <Surface isActive={activeSurface === 'browser'}>
+        <BrowserSurface />
+      </Surface>
     </div>
   )
 }
@@ -33,7 +37,7 @@ function Surface({
   children,
 }: {
   isActive: boolean
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <div
