@@ -1,11 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import {
   accessSessionQueryOptions,
   machinesQueryOptions,
 } from '../lib/machines/machines-query.ts'
-import { useStartComputerMutation } from '../lib/machines/machines-mutations.ts'
+import {
+  useStartComputerMutation,
+  useStopComputerMutation,
+} from '../lib/machines/machines-mutations.ts'
 import type {
   CloudComputer,
   CloudComputerStatus,
@@ -46,7 +49,9 @@ export function MachineWorkspacePage() {
   const computer = machines.find((m): m is CloudComputer => m.id === computerId)
 
   const startMutation = useStartComputerMutation()
+  const stopMutation = useStopComputerMutation()
   const didAutoStartRef = useRef(false)
+  const [isShuttingDown, setIsShuttingDown] = useState(false)
 
   useEffect(() => {
     if (!computer) return
@@ -76,6 +81,22 @@ export function MachineWorkspacePage() {
     }
   }, [shouldRedirect, navigate])
 
+  const goBackToMachines = useCallback((): void => {
+    void navigate({ to: '/machines' })
+  }, [navigate])
+
+  const shutDownMachine = useCallback(async (): Promise<void> => {
+    if (stopMutation.isPending || isShuttingDown) return
+    setIsShuttingDown(true)
+    try {
+      await stopMutation.mutateAsync(computerId)
+      await navigate({ to: '/machines' })
+    } catch (error) {
+      console.error('Failed to shut down machine:', error)
+      setIsShuttingDown(false)
+    }
+  }, [computerId, isShuttingDown, navigate, stopMutation])
+
   if (!computer) {
     return <MachineStartingLoader label="Loading" />
   }
@@ -88,6 +109,10 @@ export function MachineWorkspacePage() {
     return <MachineStartingLoader label="Loading" />
   }
 
+  if (isShuttingDown) {
+    return <MachineStartingLoader label="Shutting down" />
+  }
+
   if (computer.status === 'sleeping' || isPendingStartup(computer.status)) {
     return <MachineStartingLoader />
   }
@@ -98,16 +123,28 @@ export function MachineWorkspacePage() {
 
   return (
     <WorkspaceLayout>
-      <WorkspaceContent computer={computer} accessSession={accessQuery.data} />
+      <WorkspaceContent
+        computer={computer}
+        accessSession={accessQuery.data}
+        isShuttingDown={isShuttingDown}
+        onBackToMachines={goBackToMachines}
+        onShutDownMachine={shutDownMachine}
+      />
     </WorkspaceLayout>
   )
 }
 
 function WorkspaceContent({
   accessSession,
+  isShuttingDown,
+  onBackToMachines,
+  onShutDownMachine,
 }: {
   computer: CloudComputer
   accessSession: AccessSessionResponse
+  isShuttingDown: boolean
+  onBackToMachines: () => void
+  onShutDownMachine: () => Promise<void>
 }) {
   const wsUrl = buildGatewayWebsocketUrl({
     baseUrl: env.cloudServerUrl,
@@ -140,6 +177,11 @@ function WorkspaceContent({
   useAgentConnection({ agentBaseUrl })
   useAgentThreadRoute()
 
-  return <WorkspaceSurfaceStack />
+  return (
+    <WorkspaceSurfaceStack
+      isShuttingDown={isShuttingDown}
+      onBackToMachines={onBackToMachines}
+      onShutDownMachine={onShutDownMachine}
+    />
+  )
 }
-
