@@ -14,6 +14,7 @@ import { useResolvedTheme } from '../../../hooks/use-resolved-theme.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 import { FilesystemPane } from '../filesystem/filesystem-pane.tsx'
 import { BrowserSurface } from '../browser/browser-surface.tsx'
+import { useIframeVoiceHotkeyBridge } from '../../../hooks/voice/use-iframe-voice-hotkey-bridge.ts'
 
 export function WorkspaceSurfaceStack({
   isShuttingDown,
@@ -83,7 +84,10 @@ const FileSurface = memo(function FileSurface({
 }) {
   const manager = getActiveFilesystemManager()
   const resolvedTheme = useResolvedTheme()
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const src = manager?.getPreviewUrl(entry.path, resolvedTheme) ?? null
+
+  useIframeVoiceHotkeyBridge(iframeRef, src)
 
   if (src === null) {
     return (
@@ -104,6 +108,7 @@ const FileSurface = memo(function FileSurface({
       className="flex h-full w-full bg-[#e9eaed] dark:bg-[#1a1a1d]"
     >
       <iframe
+        ref={iframeRef}
         src={src}
         title={entry.name}
         className="block h-full w-full border-0"

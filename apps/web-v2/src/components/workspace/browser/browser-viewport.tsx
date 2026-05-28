@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type MutableRefObject,
+} from 'react'
 import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
 import { getActiveBrowserExtensionBridge } from '../../../stores/browser/browser-store.ts'
 import {
@@ -13,6 +20,12 @@ import {
   wheelBrowserViewport,
 } from '../../../lib/browser/browser-actions.ts'
 import type { BrowserViewportWheelInput } from '../../../lib/browser/browser-input-types.ts'
+import {
+  dispatchVoiceHotkeyEvent,
+  isVoiceHotkey,
+  isVoiceHotkeyCharacterKey,
+  isVoiceHotkeyReleaseKey,
+} from '../../../lib/voice/voice-hotkey.ts'
 
 export function BrowserViewport({
   onNaturalAspectRatio,
@@ -25,6 +38,7 @@ export function BrowserViewport({
   const screenRef = useRef<HTMLDivElement | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
   const pendingScrollRef = useRef<BrowserViewportWheelInput | null>(null)
+  const isVoiceHotkeyActiveRef = useRef(false)
   const [isKeyboardActive, setIsKeyboardActive] = useState(false)
 
   const frameUrl =
@@ -137,6 +151,7 @@ export function BrowserViewport({
     if (!isKeyboardActive || !canSendInput || activeTabId === null) return
 
     const handleKey = (event: KeyboardEvent): void => {
+      if (shouldReserveVoiceHotkey(event, isVoiceHotkeyActiveRef)) return
       if (isEditableTarget(event.target) || event.isComposing) return
       const input = toBrowserViewportKeyboardInput(activeTabId, event)
       if (input === null) return
@@ -158,6 +173,7 @@ export function BrowserViewport({
     return () => {
       window.removeEventListener('keydown', handleKey, true)
       window.removeEventListener('keyup', handleKey, true)
+      isVoiceHotkeyActiveRef.current = false
     }
   }, [activeTabId, canSendInput, isKeyboardActive])
 
@@ -234,5 +250,23 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (target instanceof HTMLTextAreaElement) return true
   if (target instanceof HTMLSelectElement) return true
   if (target instanceof HTMLElement && target.isContentEditable) return true
+  return false
+}
+
+function shouldReserveVoiceHotkey(
+  event: KeyboardEvent,
+  isActiveRef: MutableRefObject<boolean>,
+): boolean {
+  if (event.type === 'keydown' && isVoiceHotkey(event)) {
+    isActiveRef.current = true
+    return true
+  }
+  if (!isActiveRef.current || event.type !== 'keyup') return false
+  if (!isVoiceHotkeyReleaseKey(event)) return false
+  if (isVoiceHotkeyCharacterKey(event)) {
+    isActiveRef.current = false
+    return true
+  }
+  dispatchVoiceHotkeyEvent(window, 'keyup', event)
   return false
 }
