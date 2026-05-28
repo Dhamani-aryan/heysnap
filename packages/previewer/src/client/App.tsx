@@ -33,14 +33,12 @@ const emptyPreviewBuffer: PreviewBufferState = {
 type PreviewQuery = {
   readonly path: string | null;
   readonly root: string | null;
-  readonly showChrome: boolean;
   readonly theme: PreviewTheme;
 };
 
 export function App(): React.ReactElement {
   const query = usePreviewQuery();
   const [buffer, dispatchBuffer] = useReducer(previewBufferReducer, emptyPreviewBuffer);
-  const [status, setStatus] = useState<"idle" | "connecting" | "open" | "closed">("idle");
 
   useEffect(() => {
     const cleanup = installFilesystemVoiceHotkeyRelay(window);
@@ -50,14 +48,12 @@ export function App(): React.ReactElement {
   useEffect(() => {
     if (query.path === null || query.path.length === 0) {
       dispatchBuffer({ type: "reset" });
-      setStatus("idle");
       return;
     }
 
     const socket = new WebSocket(buildPreviewWebSocketUrl());
     let cancelled = false;
 
-    setStatus("connecting");
     dispatchBuffer({ type: "reset" });
 
     socket.addEventListener("open", () => {
@@ -65,7 +61,6 @@ export function App(): React.ReactElement {
         return;
       }
 
-      setStatus("open");
       socket.send(JSON.stringify({
         type: "watch",
         path: query.path,
@@ -87,12 +82,6 @@ export function App(): React.ReactElement {
       }
     });
 
-    socket.addEventListener("close", () => {
-      if (!cancelled) {
-        setStatus("closed");
-      }
-    });
-
     socket.addEventListener("error", () => {
       if (!cancelled && socket.readyState === WebSocket.OPEN) {
         dispatchBuffer({ type: "error", message: "Preview websocket error." });
@@ -110,16 +99,7 @@ export function App(): React.ReactElement {
   }
 
   return (
-    <main
-      className={query.showChrome ? "preview-shell" : "preview-shell preview-shell-embedded"}
-      data-theme={query.theme}
-    >
-      {query.showChrome ? (
-        <header className="preview-header">
-          <span className="preview-status" data-state={status}>{status}</span>
-          <span className="preview-path" title={query.path}>{query.path}</span>
-        </header>
-      ) : null}
+    <main className="preview-shell" data-theme={query.theme}>
       {buffer.error !== null ? <PreviewError message={buffer.error} /> : null}
       <section className="preview-stage" aria-label="File preview">
         {buffer.visibleSlot !== null || buffer.pendingSlot !== null ? (
@@ -148,7 +128,6 @@ const usePreviewQuery = (): PreviewQuery =>
     return {
       path: params.get("path"),
       root: params.get("root"),
-      showChrome: params.get("chrome") !== "0",
       theme: params.get("theme") === "light" ? "light" : "dark",
     };
   }, []);
