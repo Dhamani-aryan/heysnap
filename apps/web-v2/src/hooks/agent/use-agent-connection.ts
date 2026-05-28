@@ -11,10 +11,13 @@ type Options = {
 }
 
 export function useAgentConnection({ agentBaseUrl }: Options): void {
+  const normalized = agentBaseUrl ?? null
+  if (useAgentChatStore.getState().agentBaseUrl !== normalized) {
+    setActiveAgentBaseUrl(normalized)
+  }
+
   useEffect(() => {
     if (!agentBaseUrl) return
-
-    setActiveAgentBaseUrl(agentBaseUrl)
 
     return () => {
       closeActiveAgentRun()

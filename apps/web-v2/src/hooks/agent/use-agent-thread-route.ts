@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
 
@@ -21,9 +21,9 @@ export function useAgentThreadRoute() {
   const computerId = params.computerId ?? null
   const threadId = useMemo(() => decodeRouteParam(params.threadId), [params.threadId])
 
-  useEffect(() => {
-    useAgentChatStore.getState().setSelectedThreadId(threadId)
-  }, [threadId])
+  if (useAgentChatStore.getState().selectedThreadId !== threadId) {
+    useAgentChatStore.setState({ selectedThreadId: threadId })
+  }
 
   const navigateToThread = useCallback(
     (nextThreadId: string, options: { replace?: boolean } = {}) => {
