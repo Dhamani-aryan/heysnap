@@ -5,7 +5,10 @@ import {
   Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { LegendList, type LegendListRef } from '@legendapp/list/react'
+import {
+  LegendList,
+  type LegendListRef,
+} from '@legendapp/list/react'
 import {
   Suspense,
   lazy,
@@ -51,15 +54,33 @@ export const AgentTimeline = memo(function AgentTimeline({
   onSubmitUserMessageEdit,
 }: AgentTimelineProps) {
   const listRef = useRef<LegendListRef | null>(null)
+  const selectedThreadId = useAgentChatStore((state) => state.selectedThreadId)
   const rows = useAgentChatStore((state) => state.timelineRows)
+  const didInitialScrollThreadRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (rows.length > 0) {
+    didInitialScrollThreadRef.current = null
+  }, [selectedThreadId])
+
+  useEffect(() => {
+    if (rows.length === 0 || didInitialScrollThreadRef.current === selectedThreadId) {
       return
     }
 
-    listRef.current?.scrollToEnd?.({ animated: false })
-  }, [rows.length])
+    didInitialScrollThreadRef.current = selectedThreadId
+    let timeoutId = 0
+    const animationFrameId = window.requestAnimationFrame(() => {
+      void listRef.current?.scrollToEnd?.({ animated: false })
+      timeoutId = window.setTimeout(() => {
+        void listRef.current?.scrollToEnd?.({ animated: false })
+      }, 80)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId)
+      window.clearTimeout(timeoutId)
+    }
+  }, [rows.length, selectedThreadId])
 
   if (rows.length === 0) {
     return <AgentPanelState label="No displayable messages in this thread." />
