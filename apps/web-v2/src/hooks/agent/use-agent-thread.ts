@@ -27,7 +27,7 @@ export function useAgentThread(
   threadId: string | null,
   { agentBaseUrl, onThreadResolved }: Options,
 ) {
-  const enabled = threadId !== null
+  const enabled = threadId !== null && agentBaseUrl.length > 0
 
   const query = useQuery({
     queryKey: agentQueryKeys.thread(agentBaseUrl, threadId),
