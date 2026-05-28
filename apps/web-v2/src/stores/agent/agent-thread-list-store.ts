@@ -32,10 +32,12 @@ export const useAgentThreadListStore = create<AgentThreadListState>((set) => ({
 
   replaceGroups: (groups) => {
     set({
-      groups: groups.map((group) => ({
-        path: group.path,
-        threads: [...group.threads],
-      })),
+      groups: sortGroupsByLatestThread(
+        groups.map((group) => ({
+          path: group.path,
+          threads: sortThreadsByUpdatedAt(group.threads),
+        })),
+      ),
       isLoading: false,
       hasLoaded: true,
       error: null,
@@ -84,7 +86,14 @@ export const useAgentThreadListStore = create<AgentThreadListState>((set) => ({
       }
 
       return {
-        groups,
+        groups: sortGroupsByLatestThread(
+          groups
+            .map((group) => ({
+              ...group,
+              threads: sortThreadsByUpdatedAt(group.threads),
+            }))
+            .filter((group) => group.threads.length > 0),
+        ),
         hasLoaded: true,
         error: null,
       }
@@ -135,4 +144,15 @@ function sortThreadsByUpdatedAt(
   threads: readonly AgentThreadSummary[],
 ): AgentThreadSummary[] {
   return [...threads].sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+function sortGroupsByLatestThread(
+  groups: readonly AgentThreadGroup[],
+): AgentThreadGroup[] {
+  return [...groups].sort((left, right) => {
+    const leftUpdatedAt = left.threads[0]?.updatedAt ?? Number.NEGATIVE_INFINITY
+    const rightUpdatedAt = right.threads[0]?.updatedAt ?? Number.NEGATIVE_INFINITY
+
+    return rightUpdatedAt - leftUpdatedAt || left.path.localeCompare(right.path)
+  })
 }
