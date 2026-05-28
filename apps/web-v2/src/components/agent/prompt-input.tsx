@@ -22,6 +22,12 @@ import {
   useAgentPromptDraftStore,
   type PromptAttachment,
 } from '../../stores/agent/agent-prompt-draft-store.ts'
+import {
+  PromptModelPicker,
+  type PromptModelPickerState,
+} from './prompt-model-picker.tsx'
+
+export type { PromptModelChoice } from '../../lib/agent/model-selection.ts'
 
 const PDF_MIME_TYPE = 'application/pdf'
 const DEFAULT_ATTACHMENT_MIME_TYPE = 'application/octet-stream'
@@ -32,13 +38,6 @@ export type PromptVoiceState =
   | 'starting'
   | 'recording'
   | 'transcribing'
-export type PromptModelChoice = 'gpt' | 'claude'
-
-export type PromptModelPickerState = {
-  readonly value: PromptModelChoice
-  readonly disabled?: boolean
-  readonly onChange: (value: PromptModelChoice) => void
-}
 
 export type PromptInputProps = {
   readonly threadId: string | null
@@ -443,31 +442,6 @@ export function PromptInput({
             </div>
           ) : null}
 
-          {modelPicker !== undefined ? (
-            <label
-              title={
-                modelPicker.disabled === true
-                  ? 'Model can only be changed before starting a new chat'
-                  : 'Choose model'
-              }
-              onClick={(event) => event.stopPropagation()}
-              className="inline-flex h-[28px] shrink-0 items-center"
-            >
-              <span className="sr-only">Model</span>
-              <select
-                value={modelPicker.value}
-                disabled={modelPicker.disabled === true}
-                aria-label="Model"
-                onChange={(event) =>
-                  modelPicker.onChange(event.target.value as PromptModelChoice)
-                }
-                className="h-[28px] min-w-[82px] cursor-pointer rounded-[6px] border-0 bg-black/[0.04] px-[8px] pr-[24px] text-[12px] font-semibold leading-[28px] text-black/65 outline-none transition-colors duration-[120ms] hover:enabled:bg-black/[0.07] hover:enabled:text-black/80 disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:[outline-color:rgba(0,0,0,0.12)] dark:bg-white/[0.07] dark:text-white/70 dark:hover:enabled:bg-white/10 dark:hover:enabled:text-white/85 dark:focus-visible:[outline-color:rgba(255,255,255,0.12)]"
-              >
-                <option value="gpt">GPT</option>
-                <option value="claude">Claude</option>
-              </select>
-            </label>
-          ) : null}
         </div>
 
         <div className="inline-flex shrink-0 items-center gap-[6px]">
@@ -529,6 +503,10 @@ export function PromptInput({
                 />
               )}
             </button>
+          ) : null}
+
+          {modelPicker !== undefined ? (
+            <PromptModelPicker {...modelPicker} />
           ) : null}
 
           <button
