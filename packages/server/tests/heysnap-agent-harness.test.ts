@@ -43,6 +43,30 @@ describe("HeysnapAgentHarness", () => {
     }]);
   });
 
+  it("orders combined groups by the newest thread in each group", async () => {
+    const codex = new RecordingHarness("codex", [
+      threadSummary({ id: "alpha-old", startPath: "Projects/alpha", updatedAt: 10 }),
+      threadSummary({ id: "alpha-new", startPath: "Projects/alpha", updatedAt: 30 }),
+    ]);
+    const pi = new RecordingHarness("pi", [
+      threadSummary({ id: "zed-newest", startPath: "Projects/zed", updatedAt: 40 }),
+      threadSummary({ id: "middle", startPath: "Projects/middle", updatedAt: 20 }),
+    ]);
+    const harness = new HeysnapAgentHarness({ codex, pi });
+
+    const result = await harness.retrieveThreads({ rootPath: "Projects", limit: 10 });
+
+    expect(result.groups.map((group) => group.path)).toEqual([
+      "Projects/zed",
+      "Projects/alpha",
+      "Projects/middle",
+    ]);
+    expect(result.groups[1]?.threads.map((thread) => thread.id)).toEqual([
+      "alpha-new",
+      "alpha-old",
+    ]);
+  });
+
   it("routes getThread by prefix and treats unprefixed ids as Codex", async () => {
     const codex = new RecordingHarness("codex", [threadSummary({ id: "codex-thread" })]);
     const pi = new RecordingHarness("pi", [threadSummary({ id: "pi/thread" })]);
@@ -285,12 +309,13 @@ async function* createEvents(
 
 const threadSummary = (input: {
   readonly id: string;
+  readonly startPath?: string;
   readonly updatedAt?: number;
 }): AgentThreadSummary => ({
   id: input.id,
   title: input.id,
-  startPath: "Projects/app",
-  lastPath: "Projects/app",
+  startPath: input.startPath ?? "Projects/app",
+  lastPath: input.startPath ?? "Projects/app",
   createdAt: input.updatedAt ?? 1,
   updatedAt: input.updatedAt ?? 1,
   messageCount: 1,

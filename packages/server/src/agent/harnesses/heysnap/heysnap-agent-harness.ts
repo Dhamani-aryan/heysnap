@@ -1,4 +1,5 @@
 import { AgentError } from "../../errors.js";
+import { compareThreadsByUpdatedAtDesc, groupThreadSummariesByStartPath } from "../../thread-groups.js";
 import type {
   AgentHarnessName,
   AgentRunEvent,
@@ -66,7 +67,7 @@ export class HeysnapAgentHarness implements IAgentHarness {
       ...flattenThreadGroups("codex", codexResult.groups),
       ...flattenThreadGroups("pi", piResult.groups),
     ]
-      .sort((left, right) => right.thread.updatedAt - left.thread.updatedAt)
+      .sort(compareThreadsByUpdatedAtDesc)
       .slice(0, input.limit);
 
     return { groups: groupRoutedThreads(entries) };
@@ -164,31 +165,15 @@ export class HeysnapAgentHarness implements IAgentHarness {
 const flattenThreadGroups = (
   harness: AgentHarnessName,
   groups: readonly AgentThreadGroup[],
-): Array<{ readonly path: string; readonly thread: AgentThreadSummary }> =>
+): AgentThreadSummary[] =>
   groups.flatMap((group) =>
-    group.threads.map((thread) => ({
-      path: group.path,
-      thread: rewriteThreadSummary(harness, thread),
-    }))
+    group.threads.map((thread) => rewriteThreadSummary(harness, thread))
   );
 
 const groupRoutedThreads = (
-  entries: readonly { readonly path: string; readonly thread: AgentThreadSummary }[],
+  entries: readonly AgentThreadSummary[],
 ): AgentThreadGroup[] => {
-  const groups = new Map<string, AgentThreadSummary[]>();
-
-  for (const entry of entries) {
-    const threads = groups.get(entry.path) ?? [];
-    threads.push(entry.thread);
-    groups.set(entry.path, threads);
-  }
-
-  return Array.from(groups.entries())
-    .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
-    .map(([path, threads]) => ({
-      path,
-      threads: threads.sort((left, right) => right.updatedAt - left.updatedAt),
-    }));
+  return groupThreadSummariesByStartPath(entries);
 };
 
 const parseRoutedThreadId = (threadId: string): RoutedThreadId => {

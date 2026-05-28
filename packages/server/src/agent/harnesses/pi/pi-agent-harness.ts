@@ -13,6 +13,7 @@ import {
 
 import { resolveClientPath } from "../../../filesystem/paths.js";
 import { AgentError } from "../../errors.js";
+import { compareThreadsByUpdatedAtDesc } from "../../thread-groups.js";
 import type {
   AgentContent,
   AgentMessage,
@@ -150,7 +151,7 @@ export class PiAgentHarness implements IAgentHarness {
     }
 
     const summaries = Array.from(summariesById.values())
-      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .sort(compareThreadsByUpdatedAtDesc)
       .slice(0, _input.limit);
 
     return { groups: groupPiThreads(summaries) };
