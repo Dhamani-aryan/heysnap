@@ -15,6 +15,9 @@ import type {
   AgentThreadSummary,
 } from '../../lib/agent/types.ts'
 
+const DEFAULT_EXPANDED_GROUP_COUNT = 2
+const DEFAULT_VISIBLE_THREAD_COUNT = 2
+
 type Props = {
   agentBaseUrl: string
   selectedThreadId: string | null
@@ -116,11 +119,12 @@ export function ThreadHistoryPopover({
           </p>
         ) : (
           <div className="flex flex-col gap-[2px]">
-            {filteredGroups.map((group) => (
+            {filteredGroups.map((group, index) => (
               <ThreadHistoryGroup
                 key={group.path}
                 group={group}
                 selectedThreadId={selectedThreadId}
+                defaultExpanded={index < DEFAULT_EXPANDED_GROUP_COUNT}
                 forceExpanded={query.trim().length > 0}
                 onSelectThread={onSelectThread}
               />
@@ -135,23 +139,32 @@ export function ThreadHistoryPopover({
 function ThreadHistoryGroup({
   group,
   selectedThreadId,
+  defaultExpanded,
   forceExpanded,
   onSelectThread,
 }: {
   group: AgentThreadGroup
   selectedThreadId: string | null
+  defaultExpanded: boolean
   forceExpanded: boolean
   onSelectThread: (thread: AgentThreadSummary) => void
 }) {
   const label = group.path.trim().length === 0 ? 'workspace' : group.path
   const hasSelected = group.threads.some((t) => t.id === selectedThreadId)
-  const [isExpanded, setIsExpanded] = useState(hasSelected)
-  const [prevHasSelected, setPrevHasSelected] = useState(hasSelected)
-  if (hasSelected !== prevHasSelected) {
-    setPrevHasSelected(hasSelected)
-    if (hasSelected) setIsExpanded(true)
-  }
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded || hasSelected)
+  const [isShowingAll, setIsShowingAll] = useState(false)
   const expanded = forceExpanded || isExpanded
+  const visibleThreads = isShowingAll
+    ? group.threads
+    : group.threads.slice(0, DEFAULT_VISIBLE_THREAD_COUNT)
+  const canToggleVisibleThreads =
+    group.threads.length > DEFAULT_VISIBLE_THREAD_COUNT
+
+  useEffect(() => {
+    if (hasSelected) {
+      setIsExpanded(true)
+    }
+  }, [hasSelected])
 
   return (
     <section className="grid gap-[2px]">
@@ -160,13 +173,13 @@ function ThreadHistoryGroup({
         aria-expanded={expanded}
         title={label}
         onClick={() => setIsExpanded((c) => !c)}
-        className="group flex h-[32px] w-full min-w-0 items-center gap-[8px] rounded-md px-[8px] text-left text-[13px] font-normal text-subheading transition-colors duration-150 hover:bg-sidebar-hover hover:text-heading aria-expanded:text-heading"
+        className="group flex h-[32px] w-full min-w-0 items-center gap-[8px] rounded-md px-[8px] text-left text-[13px] font-normal text-heading transition-colors duration-150 hover:bg-sidebar-hover"
       >
         <HugeiconsIcon
           icon={Folder01Icon}
           size={15}
           strokeWidth={1.8}
-          className="flex-shrink-0 text-subheading group-hover:text-heading"
+          className="flex-shrink-0 text-heading"
         />
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
           {getFolderLabel(label)}
@@ -175,7 +188,7 @@ function ThreadHistoryGroup({
           icon={ArrowRight01Icon}
           size={12}
           strokeWidth={1.8}
-          className={`ml-auto text-subheading transition-transform duration-200 ease-out ${expanded ? 'rotate-90' : ''}`}
+          className={`ml-auto text-heading transition-transform duration-200 ease-out ${expanded ? 'rotate-90' : ''}`}
         />
       </button>
       <div
@@ -188,7 +201,7 @@ function ThreadHistoryGroup({
       >
         <div className="min-h-0 overflow-hidden">
           <div className="grid gap-[1px] py-[2px] pb-[6px]">
-            {group.threads.map((thread) => (
+            {visibleThreads.map((thread) => (
               <ThreadHistoryItem
                 key={thread.id}
                 thread={thread}
@@ -196,6 +209,16 @@ function ThreadHistoryGroup({
                 onSelectThread={onSelectThread}
               />
             ))}
+            {canToggleVisibleThreads ? (
+              <button
+                type="button"
+                onClick={() => setIsShowingAll((current) => !current)}
+                tabIndex={expanded ? 0 : -1}
+                className="mx-auto h-[22px] w-fit px-[8px] text-center text-[12px] leading-none text-subheading opacity-80 transition-opacity duration-150 hover:opacity-100"
+              >
+                {isShowingAll ? 'Show less' : 'Show more'}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -222,9 +245,9 @@ function ThreadHistoryItem({
       onClick={() => onSelectThread(thread)}
       title={thread.title}
       data-selected={isSelected ? 'true' : undefined}
-      className="group flex w-full min-w-0 items-center gap-[10px] rounded-md py-[7px] pl-[8px] pr-[10px] text-left text-heading transition-colors duration-150 hover:bg-black/[0.04] data-[selected=true]:bg-black/[0.04] dark:hover:bg-white/[0.06] dark:data-[selected=true]:bg-white/[0.06]"
+      className="group flex w-full min-w-0 items-center gap-[10px] rounded-md py-[7px] pl-[8px] pr-[10px] text-left transition-colors duration-150 hover:bg-black/[0.04] data-[selected=true]:bg-black/[0.04] dark:hover:bg-white/[0.06] dark:data-[selected=true]:bg-white/[0.06]"
     >
-      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium leading-[18px]">
+      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium leading-[18px] text-heading opacity-75 group-hover:opacity-100 group-data-[selected=true]:opacity-100">
         {thread.title}
       </span>
       <span className="flex-shrink-0 text-[11px] leading-[16px] text-subheading">
