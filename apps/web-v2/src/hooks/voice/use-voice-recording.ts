@@ -3,6 +3,9 @@ import {
   isVoiceHotkey,
   isVoiceHotkeyCharacterKey,
   isVoiceHotkeyReleaseKey,
+  VOICE_HOTKEY_KEYDOWN_EVENT,
+  VOICE_HOTKEY_KEYUP_EVENT,
+  type VoiceHotkeyEventLike,
 } from '../../lib/voice/voice-hotkey.ts'
 
 export type VoiceRecordingState =
@@ -142,8 +145,9 @@ export function useVoiceRecording({ onRecordingComplete }: Options = {}): {
   }, [discardRecording, finalizeRecording])
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.repeat || !isVoiceHotkey(event)) return
+    const handleKeyDown = (event: KeyboardEvent | VoiceHotkeyEvent): void => {
+      const hotkeyEvent = readVoiceHotkeyEvent(event)
+      if (hotkeyEvent.repeat || !isVoiceHotkey(hotkeyEvent)) return
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
@@ -152,15 +156,16 @@ export function useVoiceRecording({ onRecordingComplete }: Options = {}): {
       void startRecording()
     }
 
-    const handleKeyUp = (event: KeyboardEvent): void => {
+    const handleKeyUp = (event: KeyboardEvent | VoiceHotkeyEvent): void => {
+      const hotkeyEvent = readVoiceHotkeyEvent(event)
       if (
         !hotkeyRecordingRef.current ||
-        !isVoiceHotkeyReleaseKey(event)
+        !isVoiceHotkeyReleaseKey(hotkeyEvent)
       ) {
         return
       }
       event.preventDefault()
-      if (isVoiceHotkeyCharacterKey(event)) {
+      if (isVoiceHotkeyCharacterKey(hotkeyEvent)) {
         event.stopPropagation()
         event.stopImmediatePropagation()
       }
@@ -174,13 +179,28 @@ export function useVoiceRecording({ onRecordingComplete }: Options = {}): {
       stopRecording()
     }
 
+    const handleForwardedKeyDown = (event: Event): void => {
+      if (event instanceof CustomEvent) handleKeyDown(event as VoiceHotkeyEvent)
+    }
+
+    const handleForwardedKeyUp = (event: Event): void => {
+      if (event instanceof CustomEvent) handleKeyUp(event as VoiceHotkeyEvent)
+    }
+
     window.addEventListener('keydown', handleKeyDown, true)
     window.addEventListener('keyup', handleKeyUp, true)
+    window.addEventListener(VOICE_HOTKEY_KEYDOWN_EVENT, handleForwardedKeyDown)
+    window.addEventListener(VOICE_HOTKEY_KEYUP_EVENT, handleForwardedKeyUp)
     window.addEventListener('blur', handleWindowBlur)
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('keyup', handleKeyUp, true)
+      window.removeEventListener(
+        VOICE_HOTKEY_KEYDOWN_EVENT,
+        handleForwardedKeyDown,
+      )
+      window.removeEventListener(VOICE_HOTKEY_KEYUP_EVENT, handleForwardedKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
     }
   }, [startRecording, stopRecording])
@@ -200,4 +220,12 @@ export function useVoiceRecording({ onRecordingComplete }: Options = {}): {
   )
 
   return { recordingState, startRecording, stopRecording }
+}
+
+type VoiceHotkeyEvent = CustomEvent<VoiceHotkeyEventLike>
+
+function readVoiceHotkeyEvent(
+  event: KeyboardEvent | VoiceHotkeyEvent,
+): VoiceHotkeyEventLike {
+  return event instanceof CustomEvent ? event.detail : event
 }
