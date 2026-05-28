@@ -10,6 +10,7 @@ import {
   getActiveFilesystemManager,
   useFilesystemStore,
 } from '../../../stores/filesystem/filesystem-store.ts'
+import { useResolvedTheme } from '../../../hooks/use-resolved-theme.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 import { FilesystemPane } from '../filesystem/filesystem-pane.tsx'
 import { BrowserSurface } from '../browser/browser-surface.tsx'
@@ -81,7 +82,8 @@ const FileSurface = memo(function FileSurface({
   entry: FilesystemEntry
 }) {
   const manager = getActiveFilesystemManager()
-  const src = manager?.getPreviewUrl(entry.path) ?? null
+  const resolvedTheme = useResolvedTheme()
+  const src = manager?.getPreviewUrl(entry.path, resolvedTheme) ?? null
 
   if (src === null) {
     return (
