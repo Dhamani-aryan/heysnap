@@ -6,6 +6,10 @@ import type {
   FilesystemListing,
   FilesystemServerMessage,
 } from '../../lib/filesystem/types.ts'
+import {
+  createInitialNavigationHistory,
+  getParentPath,
+} from '../../lib/filesystem/filesystem-paths.ts'
 
 const HISTORY_LIMIT = 64
 
@@ -73,11 +77,22 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
     ingestServerMessage: (message) => {
       switch (message.type) {
         case 'snapshot': {
+          const { history, historyIndex } = get()
+          const nextHistory =
+            history.length === 1 &&
+            historyIndex === 0 &&
+            history[0] === '' &&
+            message.listing.path.length > 0
+              ? createInitialNavigationHistory(message.listing.path)
+              : history
           set({
             listing: message.listing,
             currentPath: message.listing.path,
             isFetching: false,
             listingError: null,
+            history: nextHistory,
+            historyIndex:
+              nextHistory === history ? historyIndex : nextHistory.length - 1,
           })
           return
         }
@@ -146,12 +161,20 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
       const manager = getActiveFilesystemManager()
       if (!manager) return
       const { history, historyIndex } = get()
-      if (historyIndex <= 0) return
-      const nextIndex = historyIndex - 1
-      const path = history[nextIndex] ?? ''
+      const hasHistoryBack = historyIndex > 0
+      const nextIndex = hasHistoryBack ? historyIndex - 1 : 0
+      const path = hasHistoryBack
+        ? (history[nextIndex] ?? '')
+        : getParentPath(get().currentPath)
+      if (!hasHistoryBack && path === get().currentPath) return
+      const nextHistory = hasHistoryBack
+        ? history
+        : createInitialNavigationHistory(path)
+      const nextHistoryIndex = hasHistoryBack ? nextIndex : nextHistory.length - 1
 
       set({
-        historyIndex: nextIndex,
+        history: nextHistory,
+        historyIndex: nextHistoryIndex,
         currentPath: path,
         isFetching: true,
         listingError: null,
@@ -161,6 +184,7 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
         await manager.subscribe(path)
       } catch (error) {
         set({
+          history,
           historyIndex,
           isFetching: false,
           listingError: (error as Error).message,

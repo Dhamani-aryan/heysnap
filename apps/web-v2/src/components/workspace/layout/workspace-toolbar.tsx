@@ -24,7 +24,9 @@ export function WorkspaceToolbar() {
   const { isRightSidebarOpen, toggleRightSidebar } = useWorkspaceLayout()
   const goBack = useFilesystemStore((s) => s.goBack)
   const goForward = useFilesystemStore((s) => s.goForward)
-  const canGoBack = useFilesystemStore((s) => s.historyIndex > 0)
+  const canGoBack = useFilesystemStore(
+    (s) => s.historyIndex > 0 || s.currentPath.length > 0,
+  )
   const canGoForward = useFilesystemStore(
     (s) => s.historyIndex < s.history.length - 1,
   )
