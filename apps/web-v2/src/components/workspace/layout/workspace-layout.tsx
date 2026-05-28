@@ -4,7 +4,7 @@ import { useWorkspaceLayout } from './use-workspace-layout.ts'
 import { WorkspaceToolbar } from './workspace-toolbar.tsx'
 import { WorkspaceRightSidebar } from './workspace-right-sidebar.tsx'
 import { VoiceGripButton } from '../../voice/voice-grip-button.tsx'
-import { WorkspaceFloatingPrompt } from './workspace-floating-prompt.tsx'
+import { WorkspaceBottomCenterStack } from './workspace-bottom-center-stack.tsx'
 
 const FRAME_INSET_PX = 10
 
@@ -42,7 +42,7 @@ function WorkspaceLayoutShell({ children }: { children: ReactNode }) {
         >
           {children}
           <VoiceGripButton />
-          <WorkspaceFloatingPrompt />
+          <WorkspaceBottomCenterStack />
         </section>
         <WorkspaceRightSidebar
           insetPx={FRAME_INSET_PX}

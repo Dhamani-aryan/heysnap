@@ -75,7 +75,7 @@ export function WorkspaceRightSidebar({
         </div>
       ) : null}
       <div className="pointer-events-auto flex flex-1 flex-col overflow-hidden">
-        {isRightSidebarOpen ? <AgentPanel /> : null}
+        <AgentPanel showPrompt={isRightSidebarOpen} />
       </div>
     </aside>
   )

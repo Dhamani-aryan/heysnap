@@ -7,7 +7,11 @@ import { useFilesystemStore } from '../../stores/filesystem/filesystem-store.ts'
 import { AgentPromptInputContainer } from './agent-prompt-input-container.tsx'
 import { AgentTimeline } from './agent-timeline.tsx'
 
-export function AgentPanel() {
+type Props = {
+  readonly showPrompt?: boolean
+}
+
+export function AgentPanel({ showPrompt = true }: Props = {}) {
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const hasMessages = useAgentChatStore((s) => s.messageOrder.length > 0)
@@ -48,9 +52,11 @@ export function AgentPanel() {
             Let's get some shit done today
           </p>
         </div>
-        <div className="pointer-events-auto px-[10px] pb-[10px] pt-[8px]">
-          <AgentPromptInputContainer onThreadResolved={handleThreadResolved} />
-        </div>
+        {showPrompt ? (
+          <div className="pointer-events-auto px-[10px] pb-[10px] pt-[8px]">
+            <AgentPromptInputContainer onThreadResolved={handleThreadResolved} />
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -68,9 +74,11 @@ export function AgentPanel() {
           />
         ) : null}
       </div>
-      <div className="pointer-events-auto px-[10px] pb-[10px] pt-[8px]">
-        <AgentPromptInputContainer onThreadResolved={handleThreadResolved} />
-      </div>
+      {showPrompt ? (
+        <div className="pointer-events-auto px-[10px] pb-[10px] pt-[8px]">
+          <AgentPromptInputContainer onThreadResolved={handleThreadResolved} />
+        </div>
+      ) : null}
     </div>
   )
 }
