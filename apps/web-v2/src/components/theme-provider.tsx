@@ -1,35 +1,17 @@
 import { useEffect } from 'react'
-import {
-  getSystemTheme,
-  resolveTheme,
-  useThemeStore,
-} from '../stores/theme-store.ts'
+import { useResolvedTheme } from '../hooks/use-resolved-theme.ts'
 
 type ThemeProviderProps = {
   children: React.ReactNode
 }
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const theme = useThemeStore((state) => state.theme)
+  const resolvedTheme = useResolvedTheme()
 
   useEffect(() => {
     const root = document.documentElement
-    const resolved = resolveTheme(theme)
-    root.classList.toggle('dark', resolved === 'dark')
-  }, [theme])
-
-  useEffect(() => {
-    if (theme !== 'system') return
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const apply = () => {
-      document.documentElement.classList.toggle(
-        'dark',
-        getSystemTheme() === 'dark',
-      )
-    }
-    media.addEventListener('change', apply)
-    return () => media.removeEventListener('change', apply)
-  }, [theme])
+    root.classList.toggle('dark', resolvedTheme === 'dark')
+  }, [resolvedTheme])
 
   return <>{children}</>
 }

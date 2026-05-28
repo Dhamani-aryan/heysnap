@@ -1,16 +1,16 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Moon02Icon, Sun01Icon } from '@hugeicons/core-free-icons'
-import { resolveTheme, useThemeStore } from '../stores/theme-store.ts'
+import { useThemeStore } from '../stores/theme-store.ts'
+import { useResolvedTheme } from '../hooks/use-resolved-theme.ts'
 
 type Props = {
   compact?: boolean
 }
 
 export function ThemeToggle({ compact = false }: Props = {}) {
-  const theme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
-  const resolved = resolveTheme(theme)
-  const isDark = resolved === 'dark'
+  const resolvedTheme = useResolvedTheme()
+  const isDark = resolvedTheme === 'dark'
   const sizeClasses = compact ? 'h-7 w-7' : 'h-9 w-9'
   const hoverClass = compact ? 'hover:bg-sidebar-hover' : 'hover:bg-secondary-hover'
 
