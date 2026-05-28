@@ -58,6 +58,14 @@ export async function startComputer(computerId: string): Promise<CloudComputer> 
   return response.computer
 }
 
+export async function stopComputer(computerId: string): Promise<CloudComputer> {
+  const response = await apiRequest<ComputerResponse>(
+    `/computers/${encodeURIComponent(computerId)}/stop`,
+    { method: 'POST' },
+  )
+  return response.computer
+}
+
 export type AccessSession = {
   id: string
   computerId: string
