@@ -14,7 +14,13 @@ if (!chromeExtensionId) {
   )
 }
 
+const sarvamApiKey = import.meta.env.VITE_SARVAM_API_KEY
+
 export const env = {
   cloudServerUrl: cloudServerUrl.replace(/\/+$/, ''),
   chromeExtensionId,
+  sarvamApiKey:
+    typeof sarvamApiKey === 'string' && sarvamApiKey.length > 0
+      ? sarvamApiKey
+      : undefined,
 } as const
