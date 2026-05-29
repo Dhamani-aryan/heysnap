@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useReducer, useState } from "react";
-import type { Dispatch } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { Dispatch, RefObject } from "react";
 
-import type { PreviewItem, PreviewServerMessage } from "../protocol";
+import type { PreviewClientMessage, PreviewItem, PreviewServerMessage, PreviewWorkbookPatchMessage } from "../protocol";
+import { applyWorkbookPatch } from "../workbookPatch";
 import { Previewer, type PreviewTheme } from "./Previewer";
 import { installFilesystemVoiceHotkeyRelay } from "./voiceHotkeyRelay";
 
@@ -20,6 +21,7 @@ type PreviewBufferState = {
 type PreviewBufferAction =
   | { readonly type: "reset" }
   | { readonly type: "queue"; readonly slot: PreviewSlot }
+  | { readonly type: "workbookPatch"; readonly message: PreviewWorkbookPatchMessage }
   | { readonly type: "ready"; readonly key: string }
   | { readonly type: "previewError"; readonly key: string; readonly message: string }
   | { readonly type: "error"; readonly message: string };
@@ -42,6 +44,11 @@ export function App(): React.ReactElement {
   const query = usePreviewQuery();
   const [theme, setTheme] = useState<PreviewTheme>(() => query.theme);
   const [buffer, dispatchBuffer] = useReducer(previewBufferReducer, emptyPreviewBuffer);
+  const bufferRef = useRef(buffer);
+
+  useEffect(() => {
+    bufferRef.current = buffer;
+  }, [buffer]);
 
   useEffect(() => {
     const cleanup = installFilesystemVoiceHotkeyRelay(window);
@@ -85,21 +92,23 @@ export function App(): React.ReactElement {
     }
 
     const socket = new WebSocket(buildPreviewWebSocketUrl());
+    const watchMessage = createWatchMessage(query);
     let cancelled = false;
 
     dispatchBuffer({ type: "reset" });
+
+    const sendWatchMessage = () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(watchMessage));
+      }
+    };
 
     socket.addEventListener("open", () => {
       if (cancelled) {
         return;
       }
 
-      socket.send(JSON.stringify({
-        type: "watch",
-        path: query.path,
-        publicBasePath: getPreviewBasePath(),
-        ...(query.root === null || query.root.length === 0 ? {} : { root: query.root }),
-      }));
+      sendWatchMessage();
     });
 
     socket.addEventListener("message", (event) => {
@@ -109,7 +118,7 @@ export function App(): React.ReactElement {
 
       try {
         const message = JSON.parse(String(event.data)) as PreviewServerMessage;
-        handlePreviewMessage(message, dispatchBuffer);
+        handlePreviewMessage(message, dispatchBuffer, bufferRef, sendWatchMessage);
       } catch {
         dispatchBuffer({ type: "error", message: "Received an invalid preview message." });
       }
@@ -177,6 +186,13 @@ const previewThemeFromMessage = (data: unknown): PreviewTheme | null => {
   return data["theme"] === "light" || data["theme"] === "dark" ? data["theme"] : null;
 };
 
+const createWatchMessage = (query: PreviewQuery): PreviewClientMessage => ({
+  type: "watch",
+  path: query.path ?? "",
+  publicBasePath: getPreviewBasePath(),
+  ...(query.root === null || query.root.length === 0 ? {} : { root: query.root }),
+});
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -208,6 +224,8 @@ const writeStoredPreviewTheme = (theme: PreviewTheme): void => {
 const handlePreviewMessage = (
   message: PreviewServerMessage,
   dispatchBuffer: Dispatch<PreviewBufferAction>,
+  bufferRef: RefObject<PreviewBufferState>,
+  requestFreshSnapshot: () => void,
 ): void => {
   switch (message.type) {
     case "file": {
@@ -218,6 +236,17 @@ const handlePreviewMessage = (
     case "workbook": {
       const { type: _type, ...data } = message;
       queuePreviewItem({ kind: "workbook", data }, dispatchBuffer);
+      return;
+    }
+    case "workbookPatch": {
+      const currentWorkbook = getCurrentWorkbook(bufferRef.current, message.path);
+
+      if (currentWorkbook?.version !== message.baseVersion) {
+        requestFreshSnapshot();
+        return;
+      }
+
+      dispatchBuffer({ type: "workbookPatch", message });
       return;
     }
     case "htmlPreview": {
@@ -231,6 +260,23 @@ const handlePreviewMessage = (
     case "pong":
       return;
   }
+};
+
+const getCurrentWorkbook = (
+  state: PreviewBufferState | undefined,
+  path: string,
+) => {
+  const visibleItem = state?.visibleSlot?.item;
+  if (visibleItem?.kind === "workbook" && visibleItem.data.path === path) {
+    return visibleItem.data;
+  }
+
+  const pendingItem = state?.pendingSlot?.item;
+  if (pendingItem?.kind === "workbook" && pendingItem.data.path === path) {
+    return pendingItem.data;
+  }
+
+  return null;
 };
 
 const queuePreviewItem = (
@@ -272,6 +318,29 @@ const previewBufferReducer = (
         pendingSlot: action.slot,
         error: state.visibleSlot === null ? null : state.error,
       };
+    case "workbookPatch": {
+      const visibleSlot = applyWorkbookPatchToSlot(state.visibleSlot, action.message);
+
+      if (visibleSlot !== null) {
+        return {
+          visibleSlot,
+          pendingSlot: state.pendingSlot,
+          error: null,
+        };
+      }
+
+      const pendingSlot = applyWorkbookPatchToSlot(state.pendingSlot, action.message);
+
+      if (pendingSlot === null) {
+        return { ...state, error: "Received a workbook patch before the workbook loaded." };
+      }
+
+      return {
+        visibleSlot: state.visibleSlot,
+        pendingSlot,
+        error: null,
+      };
+    }
     case "ready":
       if (state.pendingSlot?.versionKey !== action.key) {
         return state;
@@ -295,6 +364,40 @@ const previewBufferReducer = (
     case "error":
       return { ...state, error: action.message };
   }
+};
+
+const applyWorkbookPatchToSlot = (
+  slot: PreviewSlot | null,
+  message: PreviewWorkbookPatchMessage,
+): PreviewSlot | null => {
+  if (slot?.item.kind !== "workbook" || slot.item.data.path !== message.path) {
+    return null;
+  }
+
+  if (slot.item.data.version !== message.baseVersion) {
+    return null;
+  }
+
+  const item: PreviewItem = {
+    kind: "workbook",
+    data: {
+      ...slot.item.data,
+      path: message.path,
+      name: message.name,
+      size: message.size,
+      mtime: message.mtime,
+      version: message.version,
+      downloadUrl: message.downloadUrl,
+      change: message.change,
+      workbook: applyWorkbookPatch(slot.item.data.workbook, message.patch),
+    },
+  };
+
+  return {
+    documentKey: previewItemDocumentKey(item),
+    versionKey: previewItemVersionKey(item),
+    item,
+  };
 };
 
 const PreviewBuffer = ({
@@ -374,7 +477,13 @@ const previewItemVersionKey = (item: PreviewItem): string => {
   }
 
   if (item.kind === "workbook") {
-    return ["workbook", item.data.path, String(item.data.mtime), String(item.data.size)].join(":");
+    return [
+      "workbook",
+      item.data.path,
+      String(item.data.version),
+      String(item.data.mtime),
+      String(item.data.size),
+    ].join(":");
   }
 
   return ["html", item.data.path, String(item.data.mtime), item.data.url].join(":");
