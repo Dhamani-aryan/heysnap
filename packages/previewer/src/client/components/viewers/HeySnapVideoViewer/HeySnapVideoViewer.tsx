@@ -258,12 +258,16 @@ export function HeySnapVideoViewer({
           {/* `display: contents` preserves the flex layout while letting us
               drop the action icons to a muted tint of `currentColor` —
               matches the image viewer's chrome treatment. */}
-          <div
-            style={{
-              display: "contents",
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                flex: 1,
+                minWidth: 0,
+                color: "color-mix(in srgb, currentColor 65%, transparent)",
+              }}
+            >
             {/* Spacer pushes the right cluster to the far edge while letting
                 the left cluster shrink instead of grow. */}
             <div style={{ flex: 1 }} />

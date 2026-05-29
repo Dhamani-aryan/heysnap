@@ -325,12 +325,16 @@ export function HeySnapDocxViewer({
           {/* Icon cluster tinted to a softer `currentColor` shade — same
               treatment the XLSX/PDF viewers use to make the filename the
               focal element of the header. */}
-          <div
-            style={{
-              display: "contents",
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                flex: 1,
+                minWidth: 0,
+                color: "color-mix(in srgb, currentColor 65%, transparent)",
+              }}
+            >
             <div style={{ flex: 1 }} />
             <DocxZoomControls zoom={zoom} onZoom={onZoom} />
             <DocxDownloadButton resolved={resolved} />

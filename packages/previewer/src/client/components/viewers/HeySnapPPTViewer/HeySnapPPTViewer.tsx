@@ -492,12 +492,16 @@ export function HeySnapPPTViewer({
               drop the action icons to a muted tint of `currentColor` — same
               pattern the other viewers use to keep the title strong and the
               chrome icons softer. */}
-          <div
-            style={{
-              display: "contents",
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                flex: 1,
+                minWidth: 0,
+                color: "color-mix(in srgb, currentColor 65%, transparent)",
+              }}
+            >
             <div style={{ flex: 1 }} />
             {showZoomControls && (
               <PPTZoomControls

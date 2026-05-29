@@ -213,12 +213,16 @@ export function HeySnapPdfViewer({
                     icons to a muted tint of the header foreground — matches
                     the XLSX viewer where the title is strong and the
                     surrounding chrome icons are a softer gray. */}
-                <div
-                  style={{
-                    display: "contents",
-                    color: "color-mix(in srgb, currentColor 65%, transparent)",
-                  }}
-                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2,
+                      flex: 1,
+                      minWidth: 0,
+                      color: "color-mix(in srgb, currentColor 65%, transparent)",
+                    }}
+                  >
                   {activeDocumentId && <PdfInteractionTools documentId={activeDocumentId} />}
                   {/* Spacer pushes the right cluster to the far edge while
                       letting the left cluster shrink instead of grow. */}

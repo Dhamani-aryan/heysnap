@@ -217,12 +217,16 @@ export function HeySnapAudioPlayer({
           {showTitle && <AudioTitle name={title} style={headerTitleStyle} />}
           {/* `display: contents` preserves the flex layout while letting us
               drop the action icons to a muted tint of `currentColor`. */}
-          <div
-            style={{
-              display: "contents",
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                flex: 1,
+                minWidth: 0,
+                color: "color-mix(in srgb, currentColor 65%, transparent)",
+              }}
+            >
             <div style={{ flex: 1 }} />
             {showZoomControls && (
               <AudioZoomControls

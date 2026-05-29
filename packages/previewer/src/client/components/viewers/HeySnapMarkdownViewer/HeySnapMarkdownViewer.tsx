@@ -361,7 +361,11 @@ export function HeySnapMarkdownViewer({
           )}
           <div
             style={{
-              display: "contents",
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              flex: 1,
+              minWidth: 0,
               color: "color-mix(in srgb, currentColor 65%, transparent)",
             }}
           >
