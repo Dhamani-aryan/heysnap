@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocket, type WebSocketServer } from "ws";
 import { watch, type FSWatcher } from "chokidar";
 
-import type { PreviewClientMessage, PreviewServerMessage } from "../protocol.js";
+import type { PreviewClientMessage, PreviewHtmlChange, PreviewServerMessage } from "../protocol.js";
 import { mimeForPath } from "./mime.js";
 import {
   createDefaultPreviewPathResolver,
@@ -43,6 +43,8 @@ interface HtmlPreviewRoot {
 interface FileAssetRoot {
   readonly rootPath: string;
 }
+
+type PreviewHtmlFileChange = Exclude<PreviewHtmlChange, { readonly type: "initial" }>;
 
 export class PreviewService {
   readonly basePath: string;
@@ -370,6 +372,7 @@ class PreviewSocketSession {
   private currentPublicPath: string | null = null;
   private currentHtmlRoot: string | null = null;
   private currentPublicBasePath: string | null = null;
+  private pendingHtmlChange: PreviewHtmlChange | null = null;
   private closed = false;
 
   constructor(
@@ -435,8 +438,15 @@ class PreviewSocketSession {
     this.currentHtmlRoot = input.htmlRootPath;
     this.currentPublicBasePath = input.publicBasePath ?? null;
 
-    await this.sendUpdate(input.filePath, input.publicPath, input.htmlRootPath, input.publicBasePath);
+    await this.sendUpdate(
+      input.filePath,
+      input.publicPath,
+      input.htmlRootPath,
+      input.publicBasePath,
+      { type: "initial" },
+    );
 
+    const isHtmlWatch = isHtmlPath(input.filePath);
     const watchTarget = isHtmlPath(input.filePath)
       ? input.htmlRootPath ?? dirname(input.filePath)
       : input.filePath;
@@ -448,14 +458,35 @@ class PreviewSocketSession {
       persistent: true,
     });
 
-    const onChange = (): void => {
-      this.scheduleUpdate();
+    const scheduleFileUpdate = (type: "add" | "change", changedPath: string): void => {
+      this.scheduleUpdate(
+        isHtmlWatch
+          ? createHtmlChange(type, input.filePath, input.htmlRootPath, changedPath)
+          : undefined,
+      );
     };
 
-    watcher.on("add", onChange);
-    watcher.on("change", onChange);
-    watcher.on("unlink", () => {
-      this.sendError(`File removed: ${input.publicPath}`);
+    watcher.on("add", (changedPath) => scheduleFileUpdate("add", String(changedPath)));
+    watcher.on("change", (changedPath) => scheduleFileUpdate("change", String(changedPath)));
+    watcher.on("unlink", (changedPath) => {
+      if (!isHtmlWatch) {
+        this.sendError(`File removed: ${input.publicPath}`);
+        return;
+      }
+
+      const change = createHtmlChange(
+        "unlink",
+        input.filePath,
+        input.htmlRootPath,
+        String(changedPath),
+      );
+
+      if (change.isEntry) {
+        this.sendError(`File removed: ${input.publicPath}`);
+        return;
+      }
+
+      this.scheduleUpdate(change);
     });
     watcher.on("error", (error) => {
       this.sendError(error instanceof Error ? error.message : "Preview watcher failed.");
@@ -469,7 +500,11 @@ class PreviewSocketSession {
     this.watcher = watcher;
   }
 
-  private scheduleUpdate(): void {
+  private scheduleUpdate(change?: PreviewHtmlChange): void {
+    if (change !== undefined) {
+      this.pendingHtmlChange = mergeHtmlChanges(this.pendingHtmlChange, change);
+    }
+
     if (this.pendingTimer !== null) {
       clearTimeout(this.pendingTimer);
     }
@@ -481,11 +516,15 @@ class PreviewSocketSession {
         return;
       }
 
+      const htmlChange = this.pendingHtmlChange;
+      this.pendingHtmlChange = null;
+
       void this.sendUpdate(
         this.currentPath,
         this.currentPublicPath,
         this.currentHtmlRoot,
         this.currentPublicBasePath ?? undefined,
+        htmlChange ?? undefined,
       ).catch((error) => {
         this.sendError(error instanceof Error ? error.message : "Failed to refresh preview.");
       });
@@ -497,6 +536,7 @@ class PreviewSocketSession {
     publicPath: string,
     htmlRootPath: string | null,
     publicBasePath: string | undefined,
+    htmlChange?: PreviewHtmlChange,
   ): Promise<void> {
     const fileStats = await stat(filePath);
 
@@ -511,7 +551,7 @@ class PreviewSocketSession {
     }
 
     if (isHtmlPath(filePath)) {
-      this.sendHtmlPreview(filePath, publicPath, Date.now(), htmlRootPath, publicBasePath);
+      this.sendHtmlPreview(filePath, publicPath, Date.now(), htmlRootPath, publicBasePath, htmlChange);
       return;
     }
 
@@ -554,6 +594,7 @@ class PreviewSocketSession {
     mtime: number,
     explicitRoot: string | null,
     publicBasePath: string | undefined,
+    change: PreviewHtmlChange | undefined,
   ): void {
     const rootPath = explicitRoot ?? dirname(filePath);
     const entryPath = relative(rootPath, filePath);
@@ -565,6 +606,7 @@ class PreviewSocketSession {
       name: basename(filePath),
       mtime,
       url: this.service.buildHtmlPreviewUrl(this.connectionId, entryPath, publicBasePath),
+      ...(change === undefined ? {} : { change }),
     });
   }
 
@@ -608,6 +650,8 @@ class PreviewSocketSession {
       clearTimeout(this.pendingTimer);
       this.pendingTimer = null;
     }
+
+    this.pendingHtmlChange = null;
 
     const watcher = this.watcher;
     this.watcher = null;
@@ -696,12 +740,75 @@ const rawDataToText = (data: WebSocket.RawData): string => {
   return Buffer.concat(data).toString("utf8");
 };
 
+const createHtmlChange = (
+  type: "add" | "change" | "unlink",
+  entryPath: string,
+  htmlRootPath: string | null,
+  changedPath: string,
+): PreviewHtmlFileChange => {
+  const rootPath = htmlRootPath ?? dirname(entryPath);
+  const changedRelativePath = normalizeRelativePath(relative(rootPath, changedPath));
+  const entryRelativePath = normalizeRelativePath(relative(rootPath, entryPath));
+
+  return {
+    type,
+    path: changedRelativePath,
+    isEntry: changedRelativePath === entryRelativePath,
+  };
+};
+
+const mergeHtmlChanges = (
+  current: PreviewHtmlChange | null,
+  next: PreviewHtmlChange,
+): PreviewHtmlChange => {
+  if (current === null) {
+    return next;
+  }
+
+  return htmlChangePriority(next) >= htmlChangePriority(current) ? next : current;
+};
+
+const htmlChangePriority = (change: PreviewHtmlChange): number => {
+  if (change.type === "initial") {
+    return 5;
+  }
+
+  if (isJavaScriptPath(change.path)) {
+    return 4;
+  }
+
+  if (change.isEntry) {
+    return 3;
+  }
+
+  if (change.type === "unlink") {
+    return 2;
+  }
+
+  return 1;
+};
+
+const normalizeRelativePath = (path: string): string =>
+  path.split(sep).filter(Boolean).join("/");
+
 const isXlsxPath = (path: string): boolean =>
   extname(path).toLowerCase() === ".xlsx";
 
 const isHtmlPath = (path: string): boolean => {
   const extension = extname(path).toLowerCase();
   return extension === ".html" || extension === ".htm";
+};
+
+const isJavaScriptPath = (path: string): boolean => {
+  const extension = extname(path).toLowerCase();
+  return (
+    extension === ".js" ||
+    extension === ".mjs" ||
+    extension === ".cjs" ||
+    extension === ".jsx" ||
+    extension === ".ts" ||
+    extension === ".tsx"
+  );
 };
 
 const isMarkdownPath = (path: string): boolean => {

@@ -29,11 +29,20 @@ export type PreviewWorkbook = {
   readonly workbook: unknown;
 };
 
+export type PreviewHtmlChange =
+  | { readonly type: "initial" }
+  | {
+      readonly type: "add" | "change" | "unlink";
+      readonly path: string;
+      readonly isEntry: boolean;
+    };
+
 export type PreviewHtml = {
   readonly path: string;
   readonly name: string;
   readonly mtime: number;
   readonly url: string;
+  readonly change?: PreviewHtmlChange;
 };
 
 export type PreviewServerMessage =
