@@ -11,8 +11,6 @@ const HEARTBEAT_TIMEOUT_MS = 45_000
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 
-type PreviewTheme = 'light' | 'dark'
-
 type ManagerCallbacks = {
   readonly onMessage: (message: FilesystemServerMessage) => void
   readonly onStatusChange: (status: FilesystemConnectionStatus) => void
@@ -135,7 +133,7 @@ export class FilesystemConnectionManager {
     return url.toString()
   }
 
-  getPreviewUrl(path: string, theme: PreviewTheme): string | null {
+  getPreviewUrl(path: string): string | null {
     const url = this.resolvePreviewBaseUrl()
     if (url === null) return null
     url.searchParams.delete('path')
@@ -145,9 +143,6 @@ export class FilesystemConnectionManager {
     url.searchParams.delete('v')
     url.searchParams.set('path', path)
     url.searchParams.set('chrome', '0')
-    if (theme === 'light') {
-      url.searchParams.set('theme', 'light')
-    }
     return url.toString()
   }
 

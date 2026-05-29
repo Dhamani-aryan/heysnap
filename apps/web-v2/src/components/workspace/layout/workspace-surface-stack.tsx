@@ -11,6 +11,7 @@ import {
   useFilesystemStore,
 } from '../../../stores/filesystem/filesystem-store.ts'
 import { useResolvedTheme } from '../../../hooks/use-resolved-theme.ts'
+import type { ResolvedTheme } from '../../../stores/theme-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 import { FilesystemPane } from '../filesystem/filesystem-pane.tsx'
 import { BrowserSurface } from '../browser/browser-surface.tsx'
@@ -85,9 +86,38 @@ const FileSurface = memo(function FileSurface({
   const manager = getActiveFilesystemManager()
   const resolvedTheme = useResolvedTheme()
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  const src = manager?.getPreviewUrl(entry.path, resolvedTheme) ?? null
+  const src = manager?.getPreviewUrl(entry.path) ?? null
 
   useIframeVoiceHotkeyBridge(iframeRef, src)
+
+  useEffect(() => {
+    const iframe = iframeRef.current
+    if (iframe === null || src === null) return
+
+    const send = (): void => sendPreviewTheme(iframe, src, resolvedTheme)
+    const animationFrame = window.requestAnimationFrame(send)
+    const retryTimers = [0, 100, 500, 1_000].map((delay) =>
+      window.setTimeout(send, delay),
+    )
+    const handleMessage = (event: MessageEvent): void => {
+      if (
+        event.source === iframe.contentWindow &&
+        isPreviewReadyMessage(event.data)
+      ) {
+        send()
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      for (const timer of retryTimers) {
+        window.clearTimeout(timer)
+      }
+      window.removeEventListener('message', handleMessage)
+    }
+  }, [src, resolvedTheme])
 
   if (src === null) {
     return (
@@ -112,10 +142,46 @@ const FileSurface = memo(function FileSurface({
         src={src}
         title={entry.name}
         className="block h-full w-full border-0"
+        onLoad={() => sendPreviewTheme(iframeRef.current, src, resolvedTheme)}
       />
     </section>
   )
 })
+
+const sendPreviewTheme = (
+  iframe: HTMLIFrameElement | null,
+  src: string | null,
+  theme: ResolvedTheme,
+): void => {
+  if (iframe === null || src === null) return
+
+  const frameWindow = iframe.contentWindow
+  if (frameWindow === null) return
+
+  try {
+    frameWindow.postMessage(
+      { type: 'heysnap:preview-theme', theme },
+      previewMessageTargetOrigin(src),
+    )
+  } catch {
+    // The iframe can still be navigating; scheduled retries and the ready
+    // handshake will deliver the theme once the previewer is listening.
+  }
+}
+
+const isPreviewReadyMessage = (data: unknown): boolean =>
+  typeof data === 'object' &&
+  data !== null &&
+  'type' in data &&
+  data.type === 'heysnap:preview-ready'
+
+const previewMessageTargetOrigin = (src: string): string => {
+  try {
+    return new URL(src, window.location.href).origin
+  } catch {
+    return '*'
+  }
+}
 
 function MachinePowerButton({
   isShuttingDown,

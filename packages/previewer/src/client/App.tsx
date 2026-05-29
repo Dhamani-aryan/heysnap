@@ -30,6 +30,8 @@ const emptyPreviewBuffer: PreviewBufferState = {
   error: null,
 };
 
+const PREVIEW_THEME_STORAGE_KEY = "heysnap-preview-theme";
+
 type PreviewQuery = {
   readonly path: string | null;
   readonly root: string | null;
@@ -38,11 +40,42 @@ type PreviewQuery = {
 
 export function App(): React.ReactElement {
   const query = usePreviewQuery();
+  const [theme, setTheme] = useState<PreviewTheme>(() => query.theme);
   const [buffer, dispatchBuffer] = useReducer(previewBufferReducer, emptyPreviewBuffer);
 
   useEffect(() => {
     const cleanup = installFilesystemVoiceHotkeyRelay(window);
     return () => cleanup?.();
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (window.parent !== window && event.source !== window.parent) {
+        return;
+      }
+
+      const nextTheme = previewThemeFromMessage(event.data);
+
+      if (nextTheme !== null) {
+        setTheme(nextTheme);
+        writeStoredPreviewTheme(nextTheme);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    notifyParentPreviewReady();
+
+    const retryTimers = [
+      window.setTimeout(notifyParentPreviewReady, 100),
+      window.setTimeout(notifyParentPreviewReady, 500),
+    ];
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      for (const timer of retryTimers) {
+        window.clearTimeout(timer);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -95,18 +128,18 @@ export function App(): React.ReactElement {
   }, [query.path, query.root]);
 
   if (query.path === null || query.path.length === 0) {
-    return <PreviewPlayground theme={query.theme} />;
+    return <PreviewPlayground theme={theme} />;
   }
 
   return (
-    <main className="preview-shell" data-theme={query.theme}>
+    <main className="preview-shell" data-theme={theme}>
       {buffer.error !== null ? <PreviewError message={buffer.error} /> : null}
       <section className="preview-stage" aria-label="File preview">
         {buffer.visibleSlot !== null || buffer.pendingSlot !== null ? (
           <PreviewBuffer
             visibleSlot={buffer.visibleSlot}
             pendingSlot={buffer.pendingSlot}
-            theme={query.theme}
+            theme={theme}
             onReady={(key) => {
               dispatchBuffer({ type: "ready", key });
             }}
@@ -125,12 +158,52 @@ export function App(): React.ReactElement {
 const usePreviewQuery = (): PreviewQuery =>
   useMemo(() => {
     const params = new URLSearchParams(window.location.search);
+    const themeParam = params.get("theme");
+
     return {
       path: params.get("path"),
       root: params.get("root"),
-      theme: params.get("theme") === "light" ? "light" : "dark",
+      theme: themeParam === "light" || themeParam === "dark"
+        ? themeParam
+        : readStoredPreviewTheme() ?? "dark",
     };
   }, []);
+
+const previewThemeFromMessage = (data: unknown): PreviewTheme | null => {
+  if (!isRecord(data) || data["type"] !== "heysnap:preview-theme") {
+    return null;
+  }
+
+  return data["theme"] === "light" || data["theme"] === "dark" ? data["theme"] : null;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const notifyParentPreviewReady = (): void => {
+  if (window.parent === window) {
+    return;
+  }
+
+  window.parent.postMessage({ type: "heysnap:preview-ready" }, "*");
+};
+
+const readStoredPreviewTheme = (): PreviewTheme | null => {
+  try {
+    const stored = window.localStorage.getItem(PREVIEW_THEME_STORAGE_KEY);
+    return stored === "light" || stored === "dark" ? stored : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredPreviewTheme = (theme: PreviewTheme): void => {
+  try {
+    window.localStorage.setItem(PREVIEW_THEME_STORAGE_KEY, theme);
+  } catch {
+    // Ignore storage errors; live postMessage updates still drive the UI.
+  }
+};
 
 const handlePreviewMessage = (
   message: PreviewServerMessage,
@@ -238,33 +311,49 @@ const PreviewBuffer = ({
   readonly onError: (key: string, error: Error) => void;
 }): React.ReactElement => (
   <div className="preview-buffer">
+    {visibleSlot === null && pendingSlot !== null ? <PreviewLoading /> : null}
     {visibleSlot !== null ? (
-      <div className="preview-buffer-pane preview-buffer-pane-visible">
-        <Previewer item={visibleSlot.item} theme={theme} />
-      </div>
-    ) : pendingSlot !== null ? (
-      <PreviewLoading />
+      <PreviewBufferPane key={visibleSlot.documentKey} slot={visibleSlot} state="visible" theme={theme} />
     ) : null}
     {pendingSlot !== null ? (
-      <div
-        key={pendingSlot.versionKey}
-        className={
-          visibleSlot === null
-            ? "preview-buffer-pane preview-buffer-pane-pending preview-buffer-pane-initial"
-            : "preview-buffer-pane preview-buffer-pane-pending"
-        }
-        aria-hidden={visibleSlot !== null}
-      >
-        <Previewer
-          item={pendingSlot.item}
-          theme={theme}
-          onReady={() => onReady(pendingSlot.versionKey)}
-          onError={(previewError) => onError(pendingSlot.versionKey, previewError)}
-        />
-      </div>
+      <PreviewBufferPane
+        key={pendingSlot.documentKey}
+        slot={pendingSlot}
+        state={visibleSlot === null ? "initialPending" : "pending"}
+        theme={theme}
+        onReady={() => onReady(pendingSlot.versionKey)}
+        onError={(previewError) => onError(pendingSlot.versionKey, previewError)}
+      />
     ) : null}
   </div>
 );
+
+const PreviewBufferPane = ({
+  slot,
+  state,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly slot: PreviewSlot;
+  readonly state: "visible" | "pending" | "initialPending";
+  readonly theme: PreviewTheme;
+  readonly onReady?: () => void;
+  readonly onError?: (error: Error) => void;
+}): React.ReactElement => {
+  const isVisible = state === "visible";
+  const className = isVisible
+    ? "preview-buffer-pane preview-buffer-pane-visible"
+    : state === "initialPending"
+      ? "preview-buffer-pane preview-buffer-pane-pending preview-buffer-pane-initial"
+      : "preview-buffer-pane preview-buffer-pane-pending";
+
+  return (
+    <div className={className} aria-hidden={state === "pending" ? true : undefined}>
+      <Previewer item={slot.item} theme={theme} onReady={onReady} onError={onError} />
+    </div>
+  );
+};
 
 const previewItemDocumentKey = (item: PreviewItem): string => {
   if (item.kind === "file") {
@@ -348,9 +437,7 @@ const PreviewError = ({ message }: { readonly message: string }): React.ReactEle
 );
 
 const PreviewLoading = (): React.ReactElement => (
-  <div className="preview-loading" role="status">
-    Loading...
-  </div>
+  <div className="preview-loading" aria-hidden="true" />
 );
 
 const buildPreviewWebSocketUrl = (): string => {
