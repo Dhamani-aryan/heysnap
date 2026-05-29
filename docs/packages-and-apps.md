@@ -7,13 +7,11 @@ The packages provide shared UI, machine runtime, and hosted backend services.
 
 ### `apps/web`
 
-Next.js app for the hosted browser product.
+Vite app for the hosted browser product.
 
-- Renders the shared `CloudApp` from `packages/ui`.
-- Uses `NEXT_PUBLIC_CLOUD_SERVER_URL`, defaulting to `https://api.heysnap.xyz`.
+- Uses `VITE_CLOUD_SERVER_URL`, defaulting to the local cloud server in dev scripts.
 - Supports cloud machines only.
 - Uses gateway WebSocket URLs for filesystem and agent sessions.
-- Deployed through AWS Amplify via `.github/workflows/deploy-web.yml`.
 
 ### `apps/mobile`
 

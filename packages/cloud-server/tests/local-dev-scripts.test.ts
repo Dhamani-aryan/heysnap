@@ -26,7 +26,7 @@ describe("local machine-server release publisher", () => {
     }
   });
 
-  it("allows the web-v2 Vite dev origin in local CORS defaults", () => {
+  it("allows the web Vite dev origin in local CORS defaults", () => {
     const previous = process.env.CLOUD_SERVER_ALLOWED_ORIGINS;
     delete process.env.CLOUD_SERVER_ALLOWED_ORIGINS;
 

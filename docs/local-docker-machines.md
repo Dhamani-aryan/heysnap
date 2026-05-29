@@ -11,7 +11,7 @@ owns filesystem, agent, and capabilities.
 ```text
 Host:
   cloud-server dev server        http://localhost:4100
-  web dev server                 http://localhost:3000
+  web dev server                 http://127.0.0.1:5175
   artifact publisher             pnpm dev:local:release
 
 Docker:
@@ -37,7 +37,7 @@ machine-server release, and starts the web and admin dev servers.
 The web app is available at:
 
 ```text
-http://localhost:3000
+http://127.0.0.1:5175
 ```
 
 You can also run each long-lived process in its own terminal:

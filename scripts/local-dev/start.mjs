@@ -154,7 +154,7 @@ const main = async () => {
 
   console.log("");
   console.log("Local dev is running.");
-  console.log("Web:         http://localhost:3000");
+  console.log("Web:         http://127.0.0.1:5175");
   console.log("Admin UI:    http://localhost:5174/admin-dashboard/");
   console.log(`Cloud API:   ${localCloudUrl}`);
   console.log("Artifacts:   http://localhost:4101");
