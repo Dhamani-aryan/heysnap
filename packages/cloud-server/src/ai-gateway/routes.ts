@@ -12,7 +12,7 @@ const ANTHROPIC_PROVIDER = "anthropic";
 const IMAGE_MODEL = "gpt-image-2";
 const ALLOWED_ANTHROPIC_MODELS = new Set([
   "claude-sonnet-4-6",
-  "claude-opus-4-7",
+  "claude-opus-4-8",
 ]);
 const CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
 const REQUEST_USER_INPUT_TOOL_NAME = "request_user_input";

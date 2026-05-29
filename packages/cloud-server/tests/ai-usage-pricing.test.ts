@@ -131,9 +131,9 @@ describe("AI usage pricing", () => {
     });
   });
 
-  it("prices claude-opus-4-7 with standard Anthropic rates", () => {
+  it("prices claude-opus-4-8 with standard Anthropic rates", () => {
     const cost = calculateAiUsageCost({
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       inputTokens: 10,
       outputTokens: 4,
       cachedInputTokens: 0,
@@ -142,7 +142,7 @@ describe("AI usage pricing", () => {
     });
 
     expect(cost).toMatchObject({
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       rateMode: "standard",
       totalUsd: 0.00015,
       lineItems: [
