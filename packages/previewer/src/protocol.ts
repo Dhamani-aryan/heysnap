@@ -16,8 +16,10 @@ export type PreviewFile = {
   readonly mime: string;
   readonly size: number;
   readonly mtime: number;
-  readonly data: string;
+  readonly data?: string;
   readonly assetBaseUrl?: string;
+  readonly sourceUrl?: string;
+  readonly downloadUrl?: string;
 };
 
 export type PreviewWorkbook = {
@@ -25,9 +27,56 @@ export type PreviewWorkbook = {
   readonly name: string;
   readonly size: number;
   readonly mtime: number;
-  readonly data: string;
+  readonly version: number;
+  readonly data?: string;
+  readonly downloadUrl?: string;
+  readonly change?: PreviewWorkbookChange;
   readonly workbook: unknown;
 };
+
+export type PreviewWorkbookChange = {
+  readonly type: "initial" | "full" | "patch";
+  readonly version: number;
+  readonly changedCells?: readonly PreviewWorkbookChangedCells[];
+  readonly replacedSheets?: readonly PreviewWorkbookChangedSheet[];
+  readonly stylesChanged?: boolean;
+};
+
+export type PreviewWorkbookChangedCells = {
+  readonly sheetKey: string;
+  readonly sheetIndex: number;
+  readonly addresses: readonly string[];
+};
+
+export type PreviewWorkbookChangedSheet = {
+  readonly sheetKey: string;
+  readonly sheetIndex: number;
+};
+
+export type PreviewWorkbookPatch =
+  readonly PreviewWorkbookPatchOperation[];
+
+export type PreviewWorkbookPatchOperation =
+  | {
+      readonly kind: "cells";
+      readonly sheetKey: string;
+      readonly sheetIndex: number;
+      readonly cells: Readonly<Record<string, unknown | null>>;
+    }
+  | {
+      readonly kind: "replaceSheet";
+      readonly sheetKey: string;
+      readonly sheetIndex: number;
+      readonly sheet: unknown;
+    }
+  | {
+      readonly kind: "replaceSheets";
+      readonly sheets: readonly unknown[];
+    }
+  | {
+      readonly kind: "replaceStyles";
+      readonly styles: unknown | null;
+    };
 
 export type PreviewHtmlChange =
   | { readonly type: "initial" }
@@ -45,9 +94,23 @@ export type PreviewHtml = {
   readonly change?: PreviewHtmlChange;
 };
 
+export type PreviewWorkbookPatchMessage = {
+  readonly type: "workbookPatch";
+  readonly path: string;
+  readonly name: string;
+  readonly size: number;
+  readonly mtime: number;
+  readonly version: number;
+  readonly baseVersion: number;
+  readonly downloadUrl: string;
+  readonly patch: PreviewWorkbookPatch;
+  readonly change: PreviewWorkbookChange;
+};
+
 export type PreviewServerMessage =
   | ({ readonly type: "file" } & PreviewFile)
   | ({ readonly type: "workbook" } & PreviewWorkbook)
+  | PreviewWorkbookPatchMessage
   | ({ readonly type: "htmlPreview" } & PreviewHtml)
   | {
       readonly type: "error";

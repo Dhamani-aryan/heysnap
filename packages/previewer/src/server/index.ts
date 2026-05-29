@@ -30,6 +30,9 @@ export type {
   PreviewItem,
   PreviewServerMessage,
   PreviewWorkbook,
+  PreviewWorkbookChange,
+  PreviewWorkbookPatch,
+  PreviewWorkbookPatchMessage,
 } from "../protocol.js";
 
 export interface RunningPreviewServer {

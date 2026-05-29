@@ -18,7 +18,9 @@
     "dev": "tsx src/dev-server.ts",
     "build": "vite build && vite build --mode server",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:media-range": "node --import tsx --test src/server/mediaRange.test.ts",
+    "test:workbook-patch": "node --import tsx --test src/workbookPatch.test.ts"
   },
   "dependencies": {
     "@embedpdf/core": "^2.14.2",
