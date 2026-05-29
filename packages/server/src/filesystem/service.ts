@@ -1,16 +1,19 @@
-import { lstat, mkdir, readdir, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { cp, lstat, mkdir, readdir, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path, { basename, dirname, join } from "node:path";
 
 import trash from "trash";
 import { FilesystemError } from "./errors.js";
 import { ensureWithinRoot, resolveClientPath, toClientPath, validateEntryName } from "./paths.js";
-import type { FilesystemEntry, FilesystemEntryType, FilesystemListing, FilesystemUploadFile } from "./types.js";
+import type { FilesystemEntry, FilesystemEntryType, FilesystemListing, FilesystemPasteMode, FilesystemPasteResult, FilesystemUploadFile } from "./types.js";
 
 export type TrashFunction = (input: string | readonly string[]) => Promise<void>;
+export type RenameFunction = (oldPath: string, newPath: string) => Promise<void>;
 
 export interface FilesystemServiceOptions {
   readonly rootPath: string;
   readonly trashFunction?: TrashFunction;
+  readonly renameFunction?: RenameFunction;
 }
 
 const DEFAULT_FOLDER_NAME = "untitled folder";
@@ -18,10 +21,12 @@ const DEFAULT_FOLDER_NAME = "untitled folder";
 export class FilesystemService {
   private readonly rootPath: string;
   private readonly trashFunction: TrashFunction;
+  private readonly renameFunction: RenameFunction;
 
   constructor(options: FilesystemServiceOptions) {
     this.rootPath = options.rootPath;
     this.trashFunction = options.trashFunction ?? ((input) => trash(input, { glob: false }));
+    this.renameFunction = options.renameFunction ?? rename;
   }
 
   async listDirectory(rawPath: string | undefined, showHidden: boolean): Promise<FilesystemListing> {
@@ -206,7 +211,7 @@ export class FilesystemService {
     }
 
     await this.ensurePathAvailable(nextPath);
-    await rename(targetPath, nextPath);
+    await this.renameFunction(targetPath, nextPath);
 
     return this.getEntryFromAbsolutePath(nextPath);
   }
@@ -229,8 +234,132 @@ export class FilesystemService {
     return { paths: rawPaths.map((rawPath) => toClientPath(this.rootPath, resolveClientPath(this.rootPath, rawPath))) };
   }
 
+  async pasteEntries(
+    rawDestinationPath: string,
+    rawSourcePaths: readonly string[],
+    mode: FilesystemPasteMode,
+  ): Promise<FilesystemPasteResult> {
+    if (mode !== "copy" && mode !== "move") {
+      throw new FilesystemError("INVALID_PASTE_MODE", "Paste mode is invalid");
+    }
+
+    if (rawSourcePaths.length === 0) {
+      throw new FilesystemError("INVALID_PATH", "At least one source path is required");
+    }
+
+    const destinationPath = resolveClientPath(this.rootPath, rawDestinationPath);
+    const destinationStats = await this.getStats(destinationPath);
+
+    if (!destinationStats.isDirectory()) {
+      throw new FilesystemError("NOT_DIRECTORY", "Paste target path is not a directory");
+    }
+
+    const operations = await Promise.all(
+      rawSourcePaths.map((rawSourcePath) => this.resolvePasteOperation(destinationPath, rawSourcePath)),
+    );
+    const targetPaths = operations.map((operation) => operation.targetPath);
+
+    if (new Set(targetPaths).size !== targetPaths.length) {
+      throw new FilesystemError("DUPLICATE_PASTE_TARGET", "Paste contains duplicate target paths");
+    }
+
+    await Promise.all(targetPaths.map((targetPath) => this.ensurePathAvailable(targetPath)));
+
+    if (mode === "copy") {
+      await Promise.all(operations.map((operation) => this.copyPasteOperation(operation)));
+    } else {
+      await this.movePasteOperations(operations);
+    }
+
+    return {
+      mode,
+      sourcePaths: operations.map((operation) => operation.sourceClientPath),
+      destinationPath: toClientPath(this.rootPath, destinationPath),
+      entries: await Promise.all(operations.map((operation) => this.getEntryFromAbsolutePath(operation.targetPath))),
+    };
+  }
+
   async getEntry(rawPath: string): Promise<FilesystemEntry> {
     return this.getEntryFromAbsolutePath(resolveClientPath(this.rootPath, rawPath));
+  }
+
+  private async resolvePasteOperation(
+    destinationPath: string,
+    rawSourcePath: string,
+  ): Promise<PasteOperation> {
+    if (rawSourcePath === "") {
+      throw new FilesystemError("INVALID_PATH", "Cannot paste the filesystem root");
+    }
+
+    const sourcePath = resolveClientPath(this.rootPath, rawSourcePath);
+    let sourceStats;
+
+    try {
+      sourceStats = await lstat(sourcePath);
+    } catch {
+      throw new FilesystemError("PATH_NOT_FOUND", "Path not found");
+    }
+
+    if (sourceStats.isSymbolicLink()) {
+      throw new FilesystemError("UNSUPPORTED_ENTRY", "Symlink entries cannot be pasted");
+    }
+
+    const type = classifyEntryType(sourceStats.isDirectory(), sourceStats.isFile());
+
+    if (type === null) {
+      throw new FilesystemError("UNSUPPORTED_ENTRY", "Unsupported entry type");
+    }
+
+    if (type === "directory" && isPathInsideOrSame(sourcePath, destinationPath)) {
+      throw new FilesystemError("INVALID_PATH", "Cannot paste a folder into itself");
+    }
+
+    const targetPath = join(destinationPath, basename(sourcePath));
+    ensureWithinRoot(this.rootPath, targetPath);
+
+    return {
+      sourcePath,
+      sourceClientPath: toClientPath(this.rootPath, sourcePath),
+      targetPath,
+      type,
+    };
+  }
+
+  private async copyPasteOperation(operation: PasteOperation): Promise<void> {
+    try {
+      await cp(operation.sourcePath, operation.targetPath, {
+        recursive: operation.type === "directory",
+        force: false,
+        errorOnExist: true,
+        mode: constants.COPYFILE_EXCL,
+      });
+    } catch (error) {
+      if (isNodeError(error) && error.code === "EEXIST") {
+        throw new FilesystemError("PATH_EXISTS", "An item with that name already exists");
+      }
+
+      throw error;
+    }
+  }
+
+  private async movePasteOperations(operations: readonly PasteOperation[]): Promise<void> {
+    const moved: Array<{ readonly sourcePath: string; readonly targetPath: string }> = [];
+
+    try {
+      for (const operation of operations) {
+        await this.renameFunction(operation.sourcePath, operation.targetPath);
+        moved.push({
+          sourcePath: operation.sourcePath,
+          targetPath: operation.targetPath,
+        });
+      }
+    } catch (error) {
+      for (const operation of [...moved].reverse()) {
+        await this.renameFunction(operation.targetPath, operation.sourcePath).catch(() => undefined);
+      }
+
+      throw error;
+    }
   }
 
   private async getEntryFromAbsolutePath(entryPath: string): Promise<FilesystemEntry> {
@@ -311,6 +440,13 @@ export class FilesystemService {
   }
 }
 
+interface PasteOperation {
+  readonly sourcePath: string;
+  readonly sourceClientPath: string;
+  readonly targetPath: string;
+  readonly type: FilesystemEntryType;
+}
+
 export const removeEntriesForTest: TrashFunction = async (input) => {
   const paths = Array.isArray(input) ? input : [input];
   await Promise.all(paths.map((targetPath) => rm(targetPath, { recursive: true, force: false })));
@@ -366,6 +502,11 @@ const decodeBase64 = (contentBase64: string): Buffer => {
 
 const getPathDepth = (relativePath: string): number =>
   relativePath.split("/").length;
+
+const isPathInsideOrSame = (parentPath: string, targetPath: string): boolean => {
+  const relativePath = path.relative(parentPath, targetPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+};
 
 const isNodeError = (value: unknown): value is NodeJS.ErrnoException =>
   value instanceof Error && "code" in value;

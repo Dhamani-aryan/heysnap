@@ -66,6 +66,15 @@ export interface FilesystemUploadCompleteResponse {
   readonly entries: FilesystemEntry[];
 }
 
+export type FilesystemPasteMode = "copy" | "move";
+
+export interface FilesystemPasteResult {
+  readonly mode: FilesystemPasteMode;
+  readonly sourcePaths: string[];
+  readonly destinationPath: string;
+  readonly entries: FilesystemEntry[];
+}
+
 export interface FilesystemViewState {
   readonly currentPath: string | null;
   readonly openFiles: FilesystemEntry[];
@@ -79,12 +88,13 @@ export type FilesystemClientMessage =
   | { readonly type: "upload"; readonly requestId: string; readonly path?: string; readonly files: FilesystemUploadFile[] }
   | { readonly type: "rename"; readonly requestId: string; readonly path: string; readonly newName: string }
   | { readonly type: "trash"; readonly requestId: string; readonly paths: string[] }
+  | { readonly type: "paste"; readonly requestId: string; readonly mode: FilesystemPasteMode; readonly sourcePaths: string[]; readonly path: string }
   | { readonly type: "ping"; readonly requestId: string };
 
 export type FilesystemServerMessage =
   | { readonly type: "hello"; readonly root: { readonly name: string; readonly path: "" }; readonly serverTime: string; readonly viewState?: FilesystemViewState }
   | { readonly type: "snapshot"; readonly requestId?: string; readonly reason: SnapshotReason; readonly listing: FilesystemListing }
-  | { readonly type: "ack"; readonly requestId: string; readonly action: "setOpenFiles" | "createFolder" | "upload" | "rename" | "trash"; readonly result?: unknown }
+  | { readonly type: "ack"; readonly requestId: string; readonly action: "setOpenFiles" | "createFolder" | "upload" | "rename" | "trash" | "paste"; readonly result?: unknown }
   | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string }
   | { readonly type: "pong"; readonly requestId: string; readonly serverTime: string };
 
