@@ -13,9 +13,10 @@ import { useResolvedImageSource, type HeySnapImageSrc } from "./useResolvedImage
 import {
   clampZoom,
   ImageDownloadButton,
+  ImageHeaderGroup,
   ImageHeaderShell,
-  ImageTitle,
-  ImageZoomControls,
+  ImageReloadButton,
+  ImageZoomPicker,
 } from "./ImageViewerHeader";
 
 export type { HeySnapImageSrc } from "./useResolvedImageSource";
@@ -40,12 +41,12 @@ export interface HeySnapImageViewerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the filename span. */
+  /** @deprecated The image toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
-  /** Show the filename on the left side of the toolbar. @default true */
+  /** @deprecated The image toolbar no longer renders a filename. */
   showTitle?: boolean;
-  /** Show the −/+ zoom controls on the right side of the toolbar. @default true */
+  /** Show the zoom level picker on the right side of the toolbar. @default true */
   showZoomControls?: boolean;
   /** Show the download button on the right side of the toolbar. @default true */
   showDownloadButton?: boolean;
@@ -61,7 +62,7 @@ export interface HeySnapImageViewerProps extends Omit<BaseViewerProps, "src"> {
   alt?: string;
 
   // ── Misc ────────────────────────────────────────────────────────────
-  /** Override the document name shown in the title slot. */
+  /** Override the document name used for default alt text. */
   documentName?: string;
   /** Slot for a custom loading indicator while the image decodes. */
   loadingIndicator?: ReactNode;
@@ -100,9 +101,9 @@ const DEFAULTS = {
  * Zoom is layout-based: the rendered `<img>` is sized to `natural × scale`
  * (rather than using `transform: scale()`) so the `overflow: auto` body
  * produces accurate scrollbars when the scaled image exceeds the viewport.
- * Below the fit threshold the image is flex-centered both axes. A
- * `data-src` attribute is stamped on the root for string sources so
- * consumers can identify the source without poking at refs.
+ * Below the fit threshold the image is centered inside an explicit scroll
+ * canvas. A `data-src` attribute is stamped on the root for string sources
+ * so consumers can identify the source without poking at refs.
  */
 export function HeySnapImageViewer({
   src,
@@ -113,9 +114,7 @@ export function HeySnapImageViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
-  showTitle = true,
   showZoomControls = true,
   showDownloadButton = true,
 
@@ -173,6 +172,7 @@ export function HeySnapImageViewer({
   }, [version]);
 
   const applyZoom = (next: number) => setZoom(clampZoom(next));
+  const reloadPreview = () => window.location.reload();
 
   const handleLoad = (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -251,35 +251,21 @@ export function HeySnapImageViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {showTitle && <ImageTitle name={title} style={headerTitleStyle} />}
-          {/* `display: contents` preserves the flex layout while letting us
-              drop the action icons to a muted tint of `currentColor` —
-              matches the XLSX viewer where the title is strong and the
-              surrounding chrome icons are softer gray. */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                flex: 1,
-                minWidth: 0,
-                color: "color-mix(in srgb, currentColor 65%, transparent)",
-              }}
-            >
-            {/* Spacer pushes the right cluster to the far edge while letting
-                the left cluster shrink instead of grow. */}
-            <div style={{ flex: 1 }} />
+          <ImageHeaderGroup align="left">
+            <ImageReloadButton onReload={reloadPreview} />
+          </ImageHeaderGroup>
+          <ImageHeaderGroup align="right">
             {showZoomControls && (
-              <ImageZoomControls
+              <ImageZoomPicker
+                background={headerBackground}
+                foreground={headerForeground}
                 zoom={zoom}
                 onZoom={applyZoom}
-                // Buttons are inert until the image has decoded — otherwise
-                // the percent badge would imply a zoom that nothing reflects.
                 disabled={state !== "ready"}
               />
             )}
             {showDownloadButton && resolved && <ImageDownloadButton resolved={resolved} />}
-          </div>
+          </ImageHeaderGroup>
         </ImageHeaderShell>
       )}
       {body}
@@ -300,13 +286,20 @@ export function HeySnapImageViewer({
     );
   }
 
-  // The body acts as the scroll container; the inner wrapper carries the
-  // transform. We size the wrapper to the *displayed* dimensions (natural
-  // × renderScale) so when the scaled image exceeds the body, overflow
-  // gives us scrollbars — `transform: scale()` alone doesn't because the
-  // transformed element keeps its untransformed layout box.
+  // The body acts as the scroll container. The inner wrapper is sized to the
+  // larger of the viewport and the displayed image so scrollbars always start
+  // at the true top-left edge while smaller images remain centered.
   const displayW = naturalSize ? naturalSize.w * renderScale : undefined;
   const displayH = naturalSize ? naturalSize.h * renderScale : undefined;
+  const hasDisplaySize = displayW !== undefined && displayH !== undefined;
+  const bodyW = bodySize?.w ?? 0;
+  const bodyH = bodySize?.h ?? 0;
+  const measuredDisplayW = displayW ?? 0;
+  const measuredDisplayH = displayH ?? 0;
+  const contentW = hasDisplaySize ? Math.max(measuredDisplayW, bodyW) : "100%";
+  const contentH = hasDisplaySize ? Math.max(measuredDisplayH, bodyH) : "100%";
+  const imageOffsetX = hasDisplaySize ? Math.max((bodyW - measuredDisplayW) / 2, 0) : 0;
+  const imageOffsetY = hasDisplaySize ? Math.max((bodyH - measuredDisplayH) / 2, 0) : 0;
 
   // `data-state="ready"` is set as soon as the source resolves; the image
   // itself may still be decoding. Listeners read `onLoad` / `onError` for
@@ -327,30 +320,20 @@ export function HeySnapImageViewer({
         minWidth: 0,
         background: bodyBackground,
         overflow: "auto",
-        // Center the (possibly scaled) image both axes. When the image is
-        // larger than the body the centering yields to scroll-position once
-        // the user starts panning, which is the natural behavior.
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        display: "block",
         ...bodyStyle,
       }}
     >
       <div
-        // Wrapper takes the *scaled* dimensions so the body's overflow
-        // produces accurate scrollbars when the image exceeds the viewport.
-        // We don't use `transform: scale()` because transforms don't
-        // contribute to layout, which would make the scrollbar lie about
-        // how much content is offscreen.
+        // The wrapper is an explicit scrollable canvas. Flex-centering inside
+        // an overflow container can hide the start edge of oversized images,
+        // especially tall screenshots at high zoom.
         style={{
-          width: displayW,
-          height: displayH,
-          // Keep the wrapper from shrinking inside flex centering — the
-          // body's `flex` rules would otherwise compress it.
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          position: "relative",
+          width: contentW,
+          height: contentH,
+          minWidth: "100%",
+          minHeight: "100%",
         }}
       >
         <img
@@ -368,6 +351,9 @@ export function HeySnapImageViewer({
           // hint entirely, which is the right behavior for vector content.
           style={{
             display: "block",
+            position: hasDisplaySize ? "absolute" : "static",
+            left: hasDisplaySize ? imageOffsetX : undefined,
+            top: hasDisplaySize ? imageOffsetY : undefined,
             width: displayW,
             height: displayH,
             maxWidth: "none",

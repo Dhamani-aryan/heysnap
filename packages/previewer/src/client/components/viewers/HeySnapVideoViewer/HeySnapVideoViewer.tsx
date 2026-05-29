@@ -14,9 +14,10 @@ import { useResolvedVideoSource, type HeySnapVideoSrc } from "./useResolvedVideo
 import {
   clampVideoZoom,
   VideoDownloadButton,
+  VideoHeaderGroup,
   VideoHeaderShell,
-  VideoTitle,
-  VideoZoomControls,
+  VideoReloadButton,
+  VideoZoomPicker,
 } from "./VideoViewerHeader";
 
 export type { HeySnapVideoSrc } from "./useResolvedVideoSource";
@@ -41,12 +42,12 @@ export interface HeySnapVideoViewerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the filename span. */
+  /** @deprecated The video toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
-  /** Show the filename on the left side of the toolbar. @default true */
+  /** @deprecated The video toolbar no longer renders a filename. */
   showTitle?: boolean;
-  /** Show the −/+ zoom controls on the right side of the toolbar. @default true */
+  /** Show the zoom level picker on the right side of the toolbar. @default true */
   showZoomControls?: boolean;
   /** Show the download button on the right side of the toolbar. @default true */
   showDownloadButton?: boolean;
@@ -72,6 +73,8 @@ export interface HeySnapVideoViewerProps extends Omit<BaseViewerProps, "src"> {
   preload?: VideoHTMLAttributes<HTMLVideoElement>["preload"];
   /** Optional poster image URL shown before playback begins. */
   poster?: string;
+  /** Optional URL used by the toolbar download button. */
+  downloadUrl?: string;
   /**
    * `crossOrigin` attribute forwarded to the `<video>` element. Useful when
    * the source URL serves CORS headers and a consumer wants to read frames.
@@ -79,7 +82,7 @@ export interface HeySnapVideoViewerProps extends Omit<BaseViewerProps, "src"> {
   crossOrigin?: VideoHTMLAttributes<HTMLVideoElement>["crossOrigin"];
 
   // ── Misc ────────────────────────────────────────────────────────────
-  /** Override the document name shown in the title slot. */
+  /** Override the document name used for downloads and diagnostics. */
   documentName?: string;
   /** Slot for a custom loading indicator while the metadata loads. */
   loadingIndicator?: ReactNode;
@@ -114,6 +117,15 @@ const DEFAULTS = {
 
 const NATIVE_CONTROLS_HEIGHT = 48;
 
+type VideoPlaybackSnapshot = {
+  readonly currentTime: number;
+  readonly muted: boolean;
+  readonly paused: boolean;
+  readonly playbackRate: number;
+  readonly volume: number;
+  readonly zoom: number;
+};
+
 /**
  * Read-only video viewer with a fit-to-window default and the browser's
  * native playback controls. Renders the file via the platform's native
@@ -133,9 +145,7 @@ export function HeySnapVideoViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
-  showTitle = true,
   showZoomControls = true,
   showDownloadButton = true,
 
@@ -149,6 +159,7 @@ export function HeySnapVideoViewer({
   loop = false,
   preload = "metadata",
   poster,
+  downloadUrl,
   crossOrigin,
 
   documentName,
@@ -170,6 +181,7 @@ export function HeySnapVideoViewer({
   const [ready, setReady] = useState(false);
   const [zoom, setZoom] = useState<number>(1);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [bodySize, setBodySize] = useState<{ w: number; h: number } | null>(null);
 
@@ -180,11 +192,22 @@ export function HeySnapVideoViewer({
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const readyVersionRef = useRef<number | null>(null);
+  const zoomRef = useRef(zoom);
+  const playbackSnapshotRef = useRef<VideoPlaybackSnapshot | null>(null);
+  const previousSrcRef = useRef<HeySnapVideoSrc | null>(null);
+  zoomRef.current = zoom;
+
+  useLayoutEffect(() => {
+    if (previousSrcRef.current !== null && previousSrcRef.current !== src) {
+      playbackSnapshotRef.current = captureVideoPlaybackSnapshot(videoRef.current, zoomRef.current);
+    }
+
+    previousSrcRef.current = src;
+  }, [src]);
 
   useEffect(() => {
     setLoadError(null);
     setReady(false);
-    setZoom(1);
     setNaturalSize(null);
     setBodySize(null);
   }, [version]);
@@ -207,13 +230,28 @@ export function HeySnapVideoViewer({
     return () => ro.disconnect();
   }, [resolved?.url]);
 
+  useEffect(() => {
+    return () => {
+      const snapshot = captureVideoPlaybackSnapshot(videoRef.current, zoomRef.current);
+      if (snapshot !== null) {
+        playbackSnapshotRef.current = snapshot;
+      }
+    };
+  }, [resolved?.url]);
+
   const applyZoom = (next: number) => setZoom(clampVideoZoom(next));
+  const reloadPreview = () => window.location.reload();
 
   const handleLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement>) => {
     const video = e.currentTarget;
     if (video.videoWidth > 0 && video.videoHeight > 0) {
       setNaturalSize({ w: video.videoWidth, h: video.videoHeight });
     }
+    restoreVideoPlaybackSnapshot(video, playbackSnapshotRef.current);
+    if (playbackSnapshotRef.current !== null) {
+      setZoom(playbackSnapshotRef.current.zoom);
+    }
+    playbackSnapshotRef.current = null;
     setReady(true);
   };
 
@@ -235,7 +273,7 @@ export function HeySnapVideoViewer({
   };
 
   // ── Render ──────────────────────────────────────────────────────────
-  const title = documentName || resolved?.name || "";
+  const downloadName = documentName || resolved?.name || "video";
 
   const renderShell = (state: "loading" | "error" | "ready", body: ReactNode) => (
     <div
@@ -254,32 +292,27 @@ export function HeySnapVideoViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {showTitle && <VideoTitle name={title} style={headerTitleStyle} />}
-          {/* `display: contents` preserves the flex layout while letting us
-              drop the action icons to a muted tint of `currentColor` —
-              matches the image viewer's chrome treatment. */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                flex: 1,
-                minWidth: 0,
-                color: "color-mix(in srgb, currentColor 65%, transparent)",
-              }}
-            >
-            {/* Spacer pushes the right cluster to the far edge while letting
-                the left cluster shrink instead of grow. */}
-            <div style={{ flex: 1 }} />
+          <VideoHeaderGroup align="left">
+            <VideoReloadButton onReload={reloadPreview} />
+          </VideoHeaderGroup>
+          <VideoHeaderGroup align="right">
             {showZoomControls && (
-              <VideoZoomControls
+              <VideoZoomPicker
+                background={headerBackground}
+                foreground={headerForeground}
                 zoom={zoom}
                 onZoom={applyZoom}
                 disabled={state !== "ready"}
               />
             )}
-            {showDownloadButton && resolved && <VideoDownloadButton resolved={resolved} />}
-          </div>
+            {showDownloadButton && resolved && (
+              <VideoDownloadButton
+                resolved={resolved}
+                downloadUrl={downloadUrl}
+                name={downloadName}
+              />
+            )}
+          </VideoHeaderGroup>
         </VideoHeaderShell>
       )}
       {body}
@@ -315,6 +348,15 @@ export function HeySnapVideoViewer({
   const renderScale = fitScale * zoom;
   const displayW = naturalSize ? naturalSize.w * renderScale : undefined;
   const displayH = naturalSize ? naturalSize.h * renderScale : undefined;
+  const hasDisplaySize = displayW !== undefined && displayH !== undefined;
+  const bodyW = bodySize?.w ?? 0;
+  const bodyH = bodySize?.h ?? 0;
+  const measuredDisplayW = displayW ?? 0;
+  const measuredDisplayH = displayH ?? 0;
+  const contentW = hasDisplaySize ? Math.max(measuredDisplayW, bodyW) : "100%";
+  const contentH = hasDisplaySize ? Math.max(measuredDisplayH, bodyH) : "100%";
+  const videoOffsetX = hasDisplaySize ? Math.max((bodyW - measuredDisplayW) / 2, 0) : 0;
+  const videoOffsetY = hasDisplaySize ? Math.max((bodyH - measuredDisplayH) / 2, 0) : 0;
 
   return renderShell(
     state,
@@ -325,24 +367,18 @@ export function HeySnapVideoViewer({
         minHeight: 0,
         minWidth: 0,
         background: bodyBackground,
-        // Center the video both axes; `object-fit: contain` on the element
-        // handles the aspect-ratio fit so the letterbox bars land on
-        // `bodyBackground` rather than stretching the content.
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         overflow: "auto",
+        display: "block",
         ...bodyStyle,
       }}
     >
       <div
         style={{
-          width: displayW,
-          height: displayH,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          position: "relative",
+          width: contentW,
+          height: contentH,
+          minWidth: "100%",
+          minHeight: "100%",
         }}
       >
         <video
@@ -350,6 +386,7 @@ export function HeySnapVideoViewer({
           // from the previous source — otherwise `<video>` will sometimes
           // hang onto the old metadata until you call `.load()` manually.
           key={resolved.url}
+          ref={videoRef}
           src={resolved.url}
           controls={controls}
           autoPlay={autoPlay}
@@ -365,6 +402,9 @@ export function HeySnapVideoViewer({
           playsInline
           style={{
             display: "block",
+            position: hasDisplaySize ? "absolute" : "static",
+            left: hasDisplaySize ? videoOffsetX : undefined,
+            top: hasDisplaySize ? videoOffsetY : undefined,
             width: displayW ?? "100%",
             height: displayH ?? "100%",
             maxWidth: "none",
@@ -377,4 +417,42 @@ export function HeySnapVideoViewer({
       </div>
     </div>,
   );
+}
+
+function captureVideoPlaybackSnapshot(
+  video: HTMLVideoElement | null,
+  zoom: number,
+): VideoPlaybackSnapshot | null {
+  if (video === null) return null;
+
+  return {
+    currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+    muted: video.muted,
+    paused: video.paused,
+    playbackRate: Number.isFinite(video.playbackRate) ? video.playbackRate : 1,
+    volume: Number.isFinite(video.volume) ? video.volume : 1,
+    zoom,
+  };
+}
+
+function restoreVideoPlaybackSnapshot(
+  video: HTMLVideoElement,
+  snapshot: VideoPlaybackSnapshot | null,
+): void {
+  if (snapshot === null) return;
+
+  video.muted = snapshot.muted;
+  video.volume = Math.max(0, Math.min(1, snapshot.volume));
+  if (snapshot.playbackRate > 0) {
+    video.playbackRate = snapshot.playbackRate;
+  }
+
+  if (Number.isFinite(snapshot.currentTime) && snapshot.currentTime > 0) {
+    const duration = Number.isFinite(video.duration) ? video.duration : snapshot.currentTime;
+    video.currentTime = Math.min(snapshot.currentTime, Math.max(duration - 0.25, 0));
+  }
+
+  if (!snapshot.paused) {
+    void video.play().catch(() => undefined);
+  }
 }

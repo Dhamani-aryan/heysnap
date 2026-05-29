@@ -1,6 +1,19 @@
-import type { CSSProperties, ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Download01Icon, MinusSignIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  Download01Icon,
+  Refresh01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 
 import { IconButton } from "../../_internal/IconButton";
 import type { ResolvedImageSource } from "./useResolvedImageSource";
@@ -11,28 +24,23 @@ import type { ResolvedImageSource } from "./useResolvedImageSource";
 // spreadsheets do.
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 8.0;
-const ZOOM_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0] as const;
+const ZOOM_PRESETS = [
+  0.25,
+  0.5,
+  0.75,
+  1.0,
+  1.25,
+  1.5,
+  2.0,
+  3.0,
+  4.0,
+  6.0,
+  8.0,
+] as const;
 
 export function clampZoom(z: number): number {
   if (!Number.isFinite(z)) return 1;
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
-}
-
-/** Largest preset strictly less than `current`. Tiny epsilon prevents the
- * UI from getting stuck at non-preset values picked by "fit to screen". */
-export function getPreviousZoomPreset(current: number): number {
-  for (let i = ZOOM_PRESETS.length - 1; i >= 0; i--) {
-    if (ZOOM_PRESETS[i] < current - 1e-3) return ZOOM_PRESETS[i];
-  }
-  return MIN_ZOOM;
-}
-
-/** Smallest preset strictly greater than `current`. */
-export function getNextZoomPreset(current: number): number {
-  for (const p of ZOOM_PRESETS) {
-    if (p > current + 1e-3) return p;
-  }
-  return MAX_ZOOM;
 }
 
 interface HeaderShellProps {
@@ -46,13 +54,13 @@ interface HeaderShellProps {
 const headerBaseStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  // 28 px between functional clusters keeps the rhythm consistent with the
-  // PDF / DOCX / XLSX headers — three viewers, one toolbar idiom.
-  gap: 28,
+  justifyContent: "space-between",
+  gap: 8,
   height: 40,
   flexShrink: 0,
   padding: "0 8px",
-  // Single hairline under the bar. `currentColor` follows `foreground`.
+  position: "relative",
+  zIndex: 2,
   boxShadow: "inset 0 -1px 0 color-mix(in srgb, currentColor 10%, transparent)",
 };
 
@@ -68,49 +76,50 @@ export function ImageHeaderShell({ background, foreground, style, children }: He
   );
 }
 
-interface ImageTitleProps {
-  /** Filename / display name shown on the left side of the toolbar. */
-  name: string;
-  /** Styles merged onto the title span. */
-  style?: CSSProperties;
+interface ImageHeaderGroupProps {
+  align?: "left" | "right";
+  children?: ReactNode;
 }
 
-const defaultTitleStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 500,
-  letterSpacing: "-0.005em",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  opacity: 0.92,
-  // Match the title indentation other viewers use when no leading icon
-  // precedes it — keeps the text visually clear of the toolbar edge.
-  paddingLeft: 6,
-};
-
-/**
- * Title on the left side of the toolbar. The truncation only fires when the
- * outer flex slot allows shrinking — `minWidth: 0` + `flex: 0 1 auto` on the
- * wrapper provides that.
- */
-export function ImageTitle({ name, style }: ImageTitleProps) {
+export function ImageHeaderGroup({ align = "left", children }: ImageHeaderGroupProps) {
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: align === "right" ? "flex-end" : "flex-start",
+        gap: 6,
+        flex: align === "right" ? "0 0 auto" : "1 1 auto",
         minWidth: 0,
-        flex: "0 1 auto",
+        color: "color-mix(in srgb, currentColor 72%, transparent)",
       }}
     >
-      <span title={name} style={{ ...defaultTitleStyle, ...style }}>
-        {name}
-      </span>
+      {children}
     </div>
   );
 }
 
-interface ImageZoomControlsProps {
+interface ImageReloadButtonProps {
+  disabled?: boolean;
+  onReload: () => void;
+}
+
+export function ImageReloadButton({ disabled = false, onReload }: ImageReloadButtonProps) {
+  return (
+    <IconButton
+      aria-label="Reload preview"
+      title="Reload preview"
+      disabled={disabled}
+      onClick={onReload}
+    >
+      <HugeiconsIcon icon={Refresh01Icon} size={16} strokeWidth={1.9} />
+    </IconButton>
+  );
+}
+
+interface ImageZoomPickerProps {
+  background: string;
+  foreground: string;
   /** Current zoom (1.0 == 100 %). */
   zoom: number;
   /** Called with the *next* clamped ratio. */
@@ -119,50 +128,218 @@ interface ImageZoomControlsProps {
   disabled?: boolean;
 }
 
-/**
- * Zoom cluster: minus / "100 %" badge / plus. Tabular numerals keep the
- * badge from twitching as digits change; buttons disable at the bounds so
- * the user gets a clear "this is the limit" signal.
- */
-export function ImageZoomControls({ zoom, onZoom, disabled = false }: ImageZoomControlsProps) {
-  const percent = Math.round(zoom * 100);
-  const canZoomOut = !disabled && zoom > MIN_ZOOM + 1e-3;
-  const canZoomIn = !disabled && zoom < MAX_ZOOM - 1e-3;
+export function ImageZoomPicker({
+  background,
+  foreground,
+  zoom,
+  onZoom,
+  disabled = false,
+}: ImageZoomPickerProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [hoveredLevel, setHoveredLevel] = useState<number | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const menuId = useId();
+  const selectedIndex = nearestZoomPresetIndex(zoom);
+  const selectedZoom = ZOOM_PRESETS[selectedIndex] ?? 1;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    const handleWindowBlur = () => setIsOpen(false);
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (disabled) setIsOpen(false);
+  }, [disabled]);
+
+  const openMenu = (focusIndex = selectedIndex) => {
+    if (disabled) return;
+    setIsOpen(true);
+    window.requestAnimationFrame(() => itemRefs.current[focusIndex]?.focus());
+  };
+
+  const selectZoom = (nextZoom: number) => {
+    onZoom(clampZoom(nextZoom));
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      openMenu(selectedIndex);
+    }
+  };
 
   return (
-    <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 2 }}>
-      <IconButton
-        aria-label="Zoom out"
-        disabled={!canZoomOut}
-        onClick={() => onZoom(getPreviousZoomPreset(zoom))}
-      >
-        <HugeiconsIcon icon={MinusSignIcon} size={16} strokeWidth={2} />
-      </IconButton>
-
-      <span
+    <div
+      ref={rootRef}
+      title="Zoom level"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && rootRef.current?.contains(nextTarget)) return;
+        setIsOpen(false);
+      }}
+      style={{
+        position: "relative",
+        flexShrink: 0,
+      }}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label="Zoom level"
+        aria-haspopup="listbox"
+        aria-controls={isOpen ? menuId : undefined}
+        aria-expanded={isOpen}
+        disabled={disabled}
+        onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={handleTriggerKeyDown}
         style={{
-          minWidth: 48,
-          textAlign: "center",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 5,
+          minWidth: 70,
+          height: 28,
+          padding: "0 8px 0 10px",
+          border: 0,
+          borderRadius: 6,
+          background: isOpen
+            ? "color-mix(in srgb, currentColor 12%, transparent)"
+            : "transparent",
+          color: "inherit",
+          cursor: disabled ? "not-allowed" : "pointer",
+          font: "inherit",
           fontSize: 12,
-          fontFamily: "inherit",
           fontVariantNumeric: "tabular-nums",
-          letterSpacing: "0.01em",
-          userSelect: "none",
-          opacity: 0.85,
+          opacity: disabled ? 0.35 : 1,
+          outline: "none",
         }}
-        aria-live="polite"
-        aria-atomic="true"
       >
-        {percent}%
-      </span>
+        <span>{formatZoom(selectedZoom)}</span>
+        <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2.1} />
+      </button>
 
-      <IconButton
-        aria-label="Zoom in"
-        disabled={!canZoomIn}
-        onClick={() => onZoom(getNextZoomPreset(zoom))}
-      >
-        <HugeiconsIcon icon={PlusSignIcon} size={16} strokeWidth={2} />
-      </IconButton>
+      {isOpen && (
+        <div
+          id={menuId}
+          role="listbox"
+          aria-label="Zoom level"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            zIndex: 10,
+            minWidth: 112,
+            padding: 4,
+            borderRadius: 8,
+            background,
+            color: foreground,
+            boxShadow:
+              "0 12px 30px color-mix(in srgb, #000 20%, transparent), 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent)",
+          }}
+        >
+          {ZOOM_PRESETS.map((level, index) => {
+            const isSelected = level === selectedZoom;
+            const isHovered = level === hoveredLevel;
+
+            return (
+              <button
+                key={level}
+                ref={(node) => {
+                  itemRefs.current[index] = node;
+                }}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => selectZoom(level)}
+                onFocus={() => setHoveredLevel(level)}
+                onMouseEnter={() => setHoveredLevel(level)}
+                onMouseLeave={() => setHoveredLevel(null)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const direction = event.key === "ArrowDown" ? 1 : -1;
+                    const nextIndex =
+                      (index + direction + ZOOM_PRESETS.length) % ZOOM_PRESETS.length;
+                    itemRefs.current[nextIndex]?.focus();
+                    setHoveredLevel(ZOOM_PRESETS[nextIndex] ?? null);
+                  } else if (event.key === "Home") {
+                    event.preventDefault();
+                    itemRefs.current[0]?.focus();
+                    setHoveredLevel(ZOOM_PRESETS[0] ?? null);
+                  } else if (event.key === "End") {
+                    event.preventDefault();
+                    const lastIndex = ZOOM_PRESETS.length - 1;
+                    itemRefs.current[lastIndex]?.focus();
+                    setHoveredLevel(ZOOM_PRESETS[lastIndex] ?? null);
+                  }
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 14,
+                  width: "100%",
+                  minHeight: 28,
+                  padding: "0 7px 0 9px",
+                  border: 0,
+                  borderRadius: 6,
+                  background: isHovered || isSelected
+                    ? "color-mix(in srgb, currentColor 9%, transparent)"
+                    : "transparent",
+                  color: "inherit",
+                  cursor: "pointer",
+                  font: "inherit",
+                  fontSize: 12,
+                  fontVariantNumeric: "tabular-nums",
+                  textAlign: "left",
+                }}
+              >
+                <span>{formatZoom(level)}</span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 14,
+                    height: 14,
+                    opacity: isSelected ? 1 : 0,
+                  }}
+                >
+                  <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2.2} />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -180,7 +357,7 @@ interface ImageDownloadButtonProps {
  */
 export function ImageDownloadButton({ resolved }: ImageDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadImage(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadImage(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );
@@ -194,4 +371,23 @@ function downloadImage(resolved: ResolvedImageSource) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+function nearestZoomPresetIndex(zoom: number): number {
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  ZOOM_PRESETS.forEach((preset, index) => {
+    const distance = Math.abs(preset - zoom);
+    if (distance < bestDistance) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  });
+
+  return bestIndex;
+}
+
+function formatZoom(zoom: number): string {
+  return `${Math.round(zoom * 100)}%`;
 }
