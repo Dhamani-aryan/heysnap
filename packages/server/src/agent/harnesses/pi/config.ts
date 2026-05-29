@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { PI_SYSTEM_PROMPT } from "./system-prompt.js";
 
 export const PI_DEFAULT_PROVIDER = "anthropic";
-export const PI_DEFAULT_MODEL = "claude-opus-4-7";
+export const PI_DEFAULT_MODEL = "claude-opus-4-8";
 export const PI_ALLOWED_MODELS = [
   "claude-sonnet-4-6",
-  "claude-opus-4-7",
+  "claude-opus-4-8",
 ] as const;
 
 export interface PiUserConfigInput {

@@ -99,7 +99,7 @@ describe("agent HTTP API", () => {
         path: "Projects/app",
         content: textContent("Build the UI"),
         provider: "anthropic",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
       }),
       headers: { "content-type": "application/json" },
     });
@@ -108,7 +108,7 @@ describe("agent HTTP API", () => {
     await readSseMessages(response);
     expect(harness.sendInputs[0]).toMatchObject({
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     });
   });
 
@@ -122,7 +122,7 @@ describe("agent HTTP API", () => {
         content: textContent("Build the UI"),
         harness: "pi",
         provider: "anthropic",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
       }),
       headers: { "content-type": "application/json" },
     });
@@ -132,7 +132,7 @@ describe("agent HTTP API", () => {
     expect(harness.sendInputs[0]).toMatchObject({
       harness: "pi",
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     });
   });
 

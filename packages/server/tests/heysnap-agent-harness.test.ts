@@ -90,7 +90,7 @@ describe("HeysnapAgentHarness", () => {
       path: "Projects/app",
       content: textContent("hello"),
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     }));
 
     expect(pi.sendInputs).toHaveLength(0);
@@ -119,7 +119,7 @@ describe("HeysnapAgentHarness", () => {
       path: "Projects/app",
       content: textContent("hello"),
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     }));
 
     expect(codex.sendInputs).toHaveLength(0);
@@ -127,7 +127,7 @@ describe("HeysnapAgentHarness", () => {
       threadId: undefined,
       path: "Projects/app",
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     }]);
     expect(events[0]).toMatchObject({
       threadId: "pi:pi-new",

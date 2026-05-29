@@ -36,9 +36,9 @@ describe("Pi user config", () => {
   it("renders managed Pi settings for cloud machine defaults", () => {
     expect(renderPiSettings()).toBe(`${JSON.stringify({
       defaultProvider: "anthropic",
-      defaultModel: "claude-opus-4-7",
+      defaultModel: "claude-opus-4-8",
       defaultThinkingLevel: "medium",
-      enabledModels: ["claude-sonnet-4-6", "claude-opus-4-7"],
+      enabledModels: ["claude-sonnet-4-6", "claude-opus-4-8"],
       sessionDir: "sessions",
       enableInstallTelemetry: false,
       quietStartup: true,
@@ -103,11 +103,11 @@ describe("Pi user config", () => {
       install: false,
       apiKey: "machine-token",
       baseUrl: "https://cloud.example.com",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     });
 
     expect(await readFile(join(home, ".pi", "agent", "settings.json"), "utf8"))
-      .toBe(renderPiSettings("claude-opus-4-7"));
+      .toBe(renderPiSettings("claude-opus-4-8"));
     expect(await readFile(join(home, ".pi", "agent", "models.json"), "utf8"))
       .toBe(renderPiModels("https://cloud.example.com/llm/anthropic"));
     expect(await readFile(join(home, ".pi", "agent", "auth.json"), "utf8"))
@@ -296,7 +296,7 @@ describe("Pi user config", () => {
         parentId: "t1",
         timestamp: "2026-05-26T11:00:05.000Z",
         provider: "anthropic",
-        modelId: "claude-opus-4-7",
+        modelId: "claude-opus-4-8",
       },
       {
         type: "compaction",
@@ -372,7 +372,7 @@ describe("Pi user config", () => {
         tone: "info",
         status: "completed",
         title: "Model changed",
-        summary: "anthropic/claude-opus-4-7",
+        summary: "anthropic/claude-opus-4-8",
         createdAt: Date.parse("2026-05-26T11:00:05.000Z"),
         payload: {
           type: "model_change",
@@ -380,7 +380,7 @@ describe("Pi user config", () => {
           parentId: "t1",
           timestamp: "2026-05-26T11:00:05.000Z",
           provider: "anthropic",
-          modelId: "claude-opus-4-7",
+          modelId: "claude-opus-4-8",
         },
       },
       {
