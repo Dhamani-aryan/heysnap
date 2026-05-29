@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClientProvider } from '@tanstack/react-query'
+import 'streamdown/styles.css'
 import './globals.css'
 import './components/agent/agent.css'
 import './components/voice/voice.css'
