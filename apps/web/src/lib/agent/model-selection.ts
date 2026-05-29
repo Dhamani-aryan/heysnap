@@ -25,7 +25,7 @@ export function getNewThreadModelSelection({
     return {
       harness: 'pi',
       provider: 'anthropic',
-      model: 'claude-opus-4-7',
+      model: 'claude-opus-4-8',
     }
   }
 

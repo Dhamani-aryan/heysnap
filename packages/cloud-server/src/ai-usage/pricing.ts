@@ -57,7 +57,7 @@ export const calculateAiUsageCost = (
         cacheWrite1h: 6,
         output: 15,
       });
-    case "claude-opus-4-7":
+    case "claude-opus-4-8":
       return calculateClaudeCost(usage, {
         input: 5,
         cachedInput: 0.5,

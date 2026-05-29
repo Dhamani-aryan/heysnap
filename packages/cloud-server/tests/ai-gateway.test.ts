@@ -304,7 +304,7 @@ describe("AI gateway", () => {
       const response = await app.request("/llm/anthropic/v1/messages", {
         method: "POST",
         body: JSON.stringify({
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
           messages: [{ role: "user", content: "hi" }],
           max_tokens: 1024,
           stream: true,

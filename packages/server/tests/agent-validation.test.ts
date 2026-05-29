@@ -37,14 +37,14 @@ describe("agent validation", () => {
       content: [{ type: "text", content: "Build this" }],
       harness: "pi",
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     }))).toMatchObject({
       type: "sendMessage",
       requestId: "send-1",
       path: "Projects",
       harness: "pi",
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     });
   });
 

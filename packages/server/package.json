@@ -25,7 +25,7 @@
     "@ank1015-app/previewer": "workspace:*",
     "@ank1015-app/tunnel-protocol": "workspace:*",
     "@axiomhq/pino": "^1.6.1",
-    "@earendil-works/pi-coding-agent": "^0.75.5",
+    "@earendil-works/pi-coding-agent": "^0.77.0",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^5.0.0",
     "pino": "^10.3.1",
