@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { toast } from 'sonner'
 import {
   getActiveFilesystemManager,
   useFilesystemStore,
@@ -50,6 +51,13 @@ export function FilesystemPane() {
   const currentPath = useFilesystemStore((s) => s.currentPath)
   const navigate = useFilesystemStore((s) => s.navigate)
   const openFile = useFilesystemStore((s) => s.openFile)
+  const filesystemClipboard = useFilesystemStore((s) => s.filesystemClipboard)
+  const setFilesystemClipboard = useFilesystemStore(
+    (s) => s.setFilesystemClipboard,
+  )
+  const clearFilesystemClipboard = useFilesystemStore(
+    (s) => s.clearFilesystemClipboard,
+  )
 
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
@@ -244,6 +252,40 @@ export function FilesystemPane() {
       link.remove()
     } catch (error) {
       console.error('Failed to download:', error)
+    }
+  }
+
+  const copyEntries = (targets: readonly FilesystemEntry[]): void => {
+    if (targets.length === 0) return
+    setFilesystemClipboard('copy', targets)
+  }
+
+  const cutEntries = (targets: readonly FilesystemEntry[]): void => {
+    if (targets.length === 0) return
+    setFilesystemClipboard('cut', targets)
+  }
+
+  const pasteClipboard = async (): Promise<void> => {
+    const manager = getActiveFilesystemManager()
+    const clipboard = useFilesystemStore.getState().filesystemClipboard
+    if (!manager || clipboard === null || clipboard.entries.length === 0) return
+
+    try {
+      const result = await manager.paste(
+        clipboard.mode === 'cut' ? 'move' : 'copy',
+        clipboard.entries.map((entry) => entry.path),
+        currentPath,
+      )
+      const pastedPaths = result?.entries.map((entry) => entry.path) ?? []
+      if (pastedPaths.length > 0) {
+        setSelectedPaths(pastedPaths)
+        setAnchorPath(pastedPaths[0] ?? null)
+      }
+      if (clipboard.mode === 'cut') {
+        clearFilesystemClipboard()
+      }
+    } catch (error) {
+      toast.error((error as Error).message)
     }
   }
 
@@ -459,9 +501,17 @@ export function FilesystemPane() {
         <BackgroundContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          canPaste={
+            filesystemClipboard !== null &&
+            filesystemClipboard.entries.length > 0
+          }
           onCreateFolder={() => {
             setContextMenu(null)
             void createFolder()
+          }}
+          onPaste={() => {
+            setContextMenu(null)
+            void pasteClipboard()
           }}
           onUploadFiles={() => {
             setContextMenu(null)
@@ -480,6 +530,14 @@ export function FilesystemPane() {
           onOpen={(entry) => {
             setContextMenu(null)
             openEntry(entry)
+          }}
+          onCopy={(entry) => {
+            setContextMenu(null)
+            copyEntries([entry])
+          }}
+          onCut={(entry) => {
+            setContextMenu(null)
+            cutEntries([entry])
           }}
           onRename={(entry) => {
             setContextMenu(null)
@@ -500,6 +558,14 @@ export function FilesystemPane() {
           x={contextMenu.x}
           y={contextMenu.y}
           entries={contextMenu.entries}
+          onCopy={(picked) => {
+            setContextMenu(null)
+            copyEntries(picked)
+          }}
+          onCut={(picked) => {
+            setContextMenu(null)
+            cutEntries(picked)
+          }}
           onTrash={(picked) => {
             setContextMenu(null)
             void trashEntries(picked)

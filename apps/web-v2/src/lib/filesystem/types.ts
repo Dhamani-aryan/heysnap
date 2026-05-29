@@ -70,6 +70,15 @@ export type FilesystemUploadCompleteResponse = {
   readonly entries: readonly FilesystemEntry[]
 }
 
+export type FilesystemPasteMode = 'copy' | 'move'
+
+export type FilesystemPasteResult = {
+  readonly mode: FilesystemPasteMode
+  readonly sourcePaths: readonly string[]
+  readonly destinationPath: string
+  readonly entries: readonly FilesystemEntry[]
+}
+
 export type FilesystemClientMessage =
   | {
       readonly type: 'subscribe'
@@ -106,6 +115,13 @@ export type FilesystemClientMessage =
       readonly requestId: string
       readonly paths: readonly string[]
     }
+  | {
+      readonly type: 'paste'
+      readonly requestId: string
+      readonly mode: FilesystemPasteMode
+      readonly sourcePaths: readonly string[]
+      readonly path: string
+    }
   | { readonly type: 'ping'; readonly requestId: string }
 
 export type FilesystemSnapshotReason =
@@ -130,7 +146,13 @@ export type FilesystemServerMessage =
   | {
       readonly type: 'ack'
       readonly requestId: string
-      readonly action: 'setOpenFiles' | 'createFolder' | 'upload' | 'rename' | 'trash'
+      readonly action:
+        | 'setOpenFiles'
+        | 'createFolder'
+        | 'upload'
+        | 'rename'
+        | 'trash'
+        | 'paste'
       readonly result?: unknown
     }
   | {

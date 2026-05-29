@@ -9,9 +9,9 @@ import {
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 
 export const CONTEXT_MENU_WIDTH = 200
-export const BACKGROUND_MENU_HEIGHT = 148
-export const ENTRY_MENU_HEIGHT = 196
-export const SELECTION_MENU_HEIGHT = 64
+export const BACKGROUND_MENU_HEIGHT = 180
+export const ENTRY_MENU_HEIGHT = 260
+export const SELECTION_MENU_HEIGHT = 128
 
 export type ContextMenuState =
   | { kind: 'background'; x: number; y: number }
@@ -22,12 +22,16 @@ export function BackgroundContextMenu({
   x,
   y,
   onCreateFolder,
+  onPaste,
+  canPaste,
   onUploadFiles,
   onUploadFolder,
 }: {
   x: number
   y: number
   onCreateFolder: () => void
+  onPaste: () => void
+  canPaste: boolean
   onUploadFiles: () => void
   onUploadFolder: () => void
 }): ReactElement {
@@ -44,6 +48,13 @@ export function BackgroundContextMenu({
         }
         label="New Folder"
         onSelect={onCreateFolder}
+      />
+      <MenuSeparator />
+      <MenuItem
+        icon={<PasteGlyph />}
+        label="Paste"
+        onSelect={onPaste}
+        disabled={!canPaste}
       />
       <MenuSeparator />
       <MenuItem icon={<InfoGlyph />} label="Get Info" disabled />
@@ -81,6 +92,8 @@ export function EntryContextMenu({
   y,
   entry,
   onOpen,
+  onCopy,
+  onCut,
   onRename,
   onGetInfo,
   onTrash,
@@ -90,6 +103,8 @@ export function EntryContextMenu({
   y: number
   entry: FilesystemEntry
   onOpen: (entry: FilesystemEntry) => void
+  onCopy: (entry: FilesystemEntry) => void
+  onCut: (entry: FilesystemEntry) => void
   onRename: (entry: FilesystemEntry) => void
   onGetInfo: (entry: FilesystemEntry) => void
   onTrash: (entry: FilesystemEntry) => void
@@ -102,6 +117,17 @@ export function EntryContextMenu({
         label="Open"
         onSelect={() => onOpen(entry)}
       />
+      <MenuItem
+        icon={<CopyGlyph />}
+        label="Copy"
+        onSelect={() => onCopy(entry)}
+      />
+      <MenuItem
+        icon={<CutGlyph />}
+        label="Cut"
+        onSelect={() => onCut(entry)}
+      />
+      <MenuSeparator />
       <MenuItem
         icon={<RenameGlyph />}
         label="Rename"
@@ -138,17 +164,32 @@ export function SelectionContextMenu({
   x,
   y,
   entries,
+  onCopy,
+  onCut,
   onTrash,
   onDownload,
 }: {
   x: number
   y: number
   entries: FilesystemEntry[]
+  onCopy: (entries: readonly FilesystemEntry[]) => void
+  onCut: (entries: readonly FilesystemEntry[]) => void
   onTrash: (entries: readonly FilesystemEntry[]) => void
   onDownload: (entries: readonly FilesystemEntry[]) => void
 }): ReactElement {
   return (
     <MenuShell x={x} y={y}>
+      <MenuItem
+        icon={<CopyGlyph />}
+        label="Copy"
+        onSelect={() => onCopy(entries)}
+      />
+      <MenuItem
+        icon={<CutGlyph />}
+        label="Cut"
+        onSelect={() => onCut(entries)}
+      />
+      <MenuSeparator />
       <MenuItem
         icon={<TrashGlyph />}
         label="Trash"
@@ -214,7 +255,7 @@ function MenuItem({
         event.stopPropagation()
         onSelect?.()
       }}
-      className="flex min-h-[24px] w-full items-center gap-[8px] rounded-[6px] px-[8px] py-[2px] text-left text-[13px] font-normal leading-none tracking-[-0.005em] text-current outline-none transition-none hover:enabled:bg-[#0064e1] hover:enabled:text-white disabled:cursor-default"
+      className="flex min-h-[24px] w-full items-center gap-[8px] rounded-[6px] px-[8px] py-[2px] text-left text-[13px] font-normal leading-none tracking-[-0.005em] text-current outline-none transition-none hover:enabled:bg-[#0064e1] hover:enabled:text-white disabled:cursor-default disabled:opacity-45"
     >
       <span
         aria-hidden="true"
@@ -273,6 +314,66 @@ function RenameGlyph(): ReactElement {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </GlyphSvg>
+  )
+}
+
+function CopyGlyph(): ReactElement {
+  return (
+    <GlyphSvg>
+      <path
+        d="M8 8.5V6.8A2.8 2.8 0 0 1 10.8 4h5.4A2.8 2.8 0 0 1 19 6.8v5.4a2.8 2.8 0 0 1-2.8 2.8h-1.7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect
+        x="5"
+        y="9"
+        width="10"
+        height="10"
+        rx="2.6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+    </GlyphSvg>
+  )
+}
+
+function CutGlyph(): ReactElement {
+  return (
+    <GlyphSvg>
+      <path
+        d="M5.5 5.5 18.5 18.5M18.5 5.5 12.7 11.3"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <circle cx="6.5" cy="17.5" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="6.5" cy="6.5" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+    </GlyphSvg>
+  )
+}
+
+function PasteGlyph(): ReactElement {
+  return (
+    <GlyphSvg>
+      <path
+        d="M9 5.5h6M9.5 4h5a1.5 1.5 0 0 1 1.5 1.5v1A1.5 1.5 0 0 1 14.5 8h-5A1.5 1.5 0 0 1 8 6.5v-1A1.5 1.5 0 0 1 9.5 4Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 6H6.8A2.8 2.8 0 0 0 4 8.8v8.4A2.8 2.8 0 0 0 6.8 20h10.4a2.8 2.8 0 0 0 2.8-2.8V8.8A2.8 2.8 0 0 0 17.2 6H16"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M8 12h8M8 16h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </GlyphSvg>
   )
 }

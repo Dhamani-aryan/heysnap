@@ -3,6 +3,8 @@ import type {
   FilesystemConnectionStatus,
   FilesystemEntry,
   FilesystemListing,
+  FilesystemPasteMode,
+  FilesystemPasteResult,
   FilesystemServerMessage,
 } from './types.ts'
 
@@ -106,6 +108,20 @@ export class FilesystemConnectionManager {
 
   async trash(paths: readonly string[]): Promise<void> {
     await this.request({ type: 'trash', paths: [...paths] })
+  }
+
+  async paste(
+    mode: FilesystemPasteMode,
+    sourcePaths: readonly string[],
+    path: string,
+  ): Promise<FilesystemPasteResult | null> {
+    const result = await this.request({
+      type: 'paste',
+      mode,
+      sourcePaths: [...sourcePaths],
+      path,
+    })
+    return isFilesystemPasteResult(result) ? result : null
   }
 
   async setOpenFiles(paths: readonly string[]): Promise<void> {
@@ -455,5 +471,18 @@ function isFilesystemEntry(value: unknown): value is FilesystemEntry {
     typeof candidate.name === 'string' &&
     typeof candidate.path === 'string' &&
     (candidate.type === 'file' || candidate.type === 'directory')
+  )
+}
+
+function isFilesystemPasteResult(value: unknown): value is FilesystemPasteResult {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return (
+    (candidate.mode === 'copy' || candidate.mode === 'move') &&
+    Array.isArray(candidate.sourcePaths) &&
+    candidate.sourcePaths.every((path) => typeof path === 'string') &&
+    typeof candidate.destinationPath === 'string' &&
+    Array.isArray(candidate.entries) &&
+    candidate.entries.every(isFilesystemEntry)
   )
 }

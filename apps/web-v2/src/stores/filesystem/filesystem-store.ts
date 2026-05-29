@@ -14,6 +14,12 @@ import {
 const HISTORY_LIMIT = 64
 
 export type LeftPaneSurface = 'directory' | 'file' | 'browser'
+export type FilesystemClipboardMode = 'copy' | 'cut'
+
+export type FilesystemClipboard = {
+  readonly mode: FilesystemClipboardMode
+  readonly entries: FilesystemEntry[]
+}
 
 let activeManager: FilesystemConnectionManager | null = null
 
@@ -39,6 +45,7 @@ type FilesystemState = {
   activeFilePath: string | null
   activeLeftPaneSurface: LeftPaneSurface
   hasHydratedOpenFiles: boolean
+  filesystemClipboard: FilesystemClipboard | null
 }
 
 type FilesystemActions = {
@@ -53,6 +60,11 @@ type FilesystemActions = {
   selectFileTab: (path: string) => void
   showDirectory: () => void
   showBrowser: () => void
+  setFilesystemClipboard: (
+    mode: FilesystemClipboardMode,
+    entries: readonly FilesystemEntry[],
+  ) => void
+  clearFilesystemClipboard: () => void
   reset: () => void
 }
 
@@ -68,6 +80,7 @@ const initialState: FilesystemState = {
   activeFilePath: null,
   activeLeftPaneSurface: 'directory',
   hasHydratedOpenFiles: false,
+  filesystemClipboard: null,
 }
 
 export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
@@ -280,6 +293,14 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
 
     showBrowser: () => {
       set({ activeLeftPaneSurface: 'browser' })
+    },
+
+    setFilesystemClipboard: (mode, entries) => {
+      set({ filesystemClipboard: { mode, entries: [...entries] } })
+    },
+
+    clearFilesystemClipboard: () => {
+      set({ filesystemClipboard: null })
     },
 
     reset: () => {
