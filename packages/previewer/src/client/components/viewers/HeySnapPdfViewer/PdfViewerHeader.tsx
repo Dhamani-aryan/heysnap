@@ -12,11 +12,18 @@ import { useZoom } from "@embedpdf/plugin-zoom/react";
 import { usePan } from "@embedpdf/plugin-pan/react";
 
 import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+  ViewerValuePicker,
+} from "../../_internal/ViewerToolbar";
 import type { ResolvedPdfSource } from "./useResolvedPdfSource";
 
 /** Match the zoom plugin defaults so the buttons disable at the real bounds. */
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 60;
+const PDF_ZOOM_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0] as const;
 
 interface HeaderShellProps {
   background: string;
@@ -48,11 +55,14 @@ const headerBaseStyle: CSSProperties = {
  */
 export function PdfHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <ViewerHeaderShell background={background} foreground={foreground} style={style}>
       {children}
-    </header>
+    </ViewerHeaderShell>
   );
 }
+
+export const PdfHeaderGroup = ViewerHeaderGroup;
+export const PdfReloadButton = ViewerReloadButton;
 
 interface PdfHeaderLeftProps {
   title: string;
@@ -116,6 +126,23 @@ export function PdfHeaderLeft({
   );
 }
 
+export function PdfSidebarButton({
+  isSidebarOpen,
+  onToggleSidebar,
+  sidebarId,
+}: Pick<PdfHeaderLeftProps, "isSidebarOpen" | "onToggleSidebar" | "sidebarId">) {
+  return (
+    <IconButton
+      aria-label={isSidebarOpen ? "Hide pages" : "Show pages"}
+      aria-expanded={isSidebarOpen}
+      aria-controls={sidebarId}
+      onClick={onToggleSidebar}
+    >
+      <HugeiconsIcon icon={Menu01Icon} size={16} strokeWidth={2} />
+    </IconButton>
+  );
+}
+
 interface PdfInteractionToolsProps {
   documentId: string;
 }
@@ -166,7 +193,7 @@ interface PdfDownloadButtonProps {
  */
 export function PdfDownloadButton({ resolved }: PdfDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadPdf(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadPdf(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );
@@ -250,5 +277,30 @@ export function PdfZoomControls({ documentId }: ZoomControlsProps) {
         <HugeiconsIcon icon={PlusSignIcon} size={16} strokeWidth={2} />
       </IconButton>
     </div>
+  );
+}
+
+export function PdfZoomPicker({
+  background,
+  documentId,
+  foreground,
+}: ZoomControlsProps & {
+  background: string;
+  foreground: string;
+}) {
+  const { state, provides } = useZoom(documentId);
+  const zoom = state?.currentZoomLevel ?? 1;
+
+  return (
+    <ViewerValuePicker
+      background={background}
+      disabled={!provides}
+      foreground={foreground}
+      formatValue={(value) => `${String(Math.round(value * 100))}%`}
+      label="Zoom level"
+      onChange={(next) => provides?.requestZoom(next)}
+      options={PDF_ZOOM_PRESETS}
+      value={Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom))}
+    />
   );
 }
