@@ -110,8 +110,8 @@ const HtmlPreview = ({
   return (
     <HeySnapHtmlViewer
       src={src}
+      change={data.change}
       documentName={data.name}
-      codeTheme={theme.codeTheme}
       headerBackground={theme.headerBackground}
       headerForeground={theme.headerForeground}
       bodyBackground={theme.codeBodyBackground}
