@@ -18,9 +18,10 @@ import {
 import {
   clampFontSize,
   CodeDownloadButton,
-  CodeFontSizeControls,
+  CodeFontSizePicker,
+  CodeHeaderGroup,
   CodeHeaderShell,
-  CodeTitle,
+  CodeReloadButton,
   CodeWordWrapButton,
 } from "./CodeViewerHeader";
 import { defineHeysnapThemes, HEYSNAP_LIGHT_ID } from "./heysnapMonacoThemes";
@@ -65,12 +66,12 @@ export interface HeySnapCodeViewerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the filename span. */
+  /** @deprecated The code toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
-  /** Show the filename on the left side of the toolbar. @default true */
+  /** @deprecated The code toolbar no longer renders a filename. */
   showTitle?: boolean;
-  /** Show the −/+ font-size cluster on the right. @default true */
+  /** Show the font-size picker on the right. @default true */
   showFontSizeControls?: boolean;
   /** Show the word-wrap toggle on the right. @default true */
   showWordWrapButton?: boolean;
@@ -111,7 +112,7 @@ export interface HeySnapCodeViewerProps extends Omit<BaseViewerProps, "src"> {
   options?: editor.IStandaloneEditorConstructionOptions;
 
   // ── Misc ────────────────────────────────────────────────────────────
-  /** Override the filename shown in the toolbar. */
+  /** Override the filename used for language inference when needed. */
   documentName?: string;
   /** Slot for a custom loading indicator while the source resolves. */
   loadingIndicator?: ReactNode;
@@ -271,9 +272,7 @@ export function HeySnapCodeViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
-  showTitle = true,
   showFontSizeControls = true,
   showWordWrapButton = true,
   showDownloadButton = true,
@@ -379,7 +378,7 @@ export function HeySnapCodeViewer({
     language ?? (resolved ? resolved.language : languageFromName(documentName ?? ""));
 
   // ── Render ──────────────────────────────────────────────────────────
-  const title = documentName || resolved?.name || "";
+  const reloadPreview = () => window.location.reload();
 
   const renderShell = (state: "loading" | "error" | "ready", body: ReactNode) => (
     <div
@@ -398,30 +397,16 @@ export function HeySnapCodeViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {showTitle && <CodeTitle name={title} style={headerTitleStyle} />}
-          {/* `display: contents` preserves the flex layout while letting us
-              drop the action icons to a muted tint of `currentColor` — same
-              pattern the other viewers use to keep the title strong and the
-              chrome icons softer. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-              flex: 1,
-              minWidth: 0,
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
-            {/* Spacer pushes the right cluster to the far edge while letting
-                the left cluster shrink instead of grow. */}
-            <div style={{ flex: 1 }} />
+          <CodeHeaderGroup align="left">
+            <CodeReloadButton onReload={reloadPreview} />
+          </CodeHeaderGroup>
+          <CodeHeaderGroup align="right">
             {showFontSizeControls && (
-              <CodeFontSizeControls
+              <CodeFontSizePicker
+                background={headerBackground}
+                foreground={headerForeground}
                 fontSize={fontSize}
                 onChange={applyFontSize}
-                // Buttons are inert until the editor has mounted — otherwise
-                // the badge would imply a size nothing reflects.
                 disabled={state !== "ready"}
               />
             )}
@@ -433,7 +418,7 @@ export function HeySnapCodeViewer({
               />
             )}
             {showDownloadButton && resolved && <CodeDownloadButton resolved={resolved} />}
-          </div>
+          </CodeHeaderGroup>
         </CodeHeaderShell>
       )}
       {body}

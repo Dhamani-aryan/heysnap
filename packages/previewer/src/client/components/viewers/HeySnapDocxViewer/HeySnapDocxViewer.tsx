@@ -13,9 +13,10 @@ import { ReadyAfterPaint } from "../../_internal/previewReady";
 import { useResolvedDocxSource, type HeySnapDocxSrc } from "./useResolvedDocxSource";
 import {
   DocxDownloadButton,
+  DocxHeaderGroup,
   DocxHeaderShell,
-  DocxHeaderTitle,
-  DocxZoomControls,
+  DocxReloadButton,
+  DocxZoomPicker,
   clampZoom,
 } from "./DocxViewerHeader";
 import { ensureDocxThemeStyles } from "./docxThemeStyles";
@@ -47,7 +48,7 @@ export interface HeySnapDocxViewerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the filename text in the toolbar. */
+  /** @deprecated The DOCX toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
   // ── Body / page gutter ───────────────────────────────────────────────
@@ -160,7 +161,6 @@ export function HeySnapDocxViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
   bodyBackground = DEFAULTS.bodyBackground,
   bodyStyle,
@@ -279,7 +279,14 @@ export function HeySnapDocxViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {header}
+          {header ?? (
+            <>
+              <DocxHeaderGroup align="left">
+                <DocxReloadButton onReload={reloadPreview} />
+              </DocxHeaderGroup>
+              <DocxHeaderGroup align="right" />
+            </>
+          )}
         </DocxHeaderShell>
       )}
       {body}
@@ -289,6 +296,7 @@ export function HeySnapDocxViewer({
   const onZoom = useCallback((next: number) => {
     setZoom(clampZoom(next));
   }, []);
+  const reloadPreview = () => window.location.reload();
 
   // Buffer fetch error.
   if (error) {
@@ -306,8 +314,6 @@ export function HeySnapDocxViewer({
     );
   }
 
-  const title = documentName ?? resolved.name;
-
   return (
     <div
       className={rootClass(className)}
@@ -321,24 +327,18 @@ export function HeySnapDocxViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          <DocxHeaderTitle title={title} titleStyle={headerTitleStyle} />
-          {/* Icon cluster tinted to a softer `currentColor` shade — same
-              treatment the XLSX/PDF viewers use to make the filename the
-              focal element of the header. */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                flex: 1,
-                minWidth: 0,
-                color: "color-mix(in srgb, currentColor 65%, transparent)",
-              }}
-            >
-            <div style={{ flex: 1 }} />
-            <DocxZoomControls zoom={zoom} onZoom={onZoom} />
+          <DocxHeaderGroup align="left">
+            <DocxReloadButton onReload={reloadPreview} />
+          </DocxHeaderGroup>
+          <DocxHeaderGroup align="right">
+            <DocxZoomPicker
+              background={headerBackground}
+              foreground={headerForeground}
+              zoom={zoom}
+              onZoom={onZoom}
+            />
             <DocxDownloadButton resolved={resolved} />
-          </div>
+          </DocxHeaderGroup>
         </DocxHeaderShell>
       )}
 

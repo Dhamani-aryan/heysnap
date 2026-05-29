@@ -3,6 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Download01Icon, MinusSignIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 
 import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+  ViewerValuePicker,
+} from "../../_internal/ViewerToolbar";
 import type { ResolvedDocxSource } from "./useResolvedDocxSource";
 
 // Familiar zoom ladder — mirrors the image/XLSX viewers so the docx
@@ -61,11 +67,14 @@ const headerBaseStyle: CSSProperties = {
  */
 export function DocxHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <ViewerHeaderShell background={background} foreground={foreground} style={style}>
       {children}
-    </header>
+    </ViewerHeaderShell>
   );
 }
+
+export const DocxHeaderGroup = ViewerHeaderGroup;
+export const DocxReloadButton = ViewerReloadButton;
 
 interface DocxHeaderTitleProps {
   title: string;
@@ -169,6 +178,31 @@ export function DocxZoomControls({ zoom, onZoom }: DocxZoomControlsProps) {
   );
 }
 
+export function DocxZoomPicker({
+  background,
+  disabled = false,
+  foreground,
+  onZoom,
+  zoom,
+}: DocxZoomControlsProps & {
+  background: string;
+  disabled?: boolean;
+  foreground: string;
+}) {
+  return (
+    <ViewerValuePicker
+      background={background}
+      disabled={disabled}
+      foreground={foreground}
+      formatValue={(value) => `${String(Math.round(value * 100))}%`}
+      label="Zoom level"
+      onChange={(next) => onZoom(clampZoom(next))}
+      options={ZOOM_PRESETS}
+      value={zoom}
+    />
+  );
+}
+
 interface DocxDownloadButtonProps {
   resolved: ResolvedDocxSource;
 }
@@ -180,7 +214,7 @@ interface DocxDownloadButtonProps {
  */
 export function DocxDownloadButton({ resolved }: DocxDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadDocx(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadDocx(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );

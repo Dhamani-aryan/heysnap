@@ -11,7 +11,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { BaseViewerProps } from "../../types";
-import { clampDocumentZoom, DocumentZoomControls } from "../../_internal/documentZoom";
+import { clampDocumentZoom } from "../../_internal/documentZoom";
 import { ReadyAfterPaint } from "../../_internal/previewReady";
 import { HeySnapCodeViewer } from "../HeySnapCodeViewer";
 import { CodeWordWrapButton } from "../HeySnapCodeViewer/CodeViewerHeader";
@@ -21,9 +21,11 @@ import {
 } from "./useResolvedMarkdownSource";
 import {
   MarkdownDownloadButton,
+  MarkdownHeaderGroup,
   MarkdownHeaderShell,
   MarkdownModeToggle,
-  MarkdownTitle,
+  MarkdownReloadButton,
+  MarkdownZoomPicker,
   type MarkdownViewMode,
 } from "./MarkdownViewerHeader";
 import {
@@ -244,9 +246,7 @@ export function HeySnapMarkdownViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
-  showTitle = true,
   showModeToggle = true,
   showZoomControls = true,
   showDownloadButton = true,
@@ -322,7 +322,7 @@ export function HeySnapMarkdownViewer({
   );
 
   // ── Render ──────────────────────────────────────────────────────────
-  const title = documentName || resolved?.name || "";
+  const reloadPreview = () => window.location.reload();
 
   const renderShell = (state: "loading" | "error" | "ready", body: ReactNode) => (
     <div
@@ -341,51 +341,26 @@ export function HeySnapMarkdownViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {showTitle && <MarkdownTitle name={title} style={headerTitleStyle} />}
-          {/* The mode toggle lives directly to the right of the filename —
-              the user requested this specifically. The action cluster on
-              the far right (download) is muted via `display: contents` so
-              it shares the toolbar rhythm with the other viewers. */}
-          {showModeToggle && (
-            <div
-              style={{
-                color: "color-mix(in srgb, currentColor 65%, transparent)",
-              }}
-            >
+          <MarkdownHeaderGroup align="left">
+            <MarkdownReloadButton onReload={reloadPreview} />
+          </MarkdownHeaderGroup>
+          <MarkdownHeaderGroup align="right">
+            {showModeToggle && (
               <MarkdownModeToggle
                 mode={currentMode}
                 onChange={handleModeChange}
                 disabled={state !== "ready"}
               />
-            </div>
-          )}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-              flex: 1,
-              minWidth: 0,
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
-            <div style={{ flex: 1 }} />
+            )}
             {showZoomControls && (
-              <DocumentZoomControls
+              <MarkdownZoomPicker
+                background={headerBackground}
+                foreground={headerForeground}
                 zoom={zoom}
                 onZoom={applyZoom}
-                // Zoom only meaningfully applies to the rendered preview.
-                // In code mode the embedded HeySnapCodeViewer owns its own
-                // font-size cluster (currently hidden behind its header);
-                // we disable here so the badge doesn't lie about a state
-                // the user can't see.
                 disabled={state !== "ready" || currentMode !== "preview"}
               />
             )}
-            {/* Word-wrap toggle is meaningful only in code mode — the
-                preview already wraps. We render it conditionally rather
-                than disabled so the chrome reads as "no toggle exists
-                here" rather than "broken toggle." */}
             {currentMode === "code" && (
               <CodeWordWrapButton
                 wrapped={wordWrap === "on"}
@@ -394,7 +369,7 @@ export function HeySnapMarkdownViewer({
               />
             )}
             {showDownloadButton && resolved && <MarkdownDownloadButton resolved={resolved} />}
-          </div>
+          </MarkdownHeaderGroup>
         </MarkdownHeaderShell>
       )}
       {body}
