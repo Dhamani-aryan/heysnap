@@ -254,7 +254,7 @@ const getNewThreadModelSelection = ({
     return {
       harness: "pi" as const,
       provider: "anthropic",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     };
   }
 
