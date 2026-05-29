@@ -783,7 +783,7 @@ function getIntersectingPaths(
   box: { left: number; top: number; right: number; bottom: number },
 ): string[] {
   const containerRect = container.getBoundingClientRect()
-  return [...container.querySelectorAll<HTMLElement>('[data-entry-path]')]
+  return Array.from(container.querySelectorAll<HTMLElement>('[data-entry-path]'))
     .filter((element) => {
       const rect = element.getBoundingClientRect()
       const itemBox = {

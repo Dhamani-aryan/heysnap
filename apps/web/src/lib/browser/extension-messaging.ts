@@ -115,7 +115,7 @@ export function sendExtensionCommand(
         return
       }
 
-      if (!message.ok) {
+      if (message.ok === false) {
         reject(new ExtensionCommandError(message.error.code, message.error.message))
         return
       }

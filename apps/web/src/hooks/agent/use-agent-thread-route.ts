@@ -16,7 +16,7 @@ export function useAgentThreadRoute() {
     computerId?: string
     threadId?: string
   }
-  const navigate = useNavigate()
+  const navigate = useNavigate({ from: '/machines/$computerId' })
 
   const computerId = params.computerId ?? null
   const threadId = useMemo(() => decodeRouteParam(params.threadId), [params.threadId])
@@ -30,7 +30,7 @@ export function useAgentThreadRoute() {
       if (computerId === null) return
       const encoded = encodeURIComponent(nextThreadId)
       void navigate({
-        to: '/machines/$computerId/$threadId',
+        to: './$threadId',
         params: { computerId, threadId: encoded },
         replace: options.replace ?? false,
       })
@@ -42,7 +42,7 @@ export function useAgentThreadRoute() {
     (options: { replace?: boolean } = {}) => {
       if (computerId === null) return
       void navigate({
-        to: '/machines/$computerId',
+        to: '.',
         params: { computerId },
         replace: options.replace ?? false,
       })

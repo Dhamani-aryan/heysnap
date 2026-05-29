@@ -88,7 +88,7 @@ function compareForDisplay(a: CloudComputer, b: CloudComputer): number {
 
 export function MachinesPage() {
   const logoutMutation = useLogoutMutation()
-  const navigate = useNavigate()
+  const navigate = useNavigate({ from: '/machines' })
   const queryClient = useQueryClient()
   const { data: machines } = useSuspenseQuery(machinesQueryOptions)
 
