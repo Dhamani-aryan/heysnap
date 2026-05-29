@@ -1,7 +1,15 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
-  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
+  content: [
+    './index.html',
+    './src/**/*.{js,jsx,ts,tsx}',
+    '../../node_modules/streamdown/dist/*.js',
+    '../../node_modules/@streamdown/code/dist/*.js',
+    '../../node_modules/@streamdown/cjk/dist/*.js',
+    '../../node_modules/@streamdown/math/dist/*.js',
+    '../../node_modules/@streamdown/mermaid/dist/*.js',
+  ],
   theme: {
     extend: {
       fontFamily: {

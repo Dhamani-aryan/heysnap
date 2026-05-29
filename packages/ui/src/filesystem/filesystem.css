@@ -1,3 +1,4 @@
+@import "streamdown/styles.css";
 @import "../components/filesystem/finder/finder.css";
 @import "../components/filesystem/browser/browser.css";
 @import "../components/filesystem/workspace/workspace-chrome.css";
