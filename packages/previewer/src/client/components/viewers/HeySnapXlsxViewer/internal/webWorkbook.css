@@ -42,51 +42,48 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 10px 0 14px;
+  gap: 8px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--web-workbook-header-border);
+  position: relative;
+  z-index: 4;
 }
 
-.web-workbook-title {
+.web-workbook-header-group {
   min-width: 0;
-  overflow: hidden;
-  color: var(--web-workbook-strong-text);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.web-workbook-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 16px;
-}
-
-.web-workbook-zoom {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
+  color: color-mix(in srgb, currentColor 70%, transparent);
+}
+
+.web-workbook-header-group-left {
+  justify-content: flex-start;
+}
+
+.web-workbook-header-group-right {
+  justify-content: flex-end;
 }
 
 .web-workbook-icon-button {
   width: 28px;
   height: 28px;
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--web-workbook-muted-text);
+  color: inherit;
   cursor: pointer;
   padding: 0;
+  margin: 0;
 }
 
 .web-workbook-icon-button:hover {
-  background: var(--web-workbook-icon-hover-bg, var(--web-workbook-muted-bg-hover));
-  color: var(--web-workbook-icon-hover-color, var(--web-workbook-strong-text));
+  background: var(--web-workbook-icon-hover-bg, color-mix(in srgb, currentColor 8%, transparent));
+  color: var(--web-workbook-icon-hover-color, inherit);
 }
 
 .web-workbook-icon-button:disabled {
@@ -96,7 +93,7 @@
 
 .web-workbook-icon-button:disabled:hover {
   background: transparent;
-  color: var(--web-workbook-muted-text);
+  color: inherit;
 }
 
 .web-workbook-icon-button:focus-visible {
@@ -104,13 +101,95 @@
   outline-offset: 2px;
 }
 
-.web-workbook-zoom-value {
-  min-width: 42px;
-  color: var(--web-workbook-muted-text);
+.web-workbook-zoom-picker {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.web-workbook-zoom-trigger {
+  height: 28px;
+  min-width: 78px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  color: inherit;
+  cursor: pointer;
+  outline: none;
+  padding: 0 8px;
+  font: inherit;
   font-size: 12px;
   font-weight: 600;
-  line-height: 1;
-  text-align: center;
+  line-height: 28px;
+}
+
+.web-workbook-zoom-trigger:hover,
+.web-workbook-zoom-trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.web-workbook-zoom-trigger:focus-visible {
+  outline: 2px solid var(--active-border);
+  outline-offset: 2px;
+}
+
+.web-workbook-zoom-menu {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  min-width: 104px;
+  overflow: hidden;
+  border: 1px solid var(--web-workbook-header-border);
+  border-radius: 8px;
+  background: var(--web-workbook-sheet-bg);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.16);
+  color: var(--web-workbook-strong-text);
+  padding: 4px;
+  z-index: 30;
+}
+
+.theme-dark .web-workbook-zoom-menu {
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
+}
+
+.web-workbook-zoom-menu button {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  outline: none;
+}
+
+.web-workbook-zoom-menu button.hovered,
+.web-workbook-zoom-menu button:hover,
+.web-workbook-zoom-menu button:focus-visible {
+  background: #0285ff;
+  color: #ffffff;
+}
+
+.web-workbook-zoom-check {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .web-workbook-formula-bar {
