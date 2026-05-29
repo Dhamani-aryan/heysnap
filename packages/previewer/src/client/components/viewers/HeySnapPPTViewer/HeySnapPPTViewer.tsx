@@ -21,9 +21,11 @@ import { usePPTConversion } from "./usePPTConversion";
 import {
   clampZoom,
   PPTDownloadButton,
-  PPTHeaderLeft,
+  PPTHeaderGroup,
   PPTHeaderShell,
-  PPTZoomControls,
+  PPTReloadButton,
+  PPTSidebarButton,
+  PPTZoomPicker,
 } from "./PPTViewerHeader";
 import { PPTSidebar } from "./PPTSidebar";
 
@@ -61,14 +63,14 @@ export interface HeySnapPPTViewerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the title span. */
+  /** @deprecated The PPT toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
   /** Show the menu icon that toggles the sidebar. @default true */
   showSidebarToggle?: boolean;
-  /** Show the presentation filename. @default true */
+  /** @deprecated The PPT toolbar no longer renders a filename. */
   showTitle?: boolean;
-  /** Show the −/+ zoom controls on the right. @default true */
+  /** Show the zoom level picker on the right. @default true */
   showZoomControls?: boolean;
   /** Show the download button on the right. @default true */
   showDownloadButton?: boolean;
@@ -160,10 +162,8 @@ export function HeySnapPPTViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
   showSidebarToggle = true,
-  showTitle = true,
   showZoomControls = true,
   showDownloadButton = true,
 
@@ -431,11 +431,7 @@ export function HeySnapPPTViewer({
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
   }, [navigateSlides]);
 
-  // ── Title resolution ────────────────────────────────────────────────
-  const title = useMemo(() => {
-    if (documentName) return documentName;
-    return resolved?.name ?? "Presentation";
-  }, [documentName, resolved?.name]);
+  const reloadPreview = () => window.location.reload();
 
   // ── Slide sizing ────────────────────────────────────────────────────
   // 100% means "largest whole slide that fits in the current body area".
@@ -480,27 +476,21 @@ export function HeySnapPPTViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          <PPTHeaderLeft
-            title={title}
-            isSidebarOpen={effectiveSidebarOpen}
-            onToggleSidebar={toggleSidebar}
-            sidebarId={sidebarId}
-            showSidebarToggle={showSidebarToggle && state === "ready"}
-            titleStyle={showTitle ? headerTitleStyle : { display: "none" }}
-          />
-          {/* `display: contents` preserves the flex layout while letting us
-              drop the action icons to a muted tint of `currentColor` — same
-              pattern the other viewers use to keep the title strong and the
-              chrome icons softer. */}
-          <div
-            style={{
-              display: "contents",
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
-            <div style={{ flex: 1 }} />
+          <PPTHeaderGroup align="left">
+            <PPTReloadButton onReload={reloadPreview} />
+            {showSidebarToggle && state === "ready" ? (
+              <PPTSidebarButton
+                isSidebarOpen={effectiveSidebarOpen}
+                onToggleSidebar={toggleSidebar}
+                sidebarId={sidebarId}
+              />
+            ) : null}
+          </PPTHeaderGroup>
+          <PPTHeaderGroup align="right">
             {showZoomControls && (
-              <PPTZoomControls
+              <PPTZoomPicker
+                background={headerBackground}
+                foreground={headerForeground}
                 zoom={zoom}
                 onZoom={applyZoom}
                 disabled={state !== "ready"}
@@ -511,7 +501,7 @@ export function HeySnapPPTViewer({
                 <PPTDownloadButton resolved={resolved} />
               </div>
             )}
-          </div>
+          </PPTHeaderGroup>
         </PPTHeaderShell>
       )}
 

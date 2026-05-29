@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import { AgentError } from "./errors.js";
+import { compareThreadsByUpdatedAtDesc, groupThreadSummariesByStartPath } from "./thread-groups.js";
 import type {
   AgentContent,
   EditThreadUserMessageInput,
   AgentMessage,
   AgentRunEvent,
   AgentThread,
-  AgentThreadGroup,
   AgentThreadSummary,
   AssistantMessage,
   IAgentHarness,
@@ -39,24 +39,11 @@ export class MockAgentHarness implements IAgentHarness {
   async retrieveThreads(input: RetrieveThreadsInput = {}): Promise<RetrieveThreadsResult> {
     const threads = Array.from(this.threads.values())
       .filter((thread) => isThreadInRoot(thread, input.rootPath))
-      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .sort(compareThreadsByUpdatedAtDesc)
       .slice(0, input.limit);
 
-    const groups = new Map<string, AgentThreadSummary[]>();
-
-    for (const thread of threads) {
-      const group = groups.get(thread.startPath) ?? [];
-      group.push(toThreadSummary(thread));
-      groups.set(thread.startPath, group);
-    }
-
     return {
-      groups: Array.from(groups.entries())
-        .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
-        .map(([path, groupThreads]): AgentThreadGroup => ({
-          path,
-          threads: groupThreads.sort((left, right) => right.updatedAt - left.updatedAt),
-        })),
+      groups: groupThreadSummariesByStartPath(threads.map(toThreadSummary)),
     };
   }
 

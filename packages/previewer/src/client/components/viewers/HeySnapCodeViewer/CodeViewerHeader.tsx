@@ -8,6 +8,12 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+  ViewerValuePicker,
+} from "../../_internal/ViewerToolbar";
 import type { ResolvedCodeSource } from "./useResolvedCodeSource";
 
 // Font-size ladder matched to the other viewers' zoom envelopes. Monaco
@@ -65,11 +71,14 @@ const headerBaseStyle: CSSProperties = {
  */
 export function CodeHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <ViewerHeaderShell background={background} foreground={foreground} style={style}>
       {children}
-    </header>
+    </ViewerHeaderShell>
   );
 }
+
+export const CodeHeaderGroup = ViewerHeaderGroup;
+export const CodeReloadButton = ViewerReloadButton;
 
 interface CodeTitleProps {
   /** Filename / display name shown on the left side of the toolbar. */
@@ -173,6 +182,30 @@ export function CodeFontSizeControls({
   );
 }
 
+export function CodeFontSizePicker({
+  background,
+  disabled = false,
+  fontSize,
+  foreground,
+  onChange,
+}: CodeFontSizeControlsProps & {
+  background: string;
+  foreground: string;
+}) {
+  return (
+    <ViewerValuePicker
+      background={background}
+      disabled={disabled}
+      foreground={foreground}
+      formatValue={(value) => `${String(value)}px`}
+      label="Font size"
+      onChange={(next) => onChange(clampFontSize(next))}
+      options={FONT_SIZE_PRESETS}
+      value={fontSize}
+    />
+  );
+}
+
 interface CodeDownloadButtonProps {
   resolved: ResolvedCodeSource;
 }
@@ -184,7 +217,7 @@ interface CodeDownloadButtonProps {
  */
 export function CodeDownloadButton({ resolved }: CodeDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadCode(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadCode(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );

@@ -11,11 +11,12 @@ import {
 import type { BaseViewerProps } from "../../types";
 import { useResolvedAudioSource, type HeySnapAudioSrc } from "./useResolvedAudioSource";
 import {
-  AudioZoomControls,
+  AudioHeaderGroup,
+  AudioZoomPicker,
   clampAudioZoom,
   AudioDownloadButton,
   AudioHeaderShell,
-  AudioTitle,
+  AudioReloadButton,
 } from "./AudioPlayerHeader";
 
 export type { HeySnapAudioSrc } from "./useResolvedAudioSource";
@@ -40,12 +41,12 @@ export interface HeySnapAudioPlayerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the filename span. */
+  /** @deprecated The audio toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
-  /** Show the filename on the left side of the toolbar. @default true */
+  /** @deprecated The audio toolbar no longer renders a filename. */
   showTitle?: boolean;
-  /** Show the −/+ zoom controls on the right side of the toolbar. @default true */
+  /** Show the zoom level picker on the right side of the toolbar. @default true */
   showZoomControls?: boolean;
   /** Show the download button on the right side of the toolbar. @default true */
   showDownloadButton?: boolean;
@@ -76,7 +77,7 @@ export interface HeySnapAudioPlayerProps extends Omit<BaseViewerProps, "src"> {
   crossOrigin?: AudioHTMLAttributes<HTMLAudioElement>["crossOrigin"];
 
   // ── Misc ────────────────────────────────────────────────────────────
-  /** Override the document name shown in the title slot. */
+  /** Override the document name used for diagnostics. */
   documentName?: string;
   /** Slot for a custom loading indicator while the metadata loads. */
   loadingIndicator?: ReactNode;
@@ -126,9 +127,7 @@ export function HeySnapAudioPlayer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
-  showTitle = true,
   showZoomControls = true,
   showDownloadButton = true,
 
@@ -143,7 +142,6 @@ export function HeySnapAudioPlayer({
   preload = "metadata",
   crossOrigin,
 
-  documentName,
   loadingIndicator,
   onReady,
   onError,
@@ -195,7 +193,7 @@ export function HeySnapAudioPlayer({
   };
 
   // ── Render ──────────────────────────────────────────────────────────
-  const title = documentName || resolved?.name || "";
+  const reloadPreview = () => window.location.reload();
 
   const renderShell = (state: "loading" | "error" | "ready", body: ReactNode) => (
     <div
@@ -214,25 +212,21 @@ export function HeySnapAudioPlayer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {showTitle && <AudioTitle name={title} style={headerTitleStyle} />}
-          {/* `display: contents` preserves the flex layout while letting us
-              drop the action icons to a muted tint of `currentColor`. */}
-          <div
-            style={{
-              display: "contents",
-              color: "color-mix(in srgb, currentColor 65%, transparent)",
-            }}
-          >
-            <div style={{ flex: 1 }} />
+          <AudioHeaderGroup align="left">
+            <AudioReloadButton onReload={reloadPreview} />
+          </AudioHeaderGroup>
+          <AudioHeaderGroup align="right">
             {showZoomControls && (
-              <AudioZoomControls
+              <AudioZoomPicker
+                background={headerBackground}
+                foreground={headerForeground}
                 zoom={zoom}
                 onZoom={(next) => setZoom(clampAudioZoom(next))}
                 disabled={state !== "ready"}
               />
             )}
             {showDownloadButton && resolved && <AudioDownloadButton resolved={resolved} />}
-          </div>
+          </AudioHeaderGroup>
         </AudioHeaderShell>
       )}
       {body}

@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes input-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+
+.animate-input-shake {
+  animation: input-shake 220ms ease-in-out;
+}
+
+@keyframes dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-7px);
+    opacity: 1;
+  }
+}
+
+.animate-dot-bounce {
+  animation: dot-bounce 1100ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.send-button-idle {
+  background-color: color-mix(in srgb, var(--color-primary) 72%, transparent);
+}
+
+.dark .send-button-idle {
+  background-color: rgba(0, 100, 225, 0.24);
+}
+
+@layer base {
+  :root {
+    --color-sidebar: #f3f3f4;
+    --color-sidebar-hover: #ebebec;
+    --color-sidebar-active: #e5e5e6;
+    --color-sidebar-active-foreground: #1b1b1b;
+    --color-sidebar-inactive-foreground: #5a5a5c;
+
+    --color-background: #fcfcfd;
+    --color-card: #ffffff;
+    --color-card-foreground: #1b1b1b;
+    --color-dialog: #ffffff;
+    --color-tooltip: #ffffff;
+    --color-input: #ffffff;
+    --color-input-foreground: #1b1b1b;
+
+    --color-heading: #1b1b1b;
+    --color-subheading: #5d5d5f;
+    --color-placeholder: #a0a1a2;
+
+    --color-primary: #2563eb;
+    --color-primary-hover: #1d5fef;
+    --color-secondary: #ffffff;
+    --color-secondary-hover: #f6f6f7;
+    --color-disabled: #f1f1f2;
+    --color-ghost: #6f7ec2;
+
+    --color-border: #e8e8e8;
+
+    --color-success: #27a644;
+    --color-failure: #e5484d;
+
+    --skeleton-base: #e8e8e8;
+    --skeleton-highlight: #f1f1f2;
+
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+    font-family:
+      'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      'Segoe UI', sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color-scheme: light;
+  }
+
+  .dark {
+    --color-sidebar: #070707;
+    --color-sidebar-hover: #141415;
+    --color-sidebar-active: #1d1d1f;
+    --color-sidebar-active-foreground: #ffffff;
+    --color-sidebar-inactive-foreground: #919293;
+
+    --color-background: #0f0f10;
+    --color-card: #171718;
+    --color-card-foreground: #ffffff;
+    --color-dialog: #1b1b1c;
+    --color-tooltip: #171718;
+    --color-input: #171718;
+    --color-input-foreground: #e4e4e7;
+
+    --color-heading: #ffffff;
+    --color-subheading: #949496;
+    --color-placeholder: #5a5b5d;
+
+    --color-primary: #408cff;
+    --color-primary-hover: #4a93ff;
+    --color-secondary: #232325;
+    --color-secondary-hover: #262628;
+    --color-disabled: #2a2a2c;
+    --color-ghost: #8aa7d6;
+
+    --color-border: #1f2021;
+
+    --color-success: #27a644;
+    --color-failure: #e5484d;
+
+    --skeleton-base: #232325;
+    --skeleton-highlight: #2a2a2c;
+
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background-color: var(--color-background);
+    color: var(--color-heading);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}

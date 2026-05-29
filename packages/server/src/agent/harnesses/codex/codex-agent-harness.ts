@@ -15,7 +15,6 @@ import type {
   AgentRuntimeEventType,
   AgentRuntimeItem,
   AgentThread,
-  AgentThreadGroup,
   AgentThreadSummary,
   AgentUiContext,
   AssistantMessage,
@@ -38,6 +37,7 @@ import {
   type CodexAppServerClient,
   type CodexAppServerNotification,
 } from "./app-server-client.js";
+import { compareThreadsByUpdatedAtDesc, groupThreadSummariesByStartPath } from "../../thread-groups.js";
 import {
   countUserMessages,
   mapCodexThreadToAgentThread,
@@ -171,7 +171,7 @@ export class CodexAgentHarness implements IAgentHarness {
         summary: toThreadSummary(entry.thread, this.filesystemRoot),
       }))
       .filter((entry) => isThreadInRoot(entry.summary, input.rootPath))
-      .sort((left, right) => right.summary.updatedAt - left.summary.updatedAt)
+      .sort((left, right) => compareThreadsByUpdatedAtDesc(left.summary, right.summary))
       .slice(0, input.limit);
     const summaries = await Promise.all(
       entries.map(async ({ thread, summary }) => ({
@@ -935,22 +935,7 @@ class CodexLiveTurnMapper {
   }
 }
 
-const groupThreads = (threads: readonly AgentThreadSummary[]): AgentThreadGroup[] => {
-  const groups = new Map<string, AgentThreadSummary[]>();
-
-  for (const thread of threads) {
-    const group = groups.get(thread.startPath) ?? [];
-    group.push(thread);
-    groups.set(thread.startPath, group);
-  }
-
-  return Array.from(groups.entries())
-    .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
-    .map(([path, groupThreadsForPath]) => ({
-      path,
-      threads: groupThreadsForPath.sort((left, right) => right.updatedAt - left.updatedAt),
-    }));
-};
+const groupThreads = groupThreadSummariesByStartPath;
 
 const isThreadInRoot = (thread: AgentThreadSummary, rootPath: string | undefined): boolean => {
   if (rootPath === undefined || rootPath === "") {

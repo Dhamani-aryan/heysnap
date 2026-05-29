@@ -3,6 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CodeIcon, Download01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 
 import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+  ViewerValuePicker,
+} from "../../_internal/ViewerToolbar";
 import type { ResolvedMarkdownSource } from "./useResolvedMarkdownSource";
 
 /**
@@ -14,6 +20,7 @@ import type { ResolvedMarkdownSource } from "./useResolvedMarkdownSource";
  *    with the `markdown` language id.
  */
 export type MarkdownViewMode = "preview" | "code";
+const MARKDOWN_ZOOM_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0] as const;
 
 interface HeaderShellProps {
   background: string;
@@ -48,11 +55,14 @@ export function MarkdownHeaderShell({
   children,
 }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <ViewerHeaderShell background={background} foreground={foreground} style={style}>
       {children}
-    </header>
+    </ViewerHeaderShell>
   );
 }
+
+export const MarkdownHeaderGroup = ViewerHeaderGroup;
+export const MarkdownReloadButton = ViewerReloadButton;
 
 interface MarkdownTitleProps {
   name: string;
@@ -140,6 +150,35 @@ interface MarkdownDownloadButtonProps {
   resolved: ResolvedMarkdownSource;
 }
 
+interface MarkdownZoomPickerProps {
+  background: string;
+  disabled?: boolean;
+  foreground: string;
+  onZoom: (next: number) => void;
+  zoom: number;
+}
+
+export function MarkdownZoomPicker({
+  background,
+  disabled = false,
+  foreground,
+  onZoom,
+  zoom,
+}: MarkdownZoomPickerProps) {
+  return (
+    <ViewerValuePicker
+      background={background}
+      disabled={disabled}
+      foreground={foreground}
+      formatValue={(value) => `${String(Math.round(value * 100))}%`}
+      label="Zoom level"
+      onChange={onZoom}
+      options={MARKDOWN_ZOOM_PRESETS}
+      value={zoom}
+    />
+  );
+}
+
 /**
  * Downloads the markdown source as a `.md` text file under its resolved
  * name. We synthesize a fresh Blob each click so the download works whether
@@ -147,7 +186,7 @@ interface MarkdownDownloadButtonProps {
  */
 export function MarkdownDownloadButton({ resolved }: MarkdownDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadMarkdown(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadMarkdown(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );

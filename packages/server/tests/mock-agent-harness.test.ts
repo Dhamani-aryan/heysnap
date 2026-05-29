@@ -55,17 +55,18 @@ describe("mock agent harness", () => {
     });
   });
 
-  it("groups threads by start path and sorts groups and threads", async () => {
+  it("groups threads by start path and sorts groups by latest thread", async () => {
     const harness = new MockAgentHarness();
-    await collectEvents(harness.sendMessage({ path: "Zed", content: textContent("Z thread") }));
     await collectEvents(harness.sendMessage({ path: "Alpha", content: textContent("Old alpha") }));
     await sleep(2);
     await collectEvents(harness.sendMessage({ path: "Alpha", content: textContent("New alpha") }));
+    await sleep(2);
+    await collectEvents(harness.sendMessage({ path: "Zed", content: textContent("Z thread") }));
 
     const result = await harness.retrieveThreads({});
 
-    expect(result.groups.map((group) => group.path)).toEqual(["Alpha", "Zed"]);
-    expect(result.groups[0]?.threads.map((thread) => thread.title)).toEqual(["New alpha", "Old alpha"]);
+    expect(result.groups.map((group) => group.path)).toEqual(["Zed", "Alpha"]);
+    expect(result.groups[1]?.threads.map((thread) => thread.title)).toEqual(["New alpha", "Old alpha"]);
   });
 
   it("appends to existing threads and updates lastPath", async () => {

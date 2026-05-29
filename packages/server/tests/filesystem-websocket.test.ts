@@ -113,6 +113,95 @@ describe("filesystem websocket", () => {
     expect(await readFile(join(root, "notes", "today.txt"), "utf8")).toBe("hello upload");
   });
 
+  it("pastes files and publishes a mutation snapshot", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "target"));
+    await writeFile(join(root, "source.txt"), "hello paste");
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({
+      type: "paste",
+      requestId: "paste-1",
+      mode: "copy",
+      sourcePaths: ["source.txt"],
+      path: "target",
+    }));
+
+    expect(await client.next("ack")).toMatchObject({
+      type: "ack",
+      requestId: "paste-1",
+      action: "paste",
+      result: {
+        entries: [{ name: "source.txt", path: "target/source.txt", type: "file" }],
+      },
+    });
+    expect(await client.next("snapshot")).toMatchObject({
+      type: "snapshot",
+      reason: "mutation",
+      listing: {
+        entries: [
+          { name: "target", path: "target", type: "directory" },
+          { name: "source.txt", path: "source.txt", type: "file" },
+        ],
+      },
+    });
+    expect(await readFile(join(root, "target", "source.txt"), "utf8")).toBe("hello paste");
+  });
+
+  it("rejects invalid paste messages", async () => {
+    const root = await createRoot();
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({
+      type: "paste",
+      requestId: "paste-invalid",
+      mode: "link",
+      sourcePaths: ["source.txt"],
+      path: "",
+    }));
+
+    expect(await client.next("error")).toMatchObject({
+      type: "error",
+      code: "INVALID_MESSAGE",
+    });
+  });
+
+  it("returns paste errors without changing files", async () => {
+    const root = await createRoot();
+    await mkdir(join(root, "target"));
+    await writeFile(join(root, "source.txt"), "source");
+    await writeFile(join(root, "target", "source.txt"), "existing");
+    const { url } = await startFilesystemServer(root);
+    const client = await connect(`${url}/filesystem`);
+
+    await client.next("hello");
+    await client.next("snapshot");
+
+    client.socket.send(JSON.stringify({
+      type: "paste",
+      requestId: "paste-conflict",
+      mode: "move",
+      sourcePaths: ["source.txt"],
+      path: "target",
+    }));
+
+    expect(await client.next("error")).toMatchObject({
+      type: "error",
+      requestId: "paste-conflict",
+      code: "PATH_EXISTS",
+    });
+    expect(await readFile(join(root, "source.txt"), "utf8")).toBe("source");
+    expect(await readFile(join(root, "target", "source.txt"), "utf8")).toBe("existing");
+  });
+
   it("sends a watch snapshot when the active directory changes", async () => {
     const root = await createRoot();
     const { url } = await startFilesystemServer(root);

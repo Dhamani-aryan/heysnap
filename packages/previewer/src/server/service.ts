@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 import { WebSocket, type WebSocketServer } from "ws";
 import { watch, type FSWatcher } from "chokidar";
 
-import type { PreviewClientMessage, PreviewServerMessage } from "../protocol.js";
+import type { PreviewClientMessage, PreviewHtmlChange, PreviewServerMessage } from "../protocol.js";
+import {
+  createFullWorkbookChange,
+  createWorkbookPatch,
+  shouldUseFullWorkbookSnapshot,
+  summarizeWorkbookPatch,
+} from "../workbookPatch.js";
 import { mimeForPath } from "./mime.js";
 import {
   createDefaultPreviewPathResolver,
@@ -18,6 +24,7 @@ import {
   stripBasePath,
   type PreviewPathResolver,
 } from "./paths.js";
+import { resolveMediaRange } from "./mediaRange.js";
 import {
   attachWorkbookAssetUrls,
   createWorkbookPreview,
@@ -44,6 +51,8 @@ interface FileAssetRoot {
   readonly rootPath: string;
 }
 
+type PreviewHtmlFileChange = Exclude<PreviewHtmlChange, { readonly type: "initial" }>;
+
 export class PreviewService {
   readonly basePath: string;
   readonly websocketPath: string;
@@ -52,7 +61,9 @@ export class PreviewService {
   private readonly debounceMs: number;
   private readonly htmlRoots = new Map<string, HtmlPreviewRoot>();
   private readonly fileAssetRoots = new Map<string, FileAssetRoot>();
+  private readonly mediaFiles = new Map<string, string>();
   private readonly xlsxAssetDirs = new Map<string, string>();
+  private readonly xlsxFiles = new Map<string, string>();
 
   constructor(private readonly options: PreviewServiceOptions = {}) {
     this.basePath = normalizeBasePath(options.basePath);
@@ -105,6 +116,16 @@ export class PreviewService {
       return true;
     }
 
+    if (subpath.startsWith("/api/xlsx-file/")) {
+      await this.handleXlsxFile(subpath, response);
+      return true;
+    }
+
+    if (subpath.startsWith("/api/media-file/")) {
+      await this.handleMediaFile(subpath, request, response);
+      return true;
+    }
+
     await this.handleClientAsset(subpath, requestUrl, response, publicBasePath);
     return true;
   }
@@ -117,6 +138,8 @@ export class PreviewService {
   async cleanupConnection(connectionId: string): Promise<void> {
     this.htmlRoots.delete(connectionId);
     this.fileAssetRoots.delete(connectionId);
+    this.mediaFiles.delete(connectionId);
+    this.xlsxFiles.delete(connectionId);
     const xlsxAssetDirectory = this.xlsxAssetDirs.get(connectionId);
 
     if (xlsxAssetDirectory !== undefined) {
@@ -154,6 +177,14 @@ export class PreviewService {
     }
   }
 
+  registerXlsxFile(connectionId: string, filePath: string): void {
+    this.xlsxFiles.set(connectionId, filePath);
+  }
+
+  registerMediaFile(connectionId: string, filePath: string): void {
+    this.mediaFiles.set(connectionId, filePath);
+  }
+
   buildHtmlPreviewUrl(connectionId: string, entryPath: string, publicBasePath = this.basePath): string {
     return joinUrlPath(
       publicBasePath,
@@ -173,14 +204,58 @@ export class PreviewService {
     )}/`;
   }
 
-  buildXlsxAssetUrl(connectionId: string, assetPath: string, publicBasePath = this.basePath): string {
-    return joinUrlPath(
+  buildXlsxAssetUrl(
+    connectionId: string,
+    assetPath: string,
+    publicBasePath = this.basePath,
+    version?: number,
+  ): string {
+    const url = joinUrlPath(
       publicBasePath,
       "api",
       "xlsx-assets",
       encodeURIComponent(connectionId),
       encodePathSegments(assetPath),
     );
+
+    return version === undefined ? url : `${url}?v=${String(version)}`;
+  }
+
+  buildXlsxFileUrl(connectionId: string, publicBasePath = this.basePath, version?: number): string {
+    const url = joinUrlPath(
+      publicBasePath,
+      "api",
+      "xlsx-file",
+      encodeURIComponent(connectionId),
+    );
+
+    return version === undefined ? url : `${url}?v=${String(version)}`;
+  }
+
+  buildMediaFileUrl(
+    connectionId: string,
+    publicBasePath = this.basePath,
+    version?: number,
+    download = false,
+  ): string {
+    const url = joinUrlPath(
+      publicBasePath,
+      "api",
+      "media-file",
+      encodeURIComponent(connectionId),
+    );
+    const params = new URLSearchParams();
+
+    if (version !== undefined) {
+      params.set("v", String(version));
+    }
+
+    if (download) {
+      params.set("download", "1");
+    }
+
+    const query = params.toString();
+    return query.length === 0 ? url : `${url}?${query}`;
   }
 
   private async handleHtmlPreviewAsset(subpath: string, response: ServerResponse): Promise<void> {
@@ -309,6 +384,130 @@ export class PreviewService {
     }
   }
 
+  private async handleXlsxFile(subpath: string, response: ServerResponse): Promise<void> {
+    const match = /^\/api\/xlsx-file\/([^/]+)$/u.exec(subpath);
+
+    if (match === null) {
+      sendJson(response, 400, { error: "bad xlsx-file path" });
+      return;
+    }
+
+    const connectionId = decodeURIComponent(match[1] ?? "");
+    const filePath = this.xlsxFiles.get(connectionId);
+
+    if (filePath === undefined) {
+      sendJson(response, 404, { error: "unknown connection id" });
+      return;
+    }
+
+    try {
+      const fileStats = await stat(filePath);
+
+      if (!fileStats.isFile()) {
+        sendJson(response, 404, { error: "not found" });
+        return;
+      }
+
+      response.writeHead(200, {
+        ...previewCorsHeaders,
+        "cache-control": "no-store",
+        "content-disposition": `attachment; filename="${basename(filePath).replaceAll('"', "'")}"`,
+        "content-length": String(fileStats.size),
+        "content-type": mimeForPath(filePath),
+      });
+      createReadStream(filePath).pipe(response);
+    } catch (error) {
+      sendJson(response, error instanceof PreviewPathError ? 400 : 404, {
+        error: error instanceof Error ? error.message : "not found",
+      });
+    }
+  }
+
+  private async handleMediaFile(
+    subpath: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const match = /^\/api\/media-file\/([^/]+)$/u.exec(subpath);
+
+    if (match === null) {
+      sendJson(response, 400, { error: "bad media-file path" });
+      return;
+    }
+
+    const connectionId = decodeURIComponent(match[1] ?? "");
+    const filePath = this.mediaFiles.get(connectionId);
+
+    if (filePath === undefined) {
+      sendJson(response, 404, { error: "unknown connection id" });
+      return;
+    }
+
+    try {
+      const fileStats = await stat(filePath);
+
+      if (!fileStats.isFile()) {
+        sendJson(response, 404, { error: "not found" });
+        return;
+      }
+
+      const requestUrl = new URL(request.url ?? "/", "http://localhost");
+      const isDownload = requestUrl.searchParams.get("download") === "1";
+      const range = resolveMediaRange(request.headers.range, fileStats.size);
+      const baseHeaders = {
+        ...previewCorsHeaders,
+        "accept-ranges": "bytes",
+        "cache-control": "no-store",
+        "content-type": mimeForPath(filePath),
+        ...(isDownload
+          ? { "content-disposition": `attachment; filename="${basename(filePath).replaceAll('"', "'")}"` }
+          : {}),
+      };
+
+      if (range.kind === "invalid") {
+        response.writeHead(416, {
+          ...baseHeaders,
+          "content-length": "0",
+          "content-range": range.contentRange,
+        });
+        response.end();
+        return;
+      }
+
+      if (range.kind === "partial") {
+        response.writeHead(206, {
+          ...baseHeaders,
+          "content-length": String(range.contentLength),
+          "content-range": range.contentRange,
+        });
+
+        if (request.method === "HEAD") {
+          response.end();
+          return;
+        }
+
+        createReadStream(filePath, { start: range.start, end: range.end }).pipe(response);
+        return;
+      }
+
+      response.writeHead(200, {
+        ...baseHeaders,
+        "content-length": String(fileStats.size),
+      });
+
+      if (request.method === "HEAD") {
+        response.end();
+        return;
+      }
+
+      createReadStream(filePath).pipe(response);
+    } catch (error) {
+      sendJson(response, error instanceof PreviewPathError ? 400 : 404, {
+        error: error instanceof Error ? error.message : "not found",
+      });
+    }
+  }
+
   private async handleClientAsset(
     subpath: string,
     requestUrl: URL,
@@ -370,6 +569,9 @@ class PreviewSocketSession {
   private currentPublicPath: string | null = null;
   private currentHtmlRoot: string | null = null;
   private currentPublicBasePath: string | null = null;
+  private pendingHtmlChange: PreviewHtmlChange | null = null;
+  private currentWorkbook: unknown | null = null;
+  private currentWorkbookVersion = 0;
   private closed = false;
 
   constructor(
@@ -434,9 +636,18 @@ class PreviewSocketSession {
     this.currentPublicPath = input.publicPath;
     this.currentHtmlRoot = input.htmlRootPath;
     this.currentPublicBasePath = input.publicBasePath ?? null;
+    this.currentWorkbook = null;
+    this.currentWorkbookVersion = 0;
 
-    await this.sendUpdate(input.filePath, input.publicPath, input.htmlRootPath, input.publicBasePath);
+    await this.sendUpdate(
+      input.filePath,
+      input.publicPath,
+      input.htmlRootPath,
+      input.publicBasePath,
+      { type: "initial" },
+    );
 
+    const isHtmlWatch = isHtmlPath(input.filePath);
     const watchTarget = isHtmlPath(input.filePath)
       ? input.htmlRootPath ?? dirname(input.filePath)
       : input.filePath;
@@ -448,14 +659,35 @@ class PreviewSocketSession {
       persistent: true,
     });
 
-    const onChange = (): void => {
-      this.scheduleUpdate();
+    const scheduleFileUpdate = (type: "add" | "change", changedPath: string): void => {
+      this.scheduleUpdate(
+        isHtmlWatch
+          ? createHtmlChange(type, input.filePath, input.htmlRootPath, changedPath)
+          : undefined,
+      );
     };
 
-    watcher.on("add", onChange);
-    watcher.on("change", onChange);
-    watcher.on("unlink", () => {
-      this.sendError(`File removed: ${input.publicPath}`);
+    watcher.on("add", (changedPath) => scheduleFileUpdate("add", String(changedPath)));
+    watcher.on("change", (changedPath) => scheduleFileUpdate("change", String(changedPath)));
+    watcher.on("unlink", (changedPath) => {
+      if (!isHtmlWatch) {
+        this.sendError(`File removed: ${input.publicPath}`);
+        return;
+      }
+
+      const change = createHtmlChange(
+        "unlink",
+        input.filePath,
+        input.htmlRootPath,
+        String(changedPath),
+      );
+
+      if (change.isEntry) {
+        this.sendError(`File removed: ${input.publicPath}`);
+        return;
+      }
+
+      this.scheduleUpdate(change);
     });
     watcher.on("error", (error) => {
       this.sendError(error instanceof Error ? error.message : "Preview watcher failed.");
@@ -469,7 +701,11 @@ class PreviewSocketSession {
     this.watcher = watcher;
   }
 
-  private scheduleUpdate(): void {
+  private scheduleUpdate(change?: PreviewHtmlChange): void {
+    if (change !== undefined) {
+      this.pendingHtmlChange = mergeHtmlChanges(this.pendingHtmlChange, change);
+    }
+
     if (this.pendingTimer !== null) {
       clearTimeout(this.pendingTimer);
     }
@@ -481,11 +717,15 @@ class PreviewSocketSession {
         return;
       }
 
+      const htmlChange = this.pendingHtmlChange;
+      this.pendingHtmlChange = null;
+
       void this.sendUpdate(
         this.currentPath,
         this.currentPublicPath,
         this.currentHtmlRoot,
         this.currentPublicBasePath ?? undefined,
+        htmlChange ?? undefined,
       ).catch((error) => {
         this.sendError(error instanceof Error ? error.message : "Failed to refresh preview.");
       });
@@ -497,6 +737,7 @@ class PreviewSocketSession {
     publicPath: string,
     htmlRootPath: string | null,
     publicBasePath: string | undefined,
+    htmlChange?: PreviewHtmlChange,
   ): Promise<void> {
     const fileStats = await stat(filePath);
 
@@ -511,11 +752,36 @@ class PreviewSocketSession {
     }
 
     if (isHtmlPath(filePath)) {
-      this.sendHtmlPreview(filePath, publicPath, Date.now(), htmlRootPath, publicBasePath);
+      this.sendHtmlPreview(filePath, publicPath, Date.now(), htmlRootPath, publicBasePath, htmlChange);
+      return;
+    }
+
+    if (mimeForPath(filePath).startsWith("video/")) {
+      this.sendMediaFile(filePath, publicPath, fileStats.size, fileStats.mtimeMs, publicBasePath);
       return;
     }
 
     await this.sendBytes(filePath, publicPath, fileStats.size, fileStats.mtimeMs, publicBasePath);
+  }
+
+  private sendMediaFile(
+    filePath: string,
+    publicPath: string,
+    size: number,
+    mtime: number,
+    publicBasePath: string | undefined,
+  ): void {
+    this.service.registerMediaFile(this.connectionId, filePath);
+    this.send({
+      type: "file",
+      path: publicPath,
+      name: basename(filePath),
+      mime: mimeForPath(filePath),
+      size,
+      mtime,
+      sourceUrl: this.service.buildMediaFileUrl(this.connectionId, publicBasePath, mtime),
+      downloadUrl: this.service.buildMediaFileUrl(this.connectionId, publicBasePath, mtime, true),
+    });
   }
 
   private async sendBytes(
@@ -554,6 +820,7 @@ class PreviewSocketSession {
     mtime: number,
     explicitRoot: string | null,
     publicBasePath: string | undefined,
+    change: PreviewHtmlChange | undefined,
   ): void {
     const rootPath = explicitRoot ?? dirname(filePath);
     const entryPath = relative(rootPath, filePath);
@@ -565,6 +832,7 @@ class PreviewSocketSession {
       name: basename(filePath),
       mtime,
       url: this.service.buildHtmlPreviewUrl(this.connectionId, entryPath, publicBasePath),
+      ...(change === undefined ? {} : { change }),
     });
   }
 
@@ -575,20 +843,51 @@ class PreviewSocketSession {
     mtime: number,
     publicBasePath: string | undefined,
   ): Promise<void> {
-    const buffer = await readFile(filePath);
+    const previousWorkbook = this.currentWorkbook;
+    const baseVersion = this.currentWorkbookVersion;
+    const version = baseVersion + 1;
     const result = await createWorkbookPreview(filePath, this.service.getXlsxOptions());
     this.service.registerXlsxAssetDirectory(this.connectionId, result.assetDirectory);
+    this.service.registerXlsxFile(this.connectionId, filePath);
     attachWorkbookAssetUrls(
       result.workbook,
-      (assetPath) => this.service.buildXlsxAssetUrl(this.connectionId, assetPath, publicBasePath),
+      (assetPath) => this.service.buildXlsxAssetUrl(this.connectionId, assetPath, publicBasePath, version),
     );
+    const downloadUrl = this.service.buildXlsxFileUrl(this.connectionId, publicBasePath, version);
+
+    if (previousWorkbook !== null) {
+      const patch = createWorkbookPatch(previousWorkbook, result.workbook);
+
+      if (patch !== null && !shouldUseFullWorkbookSnapshot(result.workbook, patch)) {
+        this.currentWorkbook = result.workbook;
+        this.currentWorkbookVersion = version;
+        this.send({
+          type: "workbookPatch",
+          path: publicPath,
+          name: basename(filePath),
+          size,
+          mtime,
+          version,
+          baseVersion,
+          downloadUrl,
+          patch,
+          change: summarizeWorkbookPatch(patch, version),
+        });
+        return;
+      }
+    }
+
+    this.currentWorkbook = result.workbook;
+    this.currentWorkbookVersion = version;
     this.send({
       type: "workbook",
       path: publicPath,
       name: basename(filePath),
       size,
       mtime,
-      data: buffer.toString("base64"),
+      version,
+      downloadUrl,
+      change: createFullWorkbookChange(previousWorkbook === null ? "initial" : "full", version),
       workbook: result.workbook,
     });
   }
@@ -608,6 +907,10 @@ class PreviewSocketSession {
       clearTimeout(this.pendingTimer);
       this.pendingTimer = null;
     }
+
+    this.pendingHtmlChange = null;
+    this.currentWorkbook = null;
+    this.currentWorkbookVersion = 0;
 
     const watcher = this.watcher;
     this.watcher = null;
@@ -696,12 +999,75 @@ const rawDataToText = (data: WebSocket.RawData): string => {
   return Buffer.concat(data).toString("utf8");
 };
 
+const createHtmlChange = (
+  type: "add" | "change" | "unlink",
+  entryPath: string,
+  htmlRootPath: string | null,
+  changedPath: string,
+): PreviewHtmlFileChange => {
+  const rootPath = htmlRootPath ?? dirname(entryPath);
+  const changedRelativePath = normalizeRelativePath(relative(rootPath, changedPath));
+  const entryRelativePath = normalizeRelativePath(relative(rootPath, entryPath));
+
+  return {
+    type,
+    path: changedRelativePath,
+    isEntry: changedRelativePath === entryRelativePath,
+  };
+};
+
+const mergeHtmlChanges = (
+  current: PreviewHtmlChange | null,
+  next: PreviewHtmlChange,
+): PreviewHtmlChange => {
+  if (current === null) {
+    return next;
+  }
+
+  return htmlChangePriority(next) >= htmlChangePriority(current) ? next : current;
+};
+
+const htmlChangePriority = (change: PreviewHtmlChange): number => {
+  if (change.type === "initial") {
+    return 5;
+  }
+
+  if (isJavaScriptPath(change.path)) {
+    return 4;
+  }
+
+  if (change.isEntry) {
+    return 3;
+  }
+
+  if (change.type === "unlink") {
+    return 2;
+  }
+
+  return 1;
+};
+
+const normalizeRelativePath = (path: string): string =>
+  path.split(sep).filter(Boolean).join("/");
+
 const isXlsxPath = (path: string): boolean =>
   extname(path).toLowerCase() === ".xlsx";
 
 const isHtmlPath = (path: string): boolean => {
   const extension = extname(path).toLowerCase();
   return extension === ".html" || extension === ".htm";
+};
+
+const isJavaScriptPath = (path: string): boolean => {
+  const extension = extname(path).toLowerCase();
+  return (
+    extension === ".js" ||
+    extension === ".mjs" ||
+    extension === ".cjs" ||
+    extension === ".jsx" ||
+    extension === ".ts" ||
+    extension === ".tsx"
+  );
 };
 
 const isMarkdownPath = (path: string): boolean => {
@@ -772,9 +1138,10 @@ const resolveClientRoot = (clientRoot: string | URL | undefined): string => {
 };
 
 const previewCorsHeaders = {
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-headers": "content-type, range",
   "access-control-allow-methods": "GET, HEAD, OPTIONS",
   "access-control-allow-origin": "*",
+  "access-control-expose-headers": "accept-ranges, content-length, content-range",
 } as const;
 
 const cryptoRandomId = (): string => {

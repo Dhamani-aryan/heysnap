@@ -22,10 +22,12 @@ import { ReadyAfterPaint } from "../../_internal/previewReady";
 import { useResolvedPdfSource, type HeySnapPdfSrc } from "./useResolvedPdfSource";
 import {
   PdfDownloadButton,
-  PdfHeaderLeft,
+  PdfHeaderGroup,
   PdfHeaderShell,
   PdfInteractionTools,
-  PdfZoomControls,
+  PdfReloadButton,
+  PdfSidebarButton,
+  PdfZoomPicker,
 } from "./PdfViewerHeader";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfPageBox } from "./PdfPageBox";
@@ -48,7 +50,7 @@ export interface HeySnapPdfViewerProps extends Omit<BaseViewerProps, "src"> {
   headerForeground?: string;
   /** Escape hatch — styles merged onto the toolbar `<header>`. */
   headerStyle?: CSSProperties;
-  /** Styles merged onto the filename text in the toolbar. */
+  /** @deprecated The PDF toolbar no longer renders a filename. */
   headerTitleStyle?: CSSProperties;
 
   // ── Body / page gutter ───────────────────────────────────────────────
@@ -105,7 +107,6 @@ export function HeySnapPdfViewer({
   headerBackground = DEFAULTS.headerBackground,
   headerForeground = DEFAULTS.headerForeground,
   headerStyle,
-  headerTitleStyle,
 
   bodyBackground = DEFAULTS.bodyBackground,
   bodyStyle,
@@ -146,6 +147,8 @@ export function HeySnapPdfViewer({
     if (error) onError?.(error);
   }, [error, onError]);
 
+  const reloadPreview = () => window.location.reload();
+
   // Wraps every render branch so the toolbar is visually consistent across
   // loading / error / ready states. Header contents vary; the chrome doesn't.
   const renderShell = (
@@ -165,7 +168,14 @@ export function HeySnapPdfViewer({
           foreground={headerForeground}
           style={headerStyle}
         >
-          {header}
+          {header ?? (
+            <>
+              <PdfHeaderGroup align="left">
+                <PdfReloadButton onReload={reloadPreview} />
+              </PdfHeaderGroup>
+              <PdfHeaderGroup align="right" />
+            </>
+          )}
         </PdfHeaderShell>
       )}
       {body}
@@ -183,8 +193,6 @@ export function HeySnapPdfViewer({
     return renderShell("loading", <p style={{ padding: 16, color: "#666" }}>Loading PDF…</p>);
   }
 
-  const title = resolved.name;
-
   return (
     <div
       className={rootClass(className)}
@@ -201,31 +209,25 @@ export function HeySnapPdfViewer({
                 foreground={headerForeground}
                 style={headerStyle}
               >
-                <PdfHeaderLeft
-                  title={title}
-                  isSidebarOpen={sidebarOpen}
-                  onToggleSidebar={() => setSidebarOpen((o) => !o)}
-                  sidebarId={sidebarId}
-                  titleStyle={headerTitleStyle}
-                />
-                {/* `display: contents` keeps the flex layout identical to a
-                    flat list of children while letting us drop the action
-                    icons to a muted tint of the header foreground — matches
-                    the XLSX viewer where the title is strong and the
-                    surrounding chrome icons are a softer gray. */}
-                <div
-                  style={{
-                    display: "contents",
-                    color: "color-mix(in srgb, currentColor 65%, transparent)",
-                  }}
-                >
+                <PdfHeaderGroup align="left">
+                  <PdfReloadButton onReload={reloadPreview} />
+                  <PdfSidebarButton
+                    isSidebarOpen={sidebarOpen}
+                    onToggleSidebar={() => setSidebarOpen((o) => !o)}
+                    sidebarId={sidebarId}
+                  />
+                </PdfHeaderGroup>
+                <PdfHeaderGroup align="right">
                   {activeDocumentId && <PdfInteractionTools documentId={activeDocumentId} />}
-                  {/* Spacer pushes the right cluster to the far edge while
-                      letting the left cluster shrink instead of grow. */}
-                  <div style={{ flex: 1 }} />
-                  {activeDocumentId && <PdfZoomControls documentId={activeDocumentId} />}
+                  {activeDocumentId && (
+                    <PdfZoomPicker
+                      background={headerBackground}
+                      foreground={headerForeground}
+                      documentId={activeDocumentId}
+                    />
+                  )}
                   <PdfDownloadButton resolved={resolved} />
-                </div>
+                </PdfHeaderGroup>
               </PdfHeaderShell>
             )}
 

@@ -22,6 +22,7 @@ import { createMachineRoutes } from "./machines/routes.js";
 import { AwsEc2Provisioner } from "./provisioning/aws-ec2-provisioner.js";
 import type { ComputerProvisioner } from "./provisioning/types.js";
 import { createReleaseRoutes } from "./releases/routes.js";
+import { createSarvamGatewayRoutes } from "./sarvam-gateway/routes.js";
 import { HttpError } from "./shared/errors.js";
 import { errorToLog, logger } from "./shared/logger.js";
 import type { AppVariables } from "./shared/context.js";
@@ -125,6 +126,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.route("/machines", createMachineRoutes(options.store, options.config, feedbackArchiveStorage, provisioner));
   app.route("/llm", createAiGatewayRoutes(options.store, options.config));
   app.route("/firecrawl", createFirecrawlGatewayRoutes(options.store, options.config));
+  app.route("/sarvam", createSarvamGatewayRoutes(authService, options.config));
   app.route("/releases", createReleaseRoutes(options.store));
 
   app.notFound((context) => context.json({

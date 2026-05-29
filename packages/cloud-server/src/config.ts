@@ -26,6 +26,7 @@ export interface CloudServerConfig {
   readonly aiGatewayCaptureBodyMaxBytes?: number;
   readonly firecrawlBaseUrl?: string;
   readonly firecrawlApiKey?: string;
+  readonly sarvamApiKey?: string;
   readonly feedbackArchiveS3Bucket?: string;
   readonly feedbackArchiveS3Prefix?: string;
   readonly feedbackArchiveLocalDir?: string;
@@ -67,6 +68,7 @@ export const getCloudServerConfig = (
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
   firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
+  sarvamApiKey: readOptionalEnv(env, "SARVAM_API_KEY"),
   feedbackArchiveS3Bucket: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_BUCKET"),
   feedbackArchiveS3Prefix: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_PREFIX"),
   feedbackArchiveLocalDir: readOptionalEnv(env, "FEEDBACK_ARCHIVE_LOCAL_DIR") ?? ".local/feedback-archives",
@@ -105,6 +107,7 @@ export const getDevelopmentCloudServerConfig = (
   aiGatewayCaptureBodyMaxBytes: parsePositiveInteger(env.AI_GATEWAY_CAPTURE_BODY_MAX_BYTES, 262_144),
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
   firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
+  sarvamApiKey: readOptionalEnv(env, "SARVAM_API_KEY"),
   feedbackArchiveS3Bucket: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_BUCKET"),
   feedbackArchiveS3Prefix: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_PREFIX"),
   feedbackArchiveLocalDir: readOptionalEnv(env, "FEEDBACK_ARCHIVE_LOCAL_DIR") ?? ".local/feedback-archives",
@@ -114,6 +117,8 @@ export const getDevelopmentCloudServerConfig = (
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
   ]),
   adminToken: env.CLOUD_SERVER_ADMIN_TOKEN?.trim() || "development-admin-token",
 });

@@ -70,42 +70,6 @@ body {
   --preview-action-text: #ffffff;
 }
 
-.preview-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  min-height: 40px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--preview-border);
-  background: var(--preview-surface-bg);
-  color: var(--preview-text-soft);
-  font-size: 12px;
-}
-
-.preview-status {
-  flex: 0 0 auto;
-  width: 80px;
-  color: var(--preview-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.preview-status[data-state="open"] {
-  color: #80e6a8;
-}
-
-.preview-status[data-state="closed"] {
-  color: #ffadad;
-}
-
-.preview-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .preview-error {
   padding: 10px 12px;
   border-bottom: 1px solid var(--preview-error-border);

@@ -3,6 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Download01Icon, MinusSignIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 
 import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+  ViewerValuePicker,
+} from "../../_internal/ViewerToolbar";
 import type { ResolvedAudioSource } from "./useResolvedAudioSource";
 
 export const MIN_AUDIO_ZOOM = 0.5;
@@ -55,11 +61,14 @@ const headerBaseStyle: CSSProperties = {
  */
 export function AudioHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <ViewerHeaderShell background={background} foreground={foreground} style={style}>
       {children}
-    </header>
+    </ViewerHeaderShell>
   );
 }
+
+export const AudioHeaderGroup = ViewerHeaderGroup;
+export const AudioReloadButton = ViewerReloadButton;
 
 interface AudioTitleProps {
   /** Filename / display name shown on the left side of the toolbar. */
@@ -150,6 +159,30 @@ export function AudioZoomControls({ zoom, onZoom, disabled = false }: AudioZoomC
   );
 }
 
+export function AudioZoomPicker({
+  background,
+  disabled = false,
+  foreground,
+  onZoom,
+  zoom,
+}: AudioZoomControlsProps & {
+  background: string;
+  foreground: string;
+}) {
+  return (
+    <ViewerValuePicker
+      background={background}
+      disabled={disabled}
+      foreground={foreground}
+      formatValue={(value) => `${String(Math.round(value * 100))}%`}
+      label="Zoom level"
+      onChange={(next) => onZoom(clampAudioZoom(next))}
+      options={AUDIO_ZOOM_PRESETS}
+      value={zoom}
+    />
+  );
+}
+
 interface AudioDownloadButtonProps {
   resolved: ResolvedAudioSource;
 }
@@ -163,7 +196,7 @@ interface AudioDownloadButtonProps {
  */
 export function AudioDownloadButton({ resolved }: AudioDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadAudio(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadAudio(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );

@@ -203,6 +203,12 @@ class FilesystemSocketSession {
           await this.publishSnapshot("mutation", message.requestId);
           break;
         }
+        case "paste": {
+          const result = await this.service.pasteEntries(message.path, message.sourcePaths, message.mode);
+          this.send({ type: "ack", requestId: message.requestId, action: "paste", result });
+          await this.publishSnapshot("mutation", message.requestId);
+          break;
+        }
         case "ping":
           this.send({ type: "pong", requestId: message.requestId, serverTime: new Date().toISOString() });
           break;
@@ -392,6 +398,13 @@ const isClientMessage = (value: unknown): value is FilesystemClientMessage => {
       return typeof record["path"] === "string" && typeof record["newName"] === "string";
     case "trash":
       return Array.isArray(record["paths"]) && record["paths"].every((path) => typeof path === "string");
+    case "paste":
+      return (
+        (record["mode"] === "copy" || record["mode"] === "move") &&
+        typeof record["path"] === "string" &&
+        Array.isArray(record["sourcePaths"]) &&
+        record["sourcePaths"].every((path) => typeof path === "string")
+      );
     default:
       return false;
   }

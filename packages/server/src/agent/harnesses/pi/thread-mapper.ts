@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { toClientPath } from "../../../filesystem/paths.js";
+import { groupThreadSummariesByStartPath } from "../../thread-groups.js";
 import type {
   AgentContent,
   AgentMessage,
@@ -157,20 +158,7 @@ export const hydratePiThreadAttachmentPreviews = async (
 });
 
 export const groupPiThreads = (threads: readonly AgentThreadSummary[]): AgentThreadGroup[] => {
-  const groups = new Map<string, AgentThreadSummary[]>();
-
-  for (const thread of threads) {
-    const group = groups.get(thread.startPath) ?? [];
-    group.push(thread);
-    groups.set(thread.startPath, group);
-  }
-
-  return Array.from(groups.entries())
-    .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
-    .map(([path, groupThreads]) => ({
-      path,
-      threads: groupThreads.sort((left, right) => right.updatedAt - left.updatedAt),
-    }));
+  return groupThreadSummariesByStartPath(threads);
 };
 
 export const isPiThreadInRoot = (thread: AgentThreadSummary, rootPath: string | undefined): boolean => {

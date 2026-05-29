@@ -18,23 +18,27 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
 } from "react";
 
 import {
   CompactSelection,
   DataEditor,
   GridCellKind,
+  type DataEditorRef,
 } from "@glideapps/glide-data-grid";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  ArrowDown01Icon,
   Download01Icon,
   FunctionOfXIcon,
-  MinusSignIcon,
-  PlusSignIcon,
+  Refresh01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 
 import "@glideapps/glide-data-grid/dist/index.css";
@@ -43,6 +47,8 @@ import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
 
+import type { PreviewWorkbookChange } from "../../../../../protocol";
+import { getWorkbookSheetKey } from "../../../../../workbookPatch";
 import { readHashParam, writeHashParam } from "../../../_internal/urlHashState";
 import "./webWorkbook.css";
 
@@ -50,6 +56,7 @@ import "./webWorkbook.css";
 
 const workbookZoomStorageKey = "openxml-web-workbook-zoom";
 const sheetHashParam = "sheet";
+const workbookZoomLevels = [50, 75, 90, 100, 110, 125, 150, 200] as const;
 
 const defaultGridTheme = {
   accentColor: "#19736a",
@@ -196,6 +203,7 @@ const indexedExcelColors: Record<number, string> = {
 };
 
 const minDrawingSpanRowHeight = 8;
+const emptyWorkbookSheets: any[] = [];
 
 // ── Small helpers ────────────────────────────────────────────────────────
 
@@ -210,14 +218,14 @@ function lastOf<T>(items: T[]): T | undefined {
 function getStoredWorkbookZoom(): number {
   try {
     const value = Number(window.localStorage.getItem(workbookZoomStorageKey));
-    return Number.isFinite(value) ? clamp(value, 50, 200) : 100;
+    return Number.isFinite(value) ? clamp(value, 50, 200) : 75;
   } catch {
-    return 100;
+    return 75;
   }
 }
 
 function getWorkbookSheets(workbook: any): any[] {
-  return workbook?.workbook?.sheets || [];
+  return workbook?.workbook?.sheets || emptyWorkbookSheets;
 }
 
 function getWorkbookTitle(workbook: any, fallbackTitle = "Workbook.xlsx"): string {
@@ -249,6 +257,9 @@ const resolveSheetIndexFromHash = (sheets: readonly any[]): number => {
 
 const sheetHashName = (sheet: any, index: number): string =>
   String(sheet?.name || `Sheet ${index + 1}`);
+
+const sheetStateKey = (sheet: any, index: number): string =>
+  getWorkbookSheetKey(sheet, index);
 
 function createEmptyGridSelection(): any {
   return {
@@ -293,6 +304,67 @@ function getSelectionLabel(selection: any, gridData: any, fallback = "A1"): stri
   return `${start.address}:${end.address}`;
 }
 
+type SelectionSnapshot = {
+  readonly cellAddress: string | null;
+  readonly rangeEndAddress: string | null;
+  readonly rangeStartAddress: string | null;
+};
+
+const captureSelectionSnapshot = (selection: any, gridData: any): SelectionSnapshot | null => {
+  const current = selection?.current;
+  const range = current?.range;
+
+  if (!range) {
+    return null;
+  }
+
+  const startCol = Math.max(1, range.x);
+  const endCol = Math.max(1, range.x + range.width - 1);
+  const startRow = range.y;
+  const endRow = range.y + range.height - 1;
+  const activeCell = current.cell;
+
+  return {
+    cellAddress: activeCell ? gridData.getCellMeta(Math.max(1, activeCell[0]), activeCell[1])?.address ?? null : null,
+    rangeEndAddress: gridData.getCellMeta(endCol, endRow)?.address ?? null,
+    rangeStartAddress: gridData.getCellMeta(startCol, startRow)?.address ?? null,
+  };
+};
+
+const restoreSelectionSnapshot = (snapshot: SelectionSnapshot | null, gridData: any): any | null => {
+  if (snapshot === null || snapshot.rangeStartAddress === null) {
+    return null;
+  }
+
+  const start = gridData.getCellPosition(snapshot.rangeStartAddress);
+  const end = gridData.getCellPosition(snapshot.rangeEndAddress ?? snapshot.rangeStartAddress) ?? start;
+  const active = snapshot.cellAddress === null ? start : gridData.getCellPosition(snapshot.cellAddress) ?? start;
+
+  if (start === null || end === null || active === null) {
+    return null;
+  }
+
+  const left = Math.min(start[0], end[0]);
+  const right = Math.max(start[0], end[0]);
+  const top = Math.min(start[1], end[1]);
+  const bottom = Math.max(start[1], end[1]);
+
+  return {
+    columns: CompactSelection.empty(),
+    current: {
+      cell: active,
+      range: {
+        height: bottom - top + 1,
+        width: right - left + 1,
+        x: left,
+        y: top,
+      },
+      rangeStack: [],
+    },
+    rows: CompactSelection.empty(),
+  };
+};
+
 function safeDownloadName(name: string | null | undefined): string {
   return (
     (name || "workbook")
@@ -333,6 +405,35 @@ function downloadWorkbookFile(
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadWorkbookUrl(url: string, name: string): void {
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = name || "workbook.xlsx";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function reloadWorkbookPreview(): void {
+  window.location.reload();
+}
+
+function nearestWorkbookZoomIndex(zoom: number): number {
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  workbookZoomLevels.forEach((level, index) => {
+    const distance = Math.abs(level - zoom);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
 }
 
 function toBlobPart(source: ArrayBuffer | Uint8Array): ArrayBuffer {
@@ -1394,6 +1495,7 @@ function buildGridData(sheet: any, workbookStyles: any): any {
       columns: [],
       getCellContent: () => blankCell(),
       getCellMeta: () => null,
+      getCellPosition: () => null,
       drawingObjects: [],
       mergedCells: [],
       rows: [],
@@ -1407,6 +1509,7 @@ function buildGridData(sheet: any, workbookStyles: any): any {
   const tables = normalizeTables(sheet);
   const drawingObjects = normalizeDrawingObjects(sheet, workbookStyles);
   const visibleColumnIndexByNumber = new Map<number, number>();
+  const visibleRowIndexByNumber = new Map<number, number>();
   const visibleRows: any[] = [];
   const visibleColumns: any[] = [];
 
@@ -1426,6 +1529,7 @@ function buildGridData(sheet: any, workbookStyles: any): any {
   for (let row = bounds.minRow; row <= bounds.maxRow; row += 1) {
     const rowMeta = rowMetaByIndex.get(row);
     if (!rowMeta?.hidden) {
+      visibleRowIndexByNumber.set(row, visibleRows.length);
       visibleRows.push({
         height: rowHeightToPixels(rowMeta?.height),
         meta: rowMeta,
@@ -1531,6 +1635,14 @@ function buildGridData(sheet: any, workbookStyles: any): any {
   return {
     columns,
     drawingObjects: clippedDrawingObjects,
+    getCellPosition: (address: string | null | undefined): readonly [number, number] | null => {
+      if (!address) return null;
+      const parsed = parseCellAddress(address);
+      if (parsed === null) return null;
+      const columnIndex = visibleColumnIndexByNumber.get(parsed.column);
+      const rowIndex = visibleRowIndexByNumber.get(parsed.row);
+      return columnIndex === undefined || rowIndex === undefined ? null : [columnIndex + 1, rowIndex];
+    },
     getCellContent: (item: readonly [number, number]) => {
       const [col, row] = item;
       const details = getCellDetails(col, row);
@@ -1943,6 +2055,154 @@ function DrawingOverlay({
   }, [gridData, imageCache, size, theme, visibleRegion]);
 
   return <canvas aria-hidden="true" className="web-workbook-drawing-overlay" ref={canvasRef} />;
+}
+
+function WorkbookZoomPicker({
+  onZoom,
+  zoom,
+}: {
+  readonly onZoom: (zoom: number) => void;
+  readonly zoom: number;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [hoveredLevel, setHoveredLevel] = useState<number | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const menuId = useId();
+  const selectedIndex = nearestWorkbookZoomIndex(zoom);
+  const selectedZoom = workbookZoomLevels[selectedIndex] ?? 100;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) {
+        return;
+      }
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    const handleWindowBlur = () => setIsOpen(false);
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [isOpen]);
+
+  const openMenu = (focusIndex = selectedIndex) => {
+    setIsOpen(true);
+    window.requestAnimationFrame(() => itemRefs.current[focusIndex]?.focus());
+  };
+
+  const selectZoom = (nextZoom: number) => {
+    onZoom(nextZoom);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      openMenu(selectedIndex);
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      className="web-workbook-zoom-picker"
+      title="Zoom level"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && rootRef.current?.contains(nextTarget)) {
+          return;
+        }
+        setIsOpen(false);
+      }}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label="Zoom level"
+        aria-haspopup="listbox"
+        aria-controls={isOpen ? menuId : undefined}
+        aria-expanded={isOpen}
+        className="web-workbook-zoom-trigger"
+        onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={handleTriggerKeyDown}
+      >
+        <span>{selectedZoom}%</span>
+        <HugeiconsIcon icon={ArrowDown01Icon} size={12} color="currentColor" strokeWidth={2.1} />
+      </button>
+
+      {isOpen && (
+        <div id={menuId} role="listbox" aria-label="Zoom level" className="web-workbook-zoom-menu">
+          {workbookZoomLevels.map((level, index) => {
+            const isSelected = level === selectedZoom;
+            const isHovered = level === hoveredLevel;
+
+            return (
+              <button
+                key={level}
+                ref={(node) => {
+                  itemRefs.current[index] = node;
+                }}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                className={isHovered ? "hovered" : ""}
+                onClick={() => selectZoom(level)}
+                onFocus={() => setHoveredLevel(level)}
+                onMouseEnter={() => setHoveredLevel(level)}
+                onMouseLeave={() => setHoveredLevel(null)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const direction = event.key === "ArrowDown" ? 1 : -1;
+                    const nextIndex = (index + direction + workbookZoomLevels.length) % workbookZoomLevels.length;
+                    itemRefs.current[nextIndex]?.focus();
+                    setHoveredLevel(workbookZoomLevels[nextIndex] ?? null);
+                  } else if (event.key === "Home") {
+                    event.preventDefault();
+                    itemRefs.current[0]?.focus();
+                    setHoveredLevel(workbookZoomLevels[0] ?? null);
+                  } else if (event.key === "End") {
+                    event.preventDefault();
+                    const lastIndex = workbookZoomLevels.length - 1;
+                    itemRefs.current[lastIndex]?.focus();
+                    setHoveredLevel(workbookZoomLevels[lastIndex] ?? null);
+                  }
+                }}
+              >
+                <span>{level}%</span>
+                <span className="web-workbook-zoom-check" aria-hidden="true">
+                  {isSelected ? (
+                    <HugeiconsIcon icon={Tick02Icon} size={14} color="currentColor" strokeWidth={2.2} />
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Drawing overlay tile helpers used by drawCell — share the same canvas
@@ -2670,6 +2930,8 @@ export interface WebWorkbookProps {
   workbook?: any | null;
   /** Original workbook bytes used by the toolbar download button. */
   downloadFile?: Blob | ArrayBuffer | Uint8Array | null;
+  /** URL for downloading the latest workbook from the preview server. */
+  downloadUrl?: string | null;
   /** Filename used when `downloadFile` is provided. */
   downloadFileName?: string;
   /** MIME type used when `downloadFile` is provided. */
@@ -2678,6 +2940,8 @@ export interface WebWorkbookProps {
   allowJsonDownloadFallback?: boolean;
   /** Called after the workbook grid has rendered enough to be shown. */
   onReady?: () => void;
+  /** Metadata describing how the current workbook changed. */
+  workbookChange?: PreviewWorkbookChange;
   /**
    * Optional override for the download action. When omitted, the viewer
    * downloads the workbook JSON serialized as a `.json` file.
@@ -2711,10 +2975,12 @@ export function WebWorkbook({
   titleStyle = {},
   workbook = null,
   downloadFile = null,
+  downloadUrl = null,
   downloadFileName,
   downloadMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   allowJsonDownloadFallback = true,
   onReady,
+  workbookChange,
   onDownload = null,
   zoomTextStyle = {},
 }: WebWorkbookProps) {
@@ -2724,10 +2990,17 @@ export function WebWorkbook({
   const [gridSelection, setGridSelection] = useState<any>(createEmptyGridSelection);
   const [visibleRegion, setVisibleRegion] = useState<any>(null);
   const [imageCache, setImageCache] = useState<Record<string, any>>({});
+  const dataEditorRef = useRef<DataEditorRef | null>(null);
+  const selectedSheetIndexRef = useRef(selectedSheetIndex);
+  const activeSheetKeyRef = useRef<string | null>(null);
+  const selectionSnapshotRef = useRef<SelectionSnapshot | null>(null);
+  const visibleAddressRef = useRef<string | null>(null);
+  const workbookChangeVersionRef = useRef<number | null>(null);
   const imageLoadRef = useRef<Set<string>>(new Set<string>());
   const skipNextSheetHashWriteRef = useRef(false);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  selectedSheetIndexRef.current = selectedSheetIndex;
   const sheets = getWorkbookSheets(workbook);
   const workbookStyles = workbook?.workbook?.styles || workbook?.styles || {};
   const selectedSheet = sheets[selectedSheetIndex] || sheets[0];
@@ -2756,14 +3029,14 @@ export function WebWorkbook({
     [gridData],
   );
   const sheetsKey = useMemo(
-    () => sheets.map((sheet: any, index: number) => sheetHashName(sheet, index)).join("\u0000"),
+    () => sheets.map((sheet: any, index: number) => sheetStateKey(sheet, index)).join("\u0000"),
     [sheets],
   );
   const workbookTitle = getWorkbookTitle(workbook, title);
   const formulaBarValue = selectedCell ? getFormulaBarText(selectedCell) : formulaValue;
   const selectionLabel = getSelectionLabel(gridSelection, gridData, selectedRange);
   const canDownload = Boolean(
-    workbook && (downloadFile || typeof onDownload === "function" || allowJsonDownloadFallback),
+    workbook && (downloadUrl || downloadFile || typeof onDownload === "function" || allowJsonDownloadFallback),
   );
   const highlightRegions = useMemo(
     () => selectionFillRegions(gridSelection),
@@ -2771,6 +3044,11 @@ export function WebWorkbook({
   );
 
   const handleDownload = useCallback(() => {
+    if (downloadUrl) {
+      downloadWorkbookUrl(downloadUrl, downloadFileName ?? workbookTitle);
+      return;
+    }
+
     if (downloadFile) {
       downloadWorkbookFile(downloadFile, downloadFileName ?? workbookTitle, downloadMime);
       return;
@@ -2796,6 +3074,7 @@ export function WebWorkbook({
     downloadFile,
     downloadFileName,
     downloadMime,
+    downloadUrl,
     onDownload,
     selectedSheet,
     selectedSheetIndex,
@@ -2812,15 +3091,32 @@ export function WebWorkbook({
   }, [zoom]);
 
   useEffect(() => {
-    const nextIndex = resolveSheetIndexFromHash(sheets);
+    if (sheets.length === 0) {
+      activeSheetKeyRef.current = null;
+      setSelectedSheetIndex(0);
+      return;
+    }
+
+    const previousKey = activeSheetKeyRef.current;
+    const previousIndex = selectedSheetIndexRef.current;
+    const preservedIndex = previousKey === null
+      ? -1
+      : sheets.findIndex((sheet: any, index: number) => sheetStateKey(sheet, index) === previousKey);
+    const nextIndex = previousKey === null
+      ? resolveSheetIndexFromHash(sheets)
+      : preservedIndex !== -1
+        ? preservedIndex
+        : Math.min(previousIndex, sheets.length - 1);
     const sheet = sheets[nextIndex];
+
+    activeSheetKeyRef.current = sheetStateKey(sheet, nextIndex);
     skipNextSheetHashWriteRef.current = true;
     setSelectedSheetIndex(nextIndex);
 
     if (sheet !== undefined) {
       writeHashParam(sheetHashParam, sheetHashName(sheet, nextIndex));
     }
-  }, [sheetsKey, workbook]);
+  }, [sheets, sheetsKey]);
 
   useEffect(() => {
     if (skipNextSheetHashWriteRef.current) {
@@ -2832,14 +3128,9 @@ export function WebWorkbook({
       return;
     }
 
+    activeSheetKeyRef.current = sheetStateKey(selectedSheet, selectedSheetIndex);
     writeHashParam(sheetHashParam, sheetHashName(selectedSheet, selectedSheetIndex));
   }, [selectedSheet, selectedSheetIndex]);
-
-  useEffect(() => {
-    setSelectedCell(null);
-    setGridSelection(createEmptyGridSelection());
-    setVisibleRegion(null);
-  }, [selectedSheet]);
 
   useEffect(() => {
     const urls = imageUrlsKey ? imageUrlsKey.split("|").filter(Boolean) : [];
@@ -2901,12 +3192,37 @@ export function WebWorkbook({
     [gridData],
   );
 
+  useEffect(() => {
+    const restoredSelection = restoreSelectionSnapshot(selectionSnapshotRef.current, gridData);
+
+    if (restoredSelection !== null) {
+      setGridSelection(restoredSelection);
+      updateSelectedCellFromSelection(restoredSelection);
+    } else {
+      setSelectedCell(null);
+      setGridSelection(createEmptyGridSelection());
+    }
+
+    const visibleAddress = visibleAddressRef.current;
+    const visiblePosition = gridData.getCellPosition(visibleAddress);
+
+    if (visiblePosition !== null) {
+      const frame = window.requestAnimationFrame(() => {
+        dataEditorRef.current?.scrollTo(visiblePosition[0], visiblePosition[1]);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    return undefined;
+  }, [gridData, updateSelectedCellFromSelection]);
+
   const handleGridSelectionChange = useCallback(
     (newSelection: any) => {
+      selectionSnapshotRef.current = captureSelectionSnapshot(newSelection, gridData);
       setGridSelection(newSelection);
       updateSelectedCellFromSelection(newSelection);
     },
-    [updateSelectedCellFromSelection],
+    [gridData, updateSelectedCellFromSelection],
   );
 
   const handleCellClicked = useCallback(
@@ -2921,9 +3237,45 @@ export function WebWorkbook({
     [gridData],
   );
 
-  const handleVisibleRegionChanged = useCallback((region: any, tx = 0, ty = 0) => {
-    setVisibleRegion({ ...region, tx, ty });
-  }, []);
+  const handleVisibleRegionChanged = useCallback(
+    (region: any, tx = 0, ty = 0) => {
+      visibleAddressRef.current = gridData.getCellMeta(Math.max(1, region?.x ?? 1), Math.max(0, region?.y ?? 0))?.address ?? null;
+      setVisibleRegion({ ...region, tx, ty });
+    },
+    [gridData],
+  );
+
+  useEffect(() => {
+    if (workbookChange === undefined || workbookChange.version === workbookChangeVersionRef.current) {
+      return;
+    }
+
+    workbookChangeVersionRef.current = workbookChange.version;
+
+    if (workbookChange.type !== "patch" || workbookChange.changedCells === undefined) {
+      return;
+    }
+
+    const selectedSheetKey = selectedSheet === undefined
+      ? null
+      : sheetStateKey(selectedSheet, selectedSheetIndex);
+    const activeChange = workbookChange.changedCells.find(
+      (change) => change.sheetKey === selectedSheetKey || change.sheetIndex === selectedSheetIndex,
+    );
+
+    if (activeChange === undefined) {
+      return;
+    }
+
+    const changedCells = activeChange.addresses
+      .map((address) => gridData.getCellPosition(address))
+      .filter((cell): cell is readonly [number, number] => cell !== null)
+      .map((cell) => ({ cell }));
+
+    if (changedCells.length > 0) {
+      dataEditorRef.current?.updateCells(changedCells);
+    }
+  }, [gridData, selectedSheet, selectedSheetIndex, workbookChange]);
 
   const drawCell = useCallback(
     (args: any, drawContent: () => void) => {
@@ -2971,44 +3323,26 @@ export function WebWorkbook({
       }
     >
       <header className="web-workbook-header">
-        <div className="web-workbook-title" style={titleStyle} title={workbookTitle}>
-          {workbookTitle}
+        <div className="web-workbook-header-group web-workbook-header-group-left">
+          <button
+            aria-label="Reload preview"
+            title="Reload preview"
+            className="web-workbook-icon-button"
+            onClick={reloadWorkbookPreview}
+            style={iconButtonStyle}
+            type="button"
+          >
+            <HugeiconsIcon
+              icon={Refresh01Icon}
+              size={16}
+              color="currentColor"
+              strokeWidth={2}
+            />
+          </button>
         </div>
 
-        <div className="web-workbook-actions" aria-label="Workbook controls">
-          <div className="web-workbook-zoom" aria-label="Zoom controls">
-            <button
-              aria-label="Zoom out"
-              className="web-workbook-icon-button"
-              onClick={() => setZoom((current) => clamp(current - 10, 50, 200))}
-              style={iconButtonStyle}
-              type="button"
-            >
-              <HugeiconsIcon
-                icon={MinusSignIcon}
-                size={16}
-                color="currentColor"
-                strokeWidth={1.8}
-              />
-            </button>
-            <span className="web-workbook-zoom-value" style={zoomTextStyle}>
-              {zoom}%
-            </span>
-            <button
-              aria-label="Zoom in"
-              className="web-workbook-icon-button"
-              onClick={() => setZoom((current) => clamp(current + 10, 50, 200))}
-              style={iconButtonStyle}
-              type="button"
-            >
-              <HugeiconsIcon
-                icon={PlusSignIcon}
-                size={16}
-                color="currentColor"
-                strokeWidth={1.8}
-              />
-            </button>
-          </div>
+        <div className="web-workbook-header-group web-workbook-header-group-right" aria-label="Workbook controls">
+          <WorkbookZoomPicker zoom={zoom} onZoom={(nextZoom) => setZoom(clamp(nextZoom, 50, 200))} />
 
           <button
             aria-label="Download workbook"
@@ -3054,6 +3388,7 @@ export function WebWorkbook({
           >
             <DataEditor
               columns={gridData.columns}
+              ref={dataEditorRef}
               drawFocusRing={false}
               drawCell={drawCell}
               freezeColumns={1}
@@ -3093,7 +3428,13 @@ export function WebWorkbook({
             <button
               className={index === selectedSheetIndex ? "active" : ""}
               key={`${sheet.id || index}-${sheet.name || "sheet"}`}
-              onClick={() => setSelectedSheetIndex(index)}
+              onClick={() => {
+                activeSheetKeyRef.current = sheetStateKey(sheet, index);
+                selectionSnapshotRef.current = null;
+                visibleAddressRef.current = null;
+                setVisibleRegion(null);
+                setSelectedSheetIndex(index);
+              }}
               title={sheet.name || `Sheet ${index + 1}`}
               type="button"
             >

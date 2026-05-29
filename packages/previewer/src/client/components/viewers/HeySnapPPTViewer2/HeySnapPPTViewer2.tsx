@@ -6,9 +6,17 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Download01Icon } from "@hugeicons/core-free-icons";
 import WebViewer, { type WebViewerInstance } from "@pdftron/webviewer";
 
 import type { BaseViewerProps } from "../../types";
+import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+} from "../../_internal/ViewerToolbar";
 import {
   useResolvedPPTSource,
   type HeySnapPPTSrc,
@@ -50,26 +58,6 @@ const rootStyle: CSSProperties = {
   height: "100%",
   minHeight: 0,
   minWidth: 0,
-};
-
-const headerBaseStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  height: 40,
-  flexShrink: 0,
-  padding: "0 12px",
-  boxShadow: "inset 0 -1px 0 color-mix(in srgb, currentColor 10%, transparent)",
-};
-
-const titleBaseStyle: CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 13,
-  fontWeight: 500,
-  letterSpacing: 0,
-  opacity: 0.92,
 };
 
 export function HeySnapPPTViewer2({
@@ -202,6 +190,7 @@ export function HeySnapPPTViewer2({
   ]);
 
   const state = viewerError !== null ? "error" : loading ? "loading" : "ready";
+  const reloadPreview = () => window.location.reload();
 
   return (
     <div
@@ -212,18 +201,18 @@ export function HeySnapPPTViewer2({
       style={{ ...rootStyle, ...style }}
     >
       {showHeader ? (
-        <header
-          style={{
-            ...headerBaseStyle,
-            background: headerBackground,
-            color: headerForeground,
-            ...headerStyle,
-          }}
+        <ViewerHeaderShell
+          background={headerBackground}
+          foreground={headerForeground}
+          style={headerStyle}
         >
-          <span title={title} style={{ ...titleBaseStyle, ...headerTitleStyle }}>
-            {title}
-          </span>
-        </header>
+          <ViewerHeaderGroup align="left">
+            <ViewerReloadButton onReload={reloadPreview} />
+          </ViewerHeaderGroup>
+          <ViewerHeaderGroup align="right">
+            {resolved !== null ? <PptxDownloadButton name={title} file={resolved.file} /> : null}
+          </ViewerHeaderGroup>
+        </ViewerHeaderShell>
       ) : null}
       <div
         style={{
@@ -275,6 +264,26 @@ export function HeySnapPPTViewer2({
       </div>
     </div>
   );
+}
+
+function PptxDownloadButton({ file, name }: { file: File; name: string }) {
+  return (
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadPptxFile(file, name)}>
+      <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
+    </IconButton>
+  );
+}
+
+function downloadPptxFile(file: File, name: string) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function configureViewOnlyMode(instance: WebViewerInstance): void {

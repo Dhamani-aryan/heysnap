@@ -110,8 +110,8 @@ const HtmlPreview = ({
   return (
     <HeySnapHtmlViewer
       src={src}
+      change={data.change}
       documentName={data.name}
-      codeTheme={theme.codeTheme}
       headerBackground={theme.headerBackground}
       headerForeground={theme.headerForeground}
       bodyBackground={theme.codeBodyBackground}
@@ -167,7 +167,7 @@ const PdfPreview = ({
 }: {
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
-  const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
+  const bytes = useMemo(() => base64ToBytes(requiredFileData(file)), [file]);
 
   return (
     <HeySnapPdfViewer
@@ -190,7 +190,7 @@ const DocxPreview = ({
 }: {
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
-  const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
+  const bytes = useMemo(() => base64ToBytes(requiredFileData(file)), [file]);
 
   return (
     <HeySnapDocxViewer
@@ -213,7 +213,7 @@ const PptPreview = ({
 }: {
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
-  const bytes = useMemo(() => base64ToBytes(file.data), [file.data]);
+  const bytes = useMemo(() => base64ToBytes(requiredFileData(file)), [file]);
 
   return (
     <HeySnapPPTViewer2
@@ -239,8 +239,8 @@ const CodePreview = ({
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
   const src = useMemo(
-    () => new File([base64ToBytes(file.data)], file.name, { type: "text/plain" }),
-    [file.data, file.name],
+    () => new File([base64ToBytes(requiredFileData(file))], file.name, { type: "text/plain" }),
+    [file],
   );
 
   return (
@@ -266,8 +266,8 @@ const MarkdownPreview = ({
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
   const src = useMemo(
-    () => new File([base64ToBytes(file.data)], file.name, { type: "text/markdown" }),
-    [file.data, file.name],
+    () => new File([base64ToBytes(requiredFileData(file))], file.name, { type: "text/markdown" }),
+    [file],
   );
 
   return (
@@ -304,10 +304,12 @@ const XlsxPreview = ({
     <div className={`${theme.xlsxClassName} preview-xlsx-shell`}>
       <HeySnapXlsxViewer
         workbook={data.workbook}
+        workbookChange={data.change}
         title={data.name}
         darkBgColor={VIEWER_THEMES.dark.bodyBackground}
         lightBgColor={VIEWER_THEMES.light.codeBodyBackground}
         downloadFile={downloadFile}
+        downloadUrl={data.downloadUrl}
         downloadFileName={data.name}
         downloadMime={XLSX_MIME}
         allowJsonDownloadFallback={false}
@@ -348,11 +350,12 @@ const VideoPreview = ({
 }: {
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
-  const src = useMemo(() => fileToBrowserFile(file), [file]);
+  const src = useMemo(() => file.sourceUrl ?? fileToBrowserFile(file), [file]);
 
   return (
     <HeySnapVideoViewer
       src={src}
+      downloadUrl={file.downloadUrl}
       documentName={file.name}
       headerBackground={theme.headerBackground}
       headerForeground={theme.headerForeground}
@@ -392,7 +395,8 @@ const FallbackPreview = ({
 }: {
   readonly file: PreviewFile;
 } & ThemedPreviewerCallbacks): React.ReactElement => {
-  const dataUrl = useMemo(() => `data:${file.mime};base64,${file.data}`, [file.data, file.mime]);
+  const fileData = requiredFileData(file);
+  const dataUrl = useMemo(() => `data:${file.mime};base64,${fileData}`, [fileData, file.mime]);
 
   if (
     file.mime.startsWith("text/") ||
@@ -401,7 +405,7 @@ const FallbackPreview = ({
   ) {
     return (
       <ReadyAfterPaint onReady={onReady}>
-        <pre className="preview-text-fallback">{decodeTextFile(file.data)}</pre>
+        <pre className="preview-text-fallback">{decodeTextFile(fileData)}</pre>
       </ReadyAfterPaint>
     );
   }
@@ -418,7 +422,15 @@ const FallbackPreview = ({
 };
 
 const fileToBrowserFile = (file: PreviewFile): File =>
-  new File([base64ToBytes(file.data)], file.name, { type: file.mime });
+  new File([base64ToBytes(requiredFileData(file))], file.name, { type: file.mime });
+
+const requiredFileData = (file: PreviewFile): string => {
+  if (typeof file.data === "string") {
+    return file.data;
+  }
+
+  throw new Error(`Preview data missing for ${file.name}.`);
+};
 
 const ReadyAfterPaint = ({
   children,

@@ -1802,7 +1802,7 @@ describe("codex agent harness", () => {
         },
       });
       const turnRequest = client.requests[0] as {
-        readonly params: { readonly input: readonly Array<{ readonly type: string; readonly text?: string }> };
+        readonly params: { readonly input: ReadonlyArray<{ readonly type: string; readonly text?: string }> };
       };
       const contextText = turnRequest.params.input[1]?.text ?? "";
       const attachedFilesJson = /<user_attached_files_with_message>\n([\s\S]*?)\n  <\/user_attached_files_with_message>/u.exec(contextText)?.[1] ?? "[]";

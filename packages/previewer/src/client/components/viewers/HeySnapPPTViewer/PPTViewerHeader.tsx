@@ -8,6 +8,12 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import { IconButton } from "../../_internal/IconButton";
+import {
+  ViewerHeaderGroup,
+  ViewerHeaderShell,
+  ViewerReloadButton,
+  ViewerValuePicker,
+} from "../../_internal/ViewerToolbar";
 import type { ResolvedPPTSource } from "./useResolvedPPTSource";
 
 export const MIN_ZOOM = 0.25;
@@ -55,11 +61,14 @@ const headerBaseStyle: CSSProperties = {
 
 export function PPTHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <ViewerHeaderShell background={background} foreground={foreground} style={style}>
       {children}
-    </header>
+    </ViewerHeaderShell>
   );
 }
+
+export const PPTHeaderGroup = ViewerHeaderGroup;
+export const PPTReloadButton = ViewerReloadButton;
 
 // ── Left cluster: menu toggle + filename ────────────────────────────────
 interface PPTHeaderLeftProps {
@@ -124,6 +133,23 @@ export function PPTHeaderLeft({
   );
 }
 
+export function PPTSidebarButton({
+  isSidebarOpen,
+  onToggleSidebar,
+  sidebarId,
+}: Pick<PPTHeaderLeftProps, "isSidebarOpen" | "onToggleSidebar" | "sidebarId">) {
+  return (
+    <IconButton
+      aria-label={isSidebarOpen ? "Hide slides" : "Show slides"}
+      aria-expanded={isSidebarOpen}
+      aria-controls={sidebarId}
+      onClick={onToggleSidebar}
+    >
+      <HugeiconsIcon icon={Menu01Icon} size={16} strokeWidth={2} />
+    </IconButton>
+  );
+}
+
 // ── Zoom controls (identical visual to XLSX) ────────────────────────────
 interface PPTZoomControlsProps {
   zoom: number;
@@ -174,6 +200,30 @@ export function PPTZoomControls({ zoom, onZoom, disabled = false }: PPTZoomContr
   );
 }
 
+export function PPTZoomPicker({
+  background,
+  disabled = false,
+  foreground,
+  onZoom,
+  zoom,
+}: PPTZoomControlsProps & {
+  background: string;
+  foreground: string;
+}) {
+  return (
+    <ViewerValuePicker
+      background={background}
+      disabled={disabled}
+      foreground={foreground}
+      formatValue={(value) => `${String(Math.round(value * 100))}%`}
+      label="Zoom level"
+      onChange={(next) => onZoom(clampZoom(next))}
+      options={ZOOM_PRESETS}
+      value={zoom}
+    />
+  );
+}
+
 // ── Download button ─────────────────────────────────────────────────────
 interface PPTDownloadButtonProps {
   resolved: ResolvedPPTSource;
@@ -186,7 +236,7 @@ interface PPTDownloadButtonProps {
  */
 export function PPTDownloadButton({ resolved }: PPTDownloadButtonProps) {
   return (
-    <IconButton aria-label="Download" onClick={() => downloadPPTX(resolved)}>
+    <IconButton aria-label="Download" title="Download" onClick={() => downloadPPTX(resolved)}>
       <HugeiconsIcon icon={Download01Icon} size={17} strokeWidth={1.8} />
     </IconButton>
   );
