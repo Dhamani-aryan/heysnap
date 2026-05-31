@@ -7,6 +7,7 @@ import {
   HEYSNAP_LIGHT_ID,
   HeySnapCodeViewer,
 } from "./components/viewers/HeySnapCodeViewer";
+import { HeySnapCsvViewer } from "./components/viewers/HeySnapCsvViewer";
 import { HeySnapDocxViewer } from "./components/viewers/HeySnapDocxViewer";
 import { HeySnapHtmlViewer } from "./components/viewers/HeySnapHtmlViewer";
 import { HeySnapImageViewer } from "./components/viewers/HeySnapImageViewer";
@@ -140,6 +141,10 @@ const renderFile = (file: PreviewFile, callbacks: ThemedPreviewerCallbacks): Rea
     return <MarkdownPreview file={file} {...callbacks} />;
   }
 
+  if (isCsv(file)) {
+    return <CsvPreview file={file} {...callbacks} />;
+  }
+
   if (isCode(file)) {
     return <CodePreview file={file} {...callbacks} />;
   }
@@ -248,6 +253,30 @@ const CodePreview = ({
       src={src}
       documentName={file.name}
       theme={theme.codeTheme}
+      headerBackground={theme.headerBackground}
+      headerForeground={theme.headerForeground}
+      bodyBackground={theme.codeBodyBackground}
+      onReady={onReady}
+      onError={onError}
+    />
+  );
+};
+
+const CsvPreview = ({
+  file,
+  theme,
+  onReady,
+  onError,
+}: {
+  readonly file: PreviewFile;
+} & ThemedPreviewerCallbacks): React.ReactElement => {
+  const src = useMemo(() => fileToBrowserFile(file), [file]);
+
+  return (
+    <HeySnapCsvViewer
+      src={src}
+      documentName={file.name}
+      colorScheme={theme.mode}
       headerBackground={theme.headerBackground}
       headerForeground={theme.headerForeground}
       bodyBackground={theme.codeBodyBackground}
@@ -448,6 +477,8 @@ const ReadyAfterPaint = ({
 };
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdx"]);
+const CSV_EXTENSIONS = new Set([".csv", ".tsv"]);
+const CSV_MIME_TYPES = new Set(["text/csv", "text/tab-separated-values"]);
 const CODE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -507,6 +538,9 @@ const CODE_EXTENSIONS = new Set([
 
 const isMarkdown = (file: PreviewFile): boolean =>
   file.mime === "text/markdown" || MARKDOWN_EXTENSIONS.has(extensionOf(file.path));
+
+const isCsv = (file: PreviewFile): boolean =>
+  CSV_MIME_TYPES.has(file.mime) || CSV_EXTENSIONS.has(extensionOf(file.path));
 
 const isCode = (file: PreviewFile): boolean => {
   if (CODE_EXTENSIONS.has(extensionOf(file.path))) {
