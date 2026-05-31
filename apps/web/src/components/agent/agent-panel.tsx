@@ -9,9 +9,15 @@ import { AgentTimeline } from './agent-timeline.tsx'
 
 type Props = {
   readonly showPrompt?: boolean
+  readonly onOpenWorkspacePath?: (path: string) => void
+  readonly onOpenChromeTab?: (tabId: number) => void
 }
 
-export function AgentPanel({ showPrompt = true }: Props = {}) {
+export function AgentPanel({
+  showPrompt = true,
+  onOpenWorkspacePath,
+  onOpenChromeTab,
+}: Props = {}) {
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
   const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
@@ -73,6 +79,8 @@ export function AgentPanel({ showPrompt = true }: Props = {}) {
         {(loadStatus !== 'loading' || hasMessages) && loadError === null ? (
           <AgentTimeline
             currentPath={currentPath}
+            onOpenChromeTab={onOpenChromeTab}
+            onOpenFilePath={onOpenWorkspacePath}
             onSubmitUserMessageEdit={editMessage.submit}
           />
         ) : null}

@@ -16,6 +16,7 @@ import {
   useAgentPromptDraftStore,
 } from '../../../stores/agent/agent-prompt-draft-store.ts'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
+import { useWorkspaceMarkdownLinkActions } from '../../../hooks/workspace/use-workspace-markdown-link-actions.ts'
 import { AgentPromptInputContainer } from '../../agent/agent-prompt-input-container.tsx'
 import { useWorkspaceLayout } from './use-workspace-layout.ts'
 
@@ -72,6 +73,7 @@ function WorkspaceAgentStatus() {
   const messagesById = useAgentChatStore((s) => s.messagesById)
   const streamingMessageIds = useAgentChatStore((s) => s.streamingMessageIds)
   const currentPath = useFilesystemStore((s) => s.currentPath)
+  const { openWorkspacePath, openChromeTab } = useWorkspaceMarkdownLinkActions()
   const latestAssistantResponse = useMemo<AgentStatusResponse | null>(() => {
     if (activeRun === null) return null
 
@@ -174,6 +176,8 @@ function WorkspaceAgentStatus() {
                 text={visibleAssistantResponse.markdown}
                 cwd={currentPath}
                 isStreaming={visibleAssistantResponse.isStreaming}
+                onOpenFilePath={openWorkspacePath}
+                onOpenChromeTab={openChromeTab}
               />
             </Suspense>
           </div>
