@@ -37,7 +37,9 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
 type RequestPayload = DistributiveOmit<FilesystemClientMessage, 'requestId'>
 
 export class FilesystemConnectionManager {
-  private readonly options: FilesystemConnectionManagerOptions
+  private url: string
+  private previewBaseUrl: string | undefined
+  private readonly callbacks: ManagerCallbacks
   private socket: WebSocket | null = null
   private status: FilesystemConnectionStatus = 'idle'
   private shouldReconnect = false
@@ -52,7 +54,9 @@ export class FilesystemConnectionManager {
   private visibilityListener: (() => void) | null = null
 
   constructor(options: FilesystemConnectionManagerOptions) {
-    this.options = options
+    this.url = options.url
+    this.previewBaseUrl = options.previewBaseUrl
+    this.callbacks = options.callbacks
     this.subscribedPath = options.initialPath ?? ''
   }
 
@@ -83,6 +87,11 @@ export class FilesystemConnectionManager {
 
   getStatus(): FilesystemConnectionStatus {
     return this.status
+  }
+
+  setUrls(input: { readonly url: string; readonly previewBaseUrl?: string }): void {
+    this.url = input.url
+    this.previewBaseUrl = input.previewBaseUrl
   }
 
   async subscribe(path: string): Promise<FilesystemListing> {
@@ -163,7 +172,7 @@ export class FilesystemConnectionManager {
   }
 
   private resolvePreviewBaseUrl(): URL | null {
-    const explicit = this.options.previewBaseUrl?.trim()
+    const explicit = this.previewBaseUrl?.trim()
     if (explicit) {
       try {
         return new URL(explicit, getDocumentBaseHref())
@@ -182,7 +191,7 @@ export class FilesystemConnectionManager {
 
   private isGatewayFilesystemUrl(): boolean {
     try {
-      const url = new URL(this.options.url, getDocumentBaseHref())
+      const url = new URL(this.url, getDocumentBaseHref())
       return /^\/gateway\/computers\/[^/]+\/filesystem\/?$/u.test(url.pathname)
     } catch {
       return false
@@ -190,7 +199,7 @@ export class FilesystemConnectionManager {
   }
 
   private toHttpUrl(): URL {
-    const url = new URL(this.options.url)
+    const url = new URL(this.url)
     if (url.protocol === 'ws:') url.protocol = 'http:'
     else if (url.protocol === 'wss:') url.protocol = 'https:'
     return url
@@ -211,7 +220,7 @@ export class FilesystemConnectionManager {
 
     let socketUrl: URL
     try {
-      socketUrl = new URL(this.options.url)
+      socketUrl = new URL(this.url)
     } catch {
       this.shouldReconnect = false
       this.setStatus('closed')
@@ -265,7 +274,7 @@ export class FilesystemConnectionManager {
   }
 
   private handleServerMessage(message: FilesystemServerMessage): void {
-    this.options.callbacks.onMessage(message)
+    this.callbacks.onMessage(message)
 
     switch (message.type) {
       case 'snapshot':
@@ -422,7 +431,7 @@ export class FilesystemConnectionManager {
   private setStatus(next: FilesystemConnectionStatus): void {
     if (this.status === next) return
     this.status = next
-    this.options.callbacks.onStatusChange(next)
+    this.callbacks.onStatusChange(next)
   }
 
   private nextRequestId(): string {

@@ -10,8 +10,12 @@ import {
   createInitialNavigationHistory,
   getParentPath,
 } from '../../lib/filesystem/filesystem-paths.ts'
+import {
+  readPersistedFilesystemWorkspaceState,
+  reconcileFilesystemViewState,
+} from './filesystem-persistence.ts'
 
-const HISTORY_LIMIT = 64
+export const FILESYSTEM_HISTORY_LIMIT = 64
 
 export type LeftPaneSurface = 'directory' | 'file' | 'browser'
 export type FilesystemClipboardMode = 'copy' | 'cut'
@@ -34,6 +38,8 @@ export function getActiveFilesystemManager(): FilesystemConnectionManager | null
 }
 
 type FilesystemState = {
+  workspaceIdentity: string | null
+  hasHydratedWorkspace: boolean
   connectionStatus: FilesystemConnectionStatus
   currentPath: string
   listing: FilesystemListing | null
@@ -49,6 +55,10 @@ type FilesystemState = {
 }
 
 type FilesystemActions = {
+  hydrateWorkspace: (input: {
+    readonly workspaceIdentity: string
+    readonly canRestoreBrowser: boolean
+  }) => void
   ingestServerMessage: (message: FilesystemServerMessage) => void
   setConnectionStatus: (status: FilesystemConnectionStatus) => void
   navigate: (path: string) => Promise<void>
@@ -69,6 +79,8 @@ type FilesystemActions = {
 }
 
 const initialState: FilesystemState = {
+  workspaceIdentity: null,
+  hasHydratedWorkspace: false,
   connectionStatus: 'idle',
   currentPath: '',
   listing: null,
@@ -86,6 +98,48 @@ const initialState: FilesystemState = {
 export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
   (set, get) => ({
     ...initialState,
+
+    hydrateWorkspace: ({ workspaceIdentity, canRestoreBrowser }) => {
+      const current = get()
+      if (
+        current.workspaceIdentity === workspaceIdentity &&
+        current.hasHydratedWorkspace
+      ) {
+        return
+      }
+
+      const persisted =
+        typeof window === 'undefined'
+          ? null
+          : readPersistedFilesystemWorkspaceState(
+              window.localStorage,
+              workspaceIdentity,
+              FILESYSTEM_HISTORY_LIMIT,
+              { canRestoreBrowser },
+            )
+
+      if (persisted === null) {
+        set({
+          ...initialState,
+          workspaceIdentity,
+          hasHydratedWorkspace: true,
+        })
+        return
+      }
+
+      set({
+        ...initialState,
+        workspaceIdentity,
+        hasHydratedWorkspace: true,
+        currentPath: persisted.currentPath,
+        history: persisted.history,
+        historyIndex: persisted.historyIndex,
+        openFileTabs: persisted.openFileTabs,
+        activeFilePath: persisted.activeFilePath,
+        activeLeftPaneSurface: persisted.activeLeftPaneSurface,
+        hasHydratedOpenFiles: true,
+      })
+    },
 
     ingestServerMessage: (message) => {
       switch (message.type) {
@@ -110,15 +164,28 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
           return
         }
         case 'hello': {
-          if (!get().hasHydratedOpenFiles) {
-            const openFiles = message.viewState?.openFiles ?? []
+          const viewState = message.viewState
+          const state = get()
+          if (viewState !== undefined) {
+            const reconciled = reconcileFilesystemViewState({
+              currentOpenFileTabs: state.openFileTabs,
+              activeFilePath: state.activeFilePath,
+              activeLeftPaneSurface: state.activeLeftPaneSurface,
+              viewState,
+              shouldHydrateFromServer: !state.hasHydratedOpenFiles,
+            })
             set({
-              openFileTabs: [...openFiles],
+              openFileTabs: reconciled.openFileTabs,
+              activeFilePath: reconciled.activeFilePath,
+              activeLeftPaneSurface: reconciled.activeLeftPaneSurface,
               hasHydratedOpenFiles: true,
             })
+            syncOpenFiles(reconciled.openFileTabs)
             return
           }
-          syncOpenFiles(get().openFileTabs)
+
+          set({ hasHydratedOpenFiles: true })
+          syncOpenFiles(state.openFileTabs)
           return
         }
         case 'error': {
@@ -146,8 +213,8 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
       const truncated = history.slice(0, historyIndex + 1)
       const appended = [...truncated, path]
       const nextHistory =
-        appended.length > HISTORY_LIMIT
-          ? appended.slice(appended.length - HISTORY_LIMIT)
+        appended.length > FILESYSTEM_HISTORY_LIMIT
+          ? appended.slice(appended.length - FILESYSTEM_HISTORY_LIMIT)
           : appended
 
       set({
