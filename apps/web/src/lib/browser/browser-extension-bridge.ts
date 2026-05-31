@@ -17,11 +17,13 @@ import type {
 
 const EXTENSION_RETRY_DELAY_MS = 2500
 const TAB_EVENTS_PORT_NAME = 'heysnap-tab-events'
+const TAB_EVENTS_RECONNECT_DELAY_MS = 500
 const CHROME_DEBUGGER_PROTOCOL_VERSION = '1.3'
 
 type Callbacks = {
   onStatusChange: (status: BrowserExtensionStatus) => void
   onTabEvent?: (event: BrowserTabEvent) => void
+  onTabEventsReconnect?: () => void
   onError?: (error: ExtensionCommandError) => void
 }
 
@@ -41,9 +43,11 @@ export class BrowserExtensionBridge {
   private readonly callbacks: Callbacks
   private status: BrowserExtensionStatus = 'idle'
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private tabEventsReconnectTimer: ReturnType<typeof setTimeout> | null = null
   private detectionController: AbortController | null = null
   private tabEventsPort: ChromeRuntimePort | null = null
   private started = false
+  private shouldRefreshAfterTabEventsReconnect = false
   private readonly attachedDebuggerTabIds = new Set<number>()
 
   constructor(options: Options) {
@@ -67,6 +71,7 @@ export class BrowserExtensionBridge {
       this.detectionController.abort()
       this.detectionController = null
     }
+    this.clearTabEventsReconnectTimer()
     this.closeTabEventsPort()
     this.attachedDebuggerTabIds.clear()
     this.setStatus('idle')
@@ -252,6 +257,7 @@ export class BrowserExtensionBridge {
     if (status === 'available') {
       this.openTabEventsPort()
     } else {
+      this.clearTabEventsReconnectTimer()
       this.closeTabEventsPort()
     }
   }
@@ -267,9 +273,13 @@ export class BrowserExtensionBridge {
       if (error instanceof ExtensionCommandError) {
         this.callbacks.onError?.(error)
       }
+      this.shouldRefreshAfterTabEventsReconnect = true
+      this.scheduleTabEventsReconnect()
       return
     }
     this.tabEventsPort = port
+    const shouldNotifyReconnect = this.shouldRefreshAfterTabEventsReconnect
+    this.shouldRefreshAfterTabEventsReconnect = false
 
     port.onMessage.addListener((message) => {
       const event = parseBrowserTabEventMessage(message)
@@ -279,8 +289,14 @@ export class BrowserExtensionBridge {
     port.onDisconnect.addListener(() => {
       if (this.tabEventsPort === port) {
         this.tabEventsPort = null
+        this.shouldRefreshAfterTabEventsReconnect = true
+        this.scheduleTabEventsReconnect()
       }
     })
+
+    if (shouldNotifyReconnect) {
+      this.callbacks.onTabEventsReconnect?.()
+    }
   }
 
   private closeTabEventsPort(): void {
@@ -292,6 +308,29 @@ export class BrowserExtensionBridge {
     } catch {
       // ignore
     }
+  }
+
+  private scheduleTabEventsReconnect(): void {
+    if (
+      !this.started ||
+      this.status !== 'available' ||
+      this.callbacks.onTabEvent === undefined ||
+      this.tabEventsPort !== null ||
+      this.tabEventsReconnectTimer !== null
+    ) {
+      return
+    }
+
+    this.tabEventsReconnectTimer = setTimeout(() => {
+      this.tabEventsReconnectTimer = null
+      this.openTabEventsPort()
+    }, TAB_EVENTS_RECONNECT_DELAY_MS)
+  }
+
+  private clearTabEventsReconnectTimer(): void {
+    if (this.tabEventsReconnectTimer === null) return
+    clearTimeout(this.tabEventsReconnectTimer)
+    this.tabEventsReconnectTimer = null
   }
 }
 

@@ -48,6 +48,9 @@ export function useBrowserConnection(options: {
         onTabEvent: (event) => {
           useBrowserStore.getState().applyTabEvent(event)
         },
+        onTabEventsReconnect: () => {
+          void refreshBrowserWindowSnapshot(bridge)
+        },
       },
     })
 
@@ -220,10 +223,12 @@ export function useBrowserConnection(options: {
     const tabUrl =
       startState.tabs.find((tab) => tab.id === tabId)?.url ||
       DEFAULT_BROWSER_WINDOW_URL
+    const transitionFrameUrl = startState.screencast.frameUrl
+    const transitionAspectRatio = startState.screencast.aspectRatio
 
     useBrowserStore.getState().setScreencast({
-      aspectRatio: null,
-      frameUrl: null,
+      aspectRatio: transitionAspectRatio,
+      frameUrl: transitionFrameUrl,
       state: 'connecting',
       tabId,
     })
@@ -258,7 +263,7 @@ export function useBrowserConnection(options: {
         store.setScreencast({
           aspectRatio: current.tabId === tabId ? current.aspectRatio : null,
           frameUrl: current.tabId === tabId ? current.frameUrl : null,
-          state: 'streaming',
+          state: 'connecting',
           tabId,
         })
         return
@@ -379,4 +384,25 @@ export function useBrowserConnection(options: {
       controller.abort()
     }
   }, [extensionStatus, activeTabId, activeTabUrl, screencastMode])
+}
+
+async function refreshBrowserWindowSnapshot(
+  bridge: BrowserExtensionBridge,
+): Promise<void> {
+  const windowId = useBrowserStore.getState().windowId
+  if (windowId === null) return
+
+  const controller = new AbortController()
+  try {
+    const snapshot = await bridge.getBrowserWindow(
+      windowId,
+      { populate: true },
+      controller.signal,
+    )
+    useBrowserStore.getState().setWindow(snapshot)
+  } catch {
+    if (!controller.signal.aborted) {
+      useBrowserStore.getState().clearWindow()
+    }
+  }
 }
