@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { BrowserExtensionBridge } from '../../lib/browser/browser-extension-bridge.ts'
 import { BrowserControlManager } from '../../lib/browser/browser-control-manager.ts'
 import { DEFAULT_BROWSER_WINDOW_URL } from '../../lib/browser/parsers.ts'
@@ -30,6 +30,7 @@ import {
   type ChromeRuntimePort,
 } from '../../lib/browser/extension-messaging.ts'
 import {
+  getActiveBrowserControlManager,
   getActiveBrowserExtensionBridge,
   initialBrowserScreencastStats,
   setActiveBrowserControlManager,
@@ -42,8 +43,15 @@ const WINDOW_PROBE_INTERVAL_MS = 1500
 
 export function useBrowserConnection(options: {
   controlWebSocketUrl?: string
+  controlConnectionIdentity?: string
+  workspaceIdentity: string
 }): void {
-  const { controlWebSocketUrl } = options
+  const {
+    controlWebSocketUrl,
+    controlConnectionIdentity,
+    workspaceIdentity,
+  } = options
+  const latestControlWebSocketUrlRef = useRef(controlWebSocketUrl)
   const extensionStatus = useBrowserStore((s) => s.extensionStatus)
   const windowId = useBrowserStore((s) => s.windowId)
   const isWindowHydrated = useBrowserStore((s) => s.isWindowHydrated)
@@ -59,6 +67,10 @@ export function useBrowserConnection(options: {
     () => buildBrowserScreencastProfile(captureViewport),
     [captureViewport],
   )
+
+  useEffect(() => {
+    latestControlWebSocketUrlRef.current = controlWebSocketUrl
+  }, [controlWebSocketUrl])
 
   useEffect(() => {
     const bridge = new BrowserExtensionBridge({
@@ -171,13 +183,15 @@ export function useBrowserConnection(options: {
 
   useEffect(() => {
     if (extensionStatus !== 'available') return
-    if (controlWebSocketUrl === undefined) return
+    if (controlConnectionIdentity === undefined) return
+    const latestControlWebSocketUrl = latestControlWebSocketUrlRef.current
+    if (latestControlWebSocketUrl === undefined) return
 
     const bridge = getActiveBrowserExtensionBridge()
     if (bridge === null) return
 
     const manager = new BrowserControlManager({
-      url: controlWebSocketUrl,
+      url: latestControlWebSocketUrl,
       bridge,
       callbacks: {
         onStatusChange: (status) => {
@@ -196,7 +210,13 @@ export function useBrowserConnection(options: {
       setActiveBrowserControlManager(null)
       useBrowserStore.getState().setConnectionStatus('idle')
     }
-  }, [extensionStatus, controlWebSocketUrl])
+  }, [controlConnectionIdentity, extensionStatus, workspaceIdentity])
+
+  useEffect(() => {
+    const manager = getActiveBrowserControlManager()
+    if (manager === null || controlWebSocketUrl === undefined) return
+    manager.setUrl(controlWebSocketUrl)
+  }, [controlWebSocketUrl])
 
   useEffect(() => {
     if (extensionStatus !== 'available' || windowId === null) {
@@ -472,11 +492,7 @@ export function useBrowserConnection(options: {
     windowId,
     activeTabId,
     screencastMode,
-    screencastProfile.everyNthFrame,
-    screencastProfile.format,
-    screencastProfile.maxHeight,
-    screencastProfile.maxWidth,
-    screencastProfile.quality,
+    screencastProfile,
   ])
 
   useEffect(() => {

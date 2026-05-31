@@ -19,6 +19,7 @@ export function WorkspaceTabsStrip() {
   const showBrowser = useFilesystemStore((s) => s.showBrowser)
   const extensionStatus = useBrowserStore((s) => s.extensionStatus)
   const windowId = useBrowserStore((s) => s.windowId)
+  const isWindowHydrated = useBrowserStore((s) => s.isWindowHydrated)
   const isOpeningWindow = useBrowserStore((s) => s.isOpeningWindow)
   const ensureBrowserWindow = useBrowserStore((s) => s.ensureBrowserWindow)
   const closeBrowserWindow = useBrowserStore((s) => s.closeBrowserWindow)
@@ -34,13 +35,21 @@ export function WorkspaceTabsStrip() {
   useEffect(() => {
     if (
       activeSurface === 'browser' &&
+      isWindowHydrated &&
       windowId === null &&
       !isOpeningWindow &&
       windowError === null
     ) {
       showDirectory()
     }
-  }, [activeSurface, windowId, isOpeningWindow, windowError, showDirectory])
+  }, [
+    activeSurface,
+    isWindowHydrated,
+    windowId,
+    isOpeningWindow,
+    windowError,
+    showDirectory,
+  ])
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-[8px] overflow-hidden">
