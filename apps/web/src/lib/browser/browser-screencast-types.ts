@@ -8,9 +8,20 @@ export type BrowserScreencastConnectionState =
 
 export type BrowserScreencastState = {
   readonly aspectRatio: number | null
-  readonly frameUrl: string | null
+  readonly lastFrameAt: number | null
+  readonly stats: BrowserScreencastStats
   readonly state: BrowserScreencastConnectionState
   readonly tabId: number | null
+}
+
+export type BrowserScreencastStats = {
+  readonly droppedFrames: number
+  readonly lastFrameEstimatedBytes: number
+  readonly lastPaintedAt: number | null
+  readonly paintedFrames: number
+  readonly receivedFrames: number
+  readonly restartCount: number
+  readonly skippedFrames: number
 }
 
 export type BrowserScreencastMessage =

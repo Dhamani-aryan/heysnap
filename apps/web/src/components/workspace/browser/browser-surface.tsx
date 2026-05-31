@@ -84,6 +84,8 @@ export function BrowserSurface() {
           <BrowserAddressBar />
           <div className="browser-window-stage">
             <BrowserViewport
+              captureHeight={screenHeight}
+              captureWidth={screenWidth}
               onNaturalAspectRatio={setNaturalAspectRatio}
             />
           </div>

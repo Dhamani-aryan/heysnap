@@ -1,13 +1,29 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { BrowserExtensionBridge } from '../../lib/browser/browser-extension-bridge.ts'
 import { BrowserControlManager } from '../../lib/browser/browser-control-manager.ts'
 import { DEFAULT_BROWSER_WINDOW_URL } from '../../lib/browser/parsers.ts'
+import {
+  getBrowserFrameStats,
+  getLastBrowserFrame,
+  publishBrowserFrame,
+  recordBrowserScreencastRestart,
+} from '../../lib/browser/browser-frame-bus.ts'
 import {
   BROWSER_SCREENCAST_PORT_NAME,
   disconnectBrowserScreencastPort,
   getBrowserScreencastMode,
   parseBrowserScreencastMessage,
 } from '../../lib/browser/browser-screencast-messages.ts'
+import { buildBrowserScreencastProfile } from '../../lib/browser/browser-screencast-profile.ts'
+import type {
+  BrowserScreencastConnectionState,
+  BrowserScreencastStats,
+} from '../../lib/browser/browser-screencast-types.ts'
+import {
+  BROWSER_SCREENCAST_WATCHDOG_INTERVAL_MS,
+  getBrowserScreencastRestartDelay,
+  shouldRestartBrowserScreencast,
+} from '../../lib/browser/browser-screencast-watchdog.ts'
 import { readBrowserNavigationState } from '../../lib/browser/browser-actions.ts'
 import {
   connectExtensionPort,
@@ -15,6 +31,7 @@ import {
 } from '../../lib/browser/extension-messaging.ts'
 import {
   getActiveBrowserExtensionBridge,
+  initialBrowserScreencastStats,
   setActiveBrowserControlManager,
   setActiveBrowserExtensionBridge,
   useBrowserStore,
@@ -37,6 +54,11 @@ export function useBrowserConnection(options: {
     return s.tabs.find((tab) => tab.id === id)?.url
   })
   const screencastMode = getBrowserScreencastMode(activeTabUrl)
+  const captureViewport = useBrowserStore((s) => s.captureViewport)
+  const screencastProfile = useMemo(
+    () => buildBrowserScreencastProfile(captureViewport),
+    [captureViewport],
+  )
 
   useEffect(() => {
     const bridge = new BrowserExtensionBridge({
@@ -180,7 +202,8 @@ export function useBrowserConnection(options: {
     if (extensionStatus !== 'available' || windowId === null) {
       useBrowserStore.getState().setScreencast({
         aspectRatio: null,
-        frameUrl: null,
+        lastFrameAt: null,
+        stats: initialBrowserScreencastStats,
         state: 'idle',
         tabId: activeTabId,
       })
@@ -190,7 +213,8 @@ export function useBrowserConnection(options: {
     if (activeTabId === null) {
       useBrowserStore.getState().setScreencast({
         aspectRatio: null,
-        frameUrl: null,
+        lastFrameAt: null,
+        stats: initialBrowserScreencastStats,
         state: 'idle',
         tabId: null,
       })
@@ -200,7 +224,8 @@ export function useBrowserConnection(options: {
     if (screencastMode === 'new_tab') {
       useBrowserStore.getState().setScreencast({
         aspectRatio: null,
-        frameUrl: null,
+        lastFrameAt: null,
+        stats: toBrowserScreencastStats(activeTabId),
         state: 'new_tab',
         tabId: activeTabId,
       })
@@ -210,7 +235,8 @@ export function useBrowserConnection(options: {
     if (screencastMode !== 'streamable') {
       useBrowserStore.getState().setScreencast({
         aspectRatio: null,
-        frameUrl: null,
+        lastFrameAt: null,
+        stats: toBrowserScreencastStats(activeTabId),
         state: 'idle',
         tabId: activeTabId,
       })
@@ -223,127 +249,235 @@ export function useBrowserConnection(options: {
     const tabUrl =
       startState.tabs.find((tab) => tab.id === tabId)?.url ||
       DEFAULT_BROWSER_WINDOW_URL
-    const transitionFrameUrl = startState.screencast.frameUrl
-    const transitionAspectRatio = startState.screencast.aspectRatio
+    const lastFrame = getLastBrowserFrame(tabId)
+    const transitionAspectRatio =
+      lastFrame?.aspectRatio ?? startState.screencast.aspectRatio
+    const transitionLastFrameAt =
+      lastFrame?.receivedAt ?? startState.screencast.lastFrameAt
 
     useBrowserStore.getState().setScreencast({
       aspectRatio: transitionAspectRatio,
-      frameUrl: transitionFrameUrl,
+      lastFrameAt: transitionLastFrameAt,
+      stats: toBrowserScreencastStats(tabId),
       state: 'connecting',
       tabId,
     })
 
     let isCancelled = false
-    const abortController = new AbortController()
-    let port: ChromeRuntimePort
+    let activePort: ChromeRuntimePort | null = null
+    let activeAbortController: AbortController | null = null
+    let watchdogIntervalId: number | null = null
+    let restartTimeoutId: number | null = null
+    let restartAttempt = 0
+    let isRestartScheduled = false
+    let lastSignalAt: number | null = Date.now()
+    let streamState: BrowserScreencastConnectionState = 'connecting'
+    let currentAspectRatio = transitionAspectRatio
+    let lastMetadataUpdateAt = 0
 
-    try {
-      port = connectExtensionPort(
-        env.chromeExtensionId,
-        BROWSER_SCREENCAST_PORT_NAME,
-      )
-    } catch {
-      useBrowserStore.getState().setScreencast({
-        aspectRatio: null,
-        frameUrl: null,
-        state: 'error',
-        tabId,
-      })
-      return
-    }
-
-    port.onMessage.addListener((message) => {
-      if (isCancelled) return
-      const event = parseBrowserScreencastMessage(message)
-      if (event === null) return
-
-      const store = useBrowserStore.getState()
-      if (event.type === 'started') {
-        const current = store.screencast
-        store.setScreencast({
-          aspectRatio: current.tabId === tabId ? current.aspectRatio : null,
-          frameUrl: current.tabId === tabId ? current.frameUrl : null,
-          state: 'connecting',
-          tabId,
-        })
-        return
-      }
-      if (event.type === 'frame') {
-        if (event.tabId !== tabId) return
-        store.setScreencast({
-          aspectRatio: event.aspectRatio,
-          frameUrl: event.dataUrl,
-          state: 'streaming',
-          tabId,
-        })
-        return
-      }
-      if (event.type === 'stopped') {
-        const current = store.screencast
-        store.setScreencast({
-          aspectRatio: current.tabId === tabId ? current.aspectRatio : null,
-          frameUrl: current.tabId === tabId ? current.frameUrl : null,
-          state: 'stopped',
-          tabId,
-        })
-        return
-      }
-      store.setScreencast({
-        aspectRatio: null,
-        frameUrl: null,
-        state: 'error',
-        tabId,
-      })
-    })
-
-    port.onDisconnect.addListener(() => {
-      if (isCancelled) return
+    const setStreamState = (
+      state: BrowserScreencastConnectionState,
+      options?: { readonly force?: boolean; readonly lastFrameAt?: number | null },
+    ): void => {
       const store = useBrowserStore.getState()
       const current = store.screencast
-      if (current.tabId !== tabId) return
+      if (current.tabId !== tabId && current.tabId !== null) return
+      const now = Date.now()
+      const shouldUpdate =
+        options?.force === true ||
+        current.state !== state ||
+        current.aspectRatio !== currentAspectRatio ||
+        now - lastMetadataUpdateAt >= 1000
+      if (!shouldUpdate) return
+      lastMetadataUpdateAt = now
       store.setScreencast({
-        ...current,
-        state: current.state === 'streaming' ? 'stopped' : current.state,
+        aspectRatio: currentAspectRatio,
+        lastFrameAt: options?.lastFrameAt ?? current.lastFrameAt,
+        stats: toBrowserScreencastStats(tabId),
+        state,
+        tabId,
       })
-    })
+    }
 
-    void (async () => {
+    const disconnectActivePort = (): void => {
+      const port = activePort
+      activePort = null
+      if (port !== null) disconnectBrowserScreencastPort(port)
+    }
+
+    const clearRestartTimeout = (): void => {
+      if (restartTimeoutId === null) return
+      window.clearTimeout(restartTimeoutId)
+      restartTimeoutId = null
+    }
+
+    const scheduleRestart = (): void => {
+      if (isCancelled || isRestartScheduled) return
+      isRestartScheduled = true
+      disconnectActivePort()
+      activeAbortController?.abort()
+      activeAbortController = null
+      recordBrowserScreencastRestart(tabId)
+      streamState = 'connecting'
+      setStreamState('connecting', { force: true })
+
+      const delay = getBrowserScreencastRestartDelay(restartAttempt)
+      restartAttempt += 1
+      clearRestartTimeout()
+      restartTimeoutId = window.setTimeout(() => {
+        restartTimeoutId = null
+        isRestartScheduled = false
+        lastSignalAt = Date.now()
+        void openPort()
+      }, delay)
+    }
+
+    const openPort = async (): Promise<void> => {
+      if (isCancelled) return
+      disconnectActivePort()
+      activeAbortController?.abort()
+      const abortController = new AbortController()
+      activeAbortController = abortController
+      lastSignalAt = Date.now()
+      streamState = 'connecting'
+
+      let port: ChromeRuntimePort
+      try {
+        port = connectExtensionPort(
+          env.chromeExtensionId,
+          BROWSER_SCREENCAST_PORT_NAME,
+        )
+        activePort = port
+      } catch {
+        useBrowserStore.getState().setScreencast({
+          aspectRatio: null,
+          lastFrameAt: null,
+          stats: toBrowserScreencastStats(tabId),
+          state: 'error',
+          tabId,
+        })
+        return
+      }
+
+      port.onMessage.addListener((message) => {
+        if (isCancelled || port !== activePort) return
+        const event = parseBrowserScreencastMessage(message)
+        if (event === null) return
+
+        if (event.type === 'started') {
+          lastSignalAt = Date.now()
+          streamState = 'connecting'
+          setStreamState('connecting', { force: true })
+          return
+        }
+
+        if (event.type === 'frame') {
+          if (event.tabId !== tabId) return
+          const frame = publishBrowserFrame({
+            aspectRatio: event.aspectRatio,
+            dataUrl: event.dataUrl,
+            tabId,
+          })
+          lastSignalAt = frame.receivedAt
+          restartAttempt = 0
+          currentAspectRatio = frame.aspectRatio ?? currentAspectRatio
+          streamState = 'streaming'
+          setStreamState('streaming', {
+            force: useBrowserStore.getState().screencast.state !== 'streaming',
+            lastFrameAt: frame.receivedAt,
+          })
+          return
+        }
+
+        if (event.type === 'stopped') {
+          lastSignalAt = Date.now()
+          streamState = 'stopped'
+          setStreamState('stopped', { force: true })
+          return
+        }
+
+        streamState = 'error'
+        useBrowserStore.getState().setScreencast({
+          aspectRatio: null,
+          lastFrameAt: null,
+          stats: toBrowserScreencastStats(tabId),
+          state: 'error',
+          tabId,
+        })
+      })
+
+      port.onDisconnect.addListener(() => {
+        if (isCancelled || port !== activePort) return
+        activePort = null
+        scheduleRestart()
+      })
+
       try {
         const bridge = getActiveBrowserExtensionBridge()
-        if (bridge === null) {
-          throw new Error('Browser extension bridge is not active.')
-        }
+        if (bridge === null) throw new Error('Browser extension bridge is not active.')
         await bridge.rememberManagedWindow(
           { windowId: currentWindowId, tabId, url: tabUrl },
           abortController.signal,
         )
-        if (isCancelled || abortController.signal.aborted) return
+        if (
+          isCancelled ||
+          abortController.signal.aborted ||
+          port !== activePort
+        ) {
+          return
+        }
         port.postMessage({
           type: 'start',
           windowId: currentWindowId,
-          format: 'png',
-          quality: 100,
-          maxWidth: 1920,
-          maxHeight: 1200,
-          everyNthFrame: 1,
+          ...screencastProfile,
         })
       } catch {
-        if (isCancelled) return
+        if (isCancelled || port !== activePort) return
+        streamState = 'error'
         useBrowserStore.getState().setScreencast({
           aspectRatio: null,
-          frameUrl: null,
+          lastFrameAt: null,
+          stats: toBrowserScreencastStats(tabId),
           state: 'error',
           tabId,
         })
       }
-    })()
+    }
+
+    watchdogIntervalId = window.setInterval(() => {
+      if (
+        isRestartScheduled ||
+        !shouldRestartBrowserScreencast({
+          lastSignalAt,
+          now: Date.now(),
+          state: streamState,
+        })
+      ) {
+        return
+      }
+      scheduleRestart()
+    }, BROWSER_SCREENCAST_WATCHDOG_INTERVAL_MS)
+
+    void openPort()
 
     return () => {
       isCancelled = true
-      abortController.abort()
-      disconnectBrowserScreencastPort(port)
+      clearRestartTimeout()
+      if (watchdogIntervalId !== null) window.clearInterval(watchdogIntervalId)
+      activeAbortController?.abort()
+      disconnectActivePort()
     }
-  }, [extensionStatus, windowId, activeTabId, screencastMode])
+  }, [
+    extensionStatus,
+    windowId,
+    activeTabId,
+    screencastMode,
+    screencastProfile.everyNthFrame,
+    screencastProfile.format,
+    screencastProfile.maxHeight,
+    screencastProfile.maxWidth,
+    screencastProfile.quality,
+  ])
 
   useEffect(() => {
     if (extensionStatus !== 'available' || activeTabId === null) {
@@ -404,5 +538,18 @@ async function refreshBrowserWindowSnapshot(
     if (!controller.signal.aborted) {
       useBrowserStore.getState().clearWindow()
     }
+  }
+}
+
+function toBrowserScreencastStats(tabId: number): BrowserScreencastStats {
+  const stats = getBrowserFrameStats(tabId)
+  return {
+    droppedFrames: stats.droppedFrames,
+    lastFrameEstimatedBytes: stats.lastFrameEstimatedBytes,
+    lastPaintedAt: stats.lastPaintedAt,
+    paintedFrames: stats.paintedFrames,
+    receivedFrames: stats.receivedFrames,
+    restartCount: stats.restartCount,
+    skippedFrames: stats.skippedFrames,
   }
 }

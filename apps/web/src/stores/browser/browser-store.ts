@@ -8,7 +8,12 @@ import type {
   BrowserWindowTab,
 } from '../../lib/browser/types.ts'
 import type { BrowserControlConnectionStatus } from '../../lib/browser/browser-control-types.ts'
-import type { BrowserScreencastState } from '../../lib/browser/browser-screencast-types.ts'
+import type {
+  BrowserScreencastState,
+  BrowserScreencastStats,
+} from '../../lib/browser/browser-screencast-types.ts'
+import type { BrowserCaptureViewport } from '../../lib/browser/browser-screencast-profile.ts'
+import { clearBrowserFramesForTab } from '../../lib/browser/browser-frame-bus.ts'
 
 const WINDOW_ID_STORAGE_KEY = 'heysnap:browser-window-id'
 
@@ -51,6 +56,7 @@ type BrowserState = {
   tabs: BrowserWindowTab[]
   activeTabId: number | null
   pendingActions: BrowserPendingActions
+  captureViewport: BrowserCaptureViewport | null
   screencast: BrowserScreencastState
   navigation: BrowserNavigationState
 }
@@ -77,14 +83,26 @@ type BrowserActions = {
   upsertCreatedTab: (tab: BrowserWindowTab) => void
   ensureBrowserWindow: () => Promise<number | null>
   closeBrowserWindow: () => Promise<void>
+  setCaptureViewport: (viewport: BrowserCaptureViewport | null) => void
   setScreencast: (state: BrowserScreencastState) => void
   setNavigation: (state: BrowserNavigationState) => void
   reset: () => void
 }
 
+export const initialBrowserScreencastStats: BrowserScreencastStats = {
+  droppedFrames: 0,
+  lastFrameEstimatedBytes: 0,
+  lastPaintedAt: null,
+  paintedFrames: 0,
+  receivedFrames: 0,
+  restartCount: 0,
+  skippedFrames: 0,
+}
+
 const initialScreencast: BrowserScreencastState = {
   aspectRatio: null,
-  frameUrl: null,
+  lastFrameAt: null,
+  stats: initialBrowserScreencastStats,
   state: 'idle',
   tabId: null,
 }
@@ -105,6 +123,7 @@ const initialState: BrowserState = {
   tabs: [],
   activeTabId: null,
   pendingActions: {},
+  captureViewport: null,
   screencast: initialScreencast,
   navigation: initialNavigation,
 }
@@ -259,6 +278,37 @@ function setPendingActionValue(
   return next
 }
 
+function areBrowserScreencastStatesEqual(
+  left: BrowserScreencastState,
+  right: BrowserScreencastState,
+): boolean {
+  return (
+    left.aspectRatio === right.aspectRatio &&
+    left.lastFrameAt === right.lastFrameAt &&
+    left.state === right.state &&
+    left.tabId === right.tabId &&
+    left.stats.droppedFrames === right.stats.droppedFrames &&
+    left.stats.lastFrameEstimatedBytes === right.stats.lastFrameEstimatedBytes &&
+    left.stats.lastPaintedAt === right.stats.lastPaintedAt &&
+    left.stats.paintedFrames === right.stats.paintedFrames &&
+    left.stats.receivedFrames === right.stats.receivedFrames &&
+    left.stats.restartCount === right.stats.restartCount &&
+    left.stats.skippedFrames === right.stats.skippedFrames
+  )
+}
+
+function areBrowserCaptureViewportsEqual(
+  left: BrowserCaptureViewport | null,
+  right: BrowserCaptureViewport | null,
+): boolean {
+  if (left === null || right === null) return left === right
+  return (
+    left.devicePixelRatio === right.devicePixelRatio &&
+    left.height === right.height &&
+    left.width === right.width
+  )
+}
+
 function withActiveTab(
   tabs: readonly BrowserWindowTab[],
   activeTabId: number | null,
@@ -304,6 +354,10 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
     },
 
     setWindow: ({ id, tabs }) => {
+      const previous = get()
+      if (previous.windowId !== id) {
+        for (const tab of previous.tabs) clearBrowserFramesForTab(tab.id)
+      }
       persistWindowId(id)
       set((state) => {
         const isSameWindow = state.windowId === id
@@ -325,6 +379,7 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
     },
 
     clearWindow: () => {
+      for (const tab of get().tabs) clearBrowserFramesForTab(tab.id)
       persistWindowId(null)
       set({
         windowId: null,
@@ -379,6 +434,7 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
     },
 
     optimisticallyCloseTab: (tabId) => {
+      clearBrowserFramesForTab(tabId)
       set((state) => {
         const tabIndex = state.tabs.findIndex((tab) => tab.id === tabId)
         if (tabIndex === -1) return state
@@ -469,8 +525,20 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
       get().clearWindow()
     },
 
+    setCaptureViewport: (viewport) => {
+      set((state) =>
+        areBrowserCaptureViewportsEqual(state.captureViewport, viewport)
+          ? state
+          : { captureViewport: viewport },
+      )
+    },
+
     setScreencast: (state) => {
-      set({ screencast: state })
+      set((current) =>
+        areBrowserScreencastStatesEqual(current.screencast, state)
+          ? current
+          : { screencast: state },
+      )
     },
 
     setNavigation: (state) => {
@@ -478,6 +546,7 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
     },
 
     reset: () => {
+      for (const tab of get().tabs) clearBrowserFramesForTab(tab.id)
       set({ ...initialState })
     },
   }),
