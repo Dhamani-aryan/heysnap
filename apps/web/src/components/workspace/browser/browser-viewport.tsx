@@ -14,6 +14,7 @@ import {
   readBrowserFrameAspectRatio,
   toBrowserViewportKeyboardInput,
 } from '../../../lib/browser/browser-viewport.ts'
+import { BROWSER_POINTER_CURSOR } from '../../../lib/browser/browser-cursor.ts'
 import {
   clickBrowserViewport,
   typeBrowserViewport,
@@ -41,13 +42,21 @@ export function BrowserViewport({
   const isVoiceHotkeyActiveRef = useRef(false)
   const [isKeyboardActive, setIsKeyboardActive] = useState(false)
 
-  const frameUrl =
+  const activeFrameUrl =
     screencast.tabId !== null && screencast.tabId === activeTabId
       ? screencast.frameUrl
       : null
+  const transitionFrameUrl =
+    activeFrameUrl === null &&
+    activeTabId !== null &&
+    screencast.tabId !== null &&
+    screencast.tabId !== activeTabId
+      ? screencast.frameUrl
+      : null
+  const frameUrl = activeFrameUrl ?? transitionFrameUrl
   const canSendInput =
     activeTabId !== null &&
-    frameUrl !== null &&
+    activeFrameUrl !== null &&
     screencast.state === 'streaming'
 
   const flushScroll = useCallback(() => {
@@ -194,6 +203,7 @@ export function BrowserViewport({
       aria-label="Browser viewport"
       data-stream-state={screencast.state}
       onClick={handleClick}
+      style={{ cursor: BROWSER_POINTER_CURSOR }}
       className="relative flex h-full w-full items-center justify-center overflow-hidden"
     >
       {frameUrl !== null ? (
@@ -226,7 +236,9 @@ function getOverlayMessage(
   state: string,
   frameUrl: string | null,
 ): string | null {
-  if (frameUrl !== null && state === 'streaming') return null
+  if (frameUrl !== null && (state === 'streaming' || state === 'connecting')) {
+    return null
+  }
   switch (state) {
     case 'connecting':
       return 'Connecting to browser tab…'

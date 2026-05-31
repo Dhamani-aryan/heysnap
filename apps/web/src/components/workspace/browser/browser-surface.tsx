@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
-import { BROWSER_POINTER_CURSOR } from '../../../lib/browser/browser-cursor.ts'
 import { readBrowserFrameAspectRatio } from '../../../lib/browser/browser-viewport.ts'
 import { BrowserAddressBar } from './browser-address-bar.tsx'
 import { BrowserTabBar } from './browser-tab-bar.tsx'
@@ -69,7 +68,6 @@ export function BrowserSurface() {
       ref={panelRef}
       aria-label="Browser"
       className="browser-window-panel"
-      style={{ cursor: BROWSER_POINTER_CURSOR }}
     >
       {windowId === null ? (
         <EmptyState
