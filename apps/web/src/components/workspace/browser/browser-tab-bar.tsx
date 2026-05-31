@@ -10,7 +10,7 @@ import {
   closeBrowserTab,
   createBrowserTab,
 } from '../../../lib/browser/browser-actions.ts'
-import type { BrowserExtensionBridge } from '../../../lib/browser/browser-extension-bridge.ts'
+import { refreshBrowserTabs } from '../../../lib/browser/browser-ui-actions.ts'
 import type { BrowserWindowTab } from '../../../lib/browser/types.ts'
 import './browser-chrome.css'
 
@@ -30,9 +30,6 @@ export function BrowserTabBar() {
   const reconcileTabs = useBrowserStore((s) => s.reconcileTabs)
   const isCreatingTab =
     windowId !== null && isBrowserActionPending(pendingActions, 'create', windowId)
-
-  const refreshTabs = (bridge: BrowserExtensionBridge): Promise<void> =>
-    refreshBrowserTabs(bridge)
 
   return (
     <div
@@ -72,7 +69,7 @@ export function BrowserTabBar() {
               })
               .catch(() => {
                 setPendingAction('activate', tab.id, false)
-                return refreshTabs(bridge)
+                return refreshBrowserTabs(bridge)
               })
               .finally(() => setPendingAction('activate', tab.id, false))
           }}
@@ -93,7 +90,7 @@ export function BrowserTabBar() {
               })
               .catch(() => {
                 setPendingAction('close', tab.id, false)
-                return refreshTabs(bridge)
+                return refreshBrowserTabs(bridge)
               })
               .finally(() => setPendingAction('close', tab.id, false))
           }}
@@ -126,11 +123,11 @@ export function BrowserTabBar() {
                 upsertCreatedTab({ ...tab, active: true })
                 return
               }
-              return refreshTabs(bridge)
+              return refreshBrowserTabs(bridge)
             })
             .catch(() => {
               setPendingAction('create', windowId, false)
-              return refreshTabs(bridge)
+              return refreshBrowserTabs(bridge)
             })
             .finally(() => setPendingAction('create', windowId, false))
         }}
@@ -219,25 +216,4 @@ function BrowserTab({
       </button>
     </div>
   )
-}
-
-async function refreshBrowserTabs(
-  bridge: BrowserExtensionBridge,
-): Promise<void> {
-  const windowId = useBrowserStore.getState().windowId
-  if (windowId === null) return
-
-  const controller = new AbortController()
-  try {
-    const snapshot = await bridge.getBrowserWindow(
-      windowId,
-      { populate: true },
-      controller.signal,
-    )
-    useBrowserStore.getState().setWindow(snapshot)
-  } catch {
-    if (!controller.signal.aborted) {
-      useBrowserStore.getState().clearWindow()
-    }
-  }
 }
