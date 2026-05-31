@@ -13,6 +13,10 @@ import {
 } from '../../../stores/filesystem/filesystem-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 import {
+  getFilesystemEntryIconSize,
+  getFilesystemEntryIconSrc,
+} from '../../../lib/filesystem/filesystem-icons.ts'
+import {
   folderPickerAttributes,
   getBrowserRelativePath,
   getDirectoryUploadSources,
@@ -702,15 +706,14 @@ function RenameInput({
 }
 
 function EntryImage({ entry }: { entry: FilesystemEntry }) {
-  const isDirectory = entry.type === 'directory'
-  const src = isDirectory ? '/filesystem/Folder.png' : '/filesystem/File.png'
-  const width = isDirectory ? 60 : 39
+  const src = getFilesystemEntryIconSrc(entry)
+  const size = getFilesystemEntryIconSize(entry)
   return (
     <img
       src={src}
       alt=""
       draggable={false}
-      style={{ width, height: 52 }}
+      style={{ width: size.width, height: size.height }}
       className="select-none object-contain [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.18))]"
     />
   )

@@ -5,6 +5,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
 import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
+import { getFilesystemFileTypeIconSrc } from '../../../lib/filesystem/filesystem-icons.ts'
 
 const LONG_NAME_THRESHOLD = 24
 
@@ -222,7 +223,7 @@ function FileTab({
   onSelect: () => void
   onClose: () => void
 }) {
-  const iconSrc = getTypedFileIconSrc(tab.name)
+  const iconSrc = getFilesystemFileTypeIconSrc(tab.name)
   const isLongName = tab.name.length > LONG_NAME_THRESHOLD
 
   return (
@@ -310,12 +311,4 @@ function CloseGlyph() {
       />
     </svg>
   )
-}
-
-function getTypedFileIconSrc(fileName: string): string | null {
-  const lower = fileName.toLowerCase()
-  if (lower.endsWith('.pdf')) return '/filesystem/pdf_file_icon.png'
-  if (lower.endsWith('.docx')) return '/filesystem/docx_file_icon.png'
-  if (/\.(xls|xlsx)$/iu.test(lower)) return '/filesystem/xlsx_file_icon.png'
-  return null
 }
