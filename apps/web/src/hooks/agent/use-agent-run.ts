@@ -22,11 +22,15 @@ import type {
   UserMessage,
 } from '../../lib/agent/types.ts'
 import type { ActiveRunState } from '../../lib/agent/agent-events.ts'
-import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
+import {
+  getActiveAgentBaseUrl,
+  useAgentChatStore,
+} from '../../stores/agent/agent-chat-store.ts'
 import { useAgentThreadListStore } from '../../stores/agent/agent-thread-list-store.ts'
 
 type Options = {
   agentBaseUrl: string
+  agentIdentity: string
   currentPath: string
   uiContext?: AgentUiContext
   selectedThreadId: string | null
@@ -43,6 +47,7 @@ type SubmitInput = {
 
 export function useAgentRun({
   agentBaseUrl,
+  agentIdentity,
   currentPath,
   uiContext,
   selectedThreadId,
@@ -77,7 +82,7 @@ export function useAgentRun({
         .addOptimisticUserMessage(optimisticUserMessage, optimisticRun)
 
       const handle = startAgentRun(
-        agentBaseUrl,
+        () => getActiveAgentBaseUrl() ?? agentBaseUrl,
         {
           threadId: selectedThreadId ?? undefined,
           path: currentPath,
@@ -95,7 +100,7 @@ export function useAgentRun({
               .setThreadStreaming(threadId, true)
             onThreadResolved?.(threadId)
             void queryClient.invalidateQueries({
-              queryKey: agentQueryKeys.threadGroups(agentBaseUrl),
+              queryKey: agentQueryKeys.threadGroups(agentIdentity),
             })
           },
           onEvent: (event) => {
@@ -146,7 +151,7 @@ export function useAgentRun({
     onSettled: () => {
       setActiveAgentRunHandle(null)
       void queryClient.invalidateQueries({
-        queryKey: agentQueryKeys.threadGroups(agentBaseUrl),
+        queryKey: agentQueryKeys.threadGroups(agentIdentity),
       })
     },
   })
@@ -182,7 +187,7 @@ export function useAgentRun({
 
       try {
         useAgentChatStore.getState().setRunError(null)
-        await steerAgentRun(agentBaseUrl, {
+        await steerAgentRun(getActiveAgentBaseUrl() ?? agentBaseUrl, {
           threadId: activeRun.threadId,
           runId: activeRun.runId,
           path: currentPath,

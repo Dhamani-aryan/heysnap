@@ -31,6 +31,7 @@ export function WorkspaceToolbar() {
     (s) => s.historyIndex < s.history.length - 1,
   )
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const { navigateToThread, navigateToNewThread } = useAgentThreadRoute()
 
@@ -75,9 +76,10 @@ export function WorkspaceToolbar() {
           onClick={toggleHistory}
           pressed={isHistoryOpen}
         />
-        {isHistoryOpen && agentBaseUrl !== null ? (
+        {isHistoryOpen && agentBaseUrl !== null && agentIdentity !== null ? (
           <ThreadHistoryPopover
             agentBaseUrl={agentBaseUrl}
+            agentIdentity={agentIdentity}
             selectedThreadId={selectedThreadId}
             onClose={closeHistory}
             onSelectThread={handleSelectThread}

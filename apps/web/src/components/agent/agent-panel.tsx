@@ -13,6 +13,7 @@ type Props = {
 
 export function AgentPanel({ showPrompt = true }: Props = {}) {
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const hasMessages = useAgentChatStore((s) => s.messageOrder.length > 0)
   const activeRun = useAgentChatStore((s) => s.activeRun)
@@ -32,11 +33,13 @@ export function AgentPanel({ showPrompt = true }: Props = {}) {
 
   useAgentThread(selectedThreadId, {
     agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     onThreadResolved: handleThreadResolved,
   })
 
   const editMessage = useAgentEditMessage({
     agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     currentPath,
     selectedThreadId,
     onThreadResolved: handleThreadResolved,
@@ -67,7 +70,7 @@ export function AgentPanel({ showPrompt = true }: Props = {}) {
         {loadError !== null ? (
           <div className="agent-panel-state error">{loadError}</div>
         ) : null}
-        {loadStatus !== 'loading' && loadError === null ? (
+        {(loadStatus !== 'loading' || hasMessages) && loadError === null ? (
           <AgentTimeline
             currentPath={currentPath}
             onSubmitUserMessageEdit={editMessage.submit}

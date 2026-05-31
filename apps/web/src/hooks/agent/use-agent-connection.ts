@@ -1,29 +1,38 @@
 import { useEffect } from 'react'
 import { closeActiveAgentRun } from '../../lib/agent/agent-run-controller.ts'
 import {
-  setActiveAgentBaseUrl,
+  setActiveAgentConnection,
   useAgentChatStore,
 } from '../../stores/agent/agent-chat-store.ts'
 import { useAgentThreadListStore } from '../../stores/agent/agent-thread-list-store.ts'
 
 type Options = {
   agentBaseUrl: string | null | undefined
+  agentIdentity: string | null | undefined
 }
 
-export function useAgentConnection({ agentBaseUrl }: Options): void {
+export function useAgentConnection({
+  agentBaseUrl,
+  agentIdentity,
+}: Options): void {
   const normalized = agentBaseUrl ?? null
-  if (useAgentChatStore.getState().agentBaseUrl !== normalized) {
-    setActiveAgentBaseUrl(normalized)
-  }
+  const normalizedIdentity = agentIdentity ?? null
 
   useEffect(() => {
-    if (!agentBaseUrl) return
-
-    return () => {
+    const previousIdentity = useAgentChatStore.getState().agentIdentity
+    if (
+      normalizedIdentity !== null &&
+      previousIdentity !== null &&
+      previousIdentity !== normalizedIdentity
+    ) {
       closeActiveAgentRun()
-      setActiveAgentBaseUrl(null)
       useAgentChatStore.getState().reset()
       useAgentThreadListStore.getState().reset()
     }
-  }, [agentBaseUrl])
+
+    setActiveAgentConnection({
+      agentBaseUrl: normalized,
+      agentIdentity: normalizedIdentity,
+    })
+  }, [normalized, normalizedIdentity])
 }

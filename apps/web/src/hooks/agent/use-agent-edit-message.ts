@@ -17,11 +17,15 @@ import type {
   AgentUiContext,
 } from '../../lib/agent/types.ts'
 import type { ActiveRunState } from '../../lib/agent/agent-events.ts'
-import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
+import {
+  getActiveAgentBaseUrl,
+  useAgentChatStore,
+} from '../../stores/agent/agent-chat-store.ts'
 import { useAgentThreadListStore } from '../../stores/agent/agent-thread-list-store.ts'
 
 type Options = {
   agentBaseUrl: string
+  agentIdentity: string
   currentPath: string
   uiContext?: AgentUiContext
   selectedThreadId: string | null
@@ -36,6 +40,7 @@ type SubmitInput = {
 
 export function useAgentEditMessage({
   agentBaseUrl,
+  agentIdentity,
   currentPath,
   uiContext,
   selectedThreadId,
@@ -71,7 +76,7 @@ export function useAgentEditMessage({
       })
 
       const handle = editAgentThreadUserMessage(
-        agentBaseUrl,
+        () => getActiveAgentBaseUrl() ?? agentBaseUrl,
         {
           threadId: selectedThreadId,
           path: currentPath,
@@ -86,7 +91,7 @@ export function useAgentEditMessage({
               .setThreadStreaming(threadId, true)
             onThreadResolved?.(threadId)
             void queryClient.invalidateQueries({
-              queryKey: agentQueryKeys.threadGroups(agentBaseUrl),
+              queryKey: agentQueryKeys.threadGroups(agentIdentity),
             })
           },
           onEvent: (event) => {
@@ -137,11 +142,11 @@ export function useAgentEditMessage({
     onSettled: () => {
       setActiveAgentRunHandle(null)
       void queryClient.invalidateQueries({
-        queryKey: agentQueryKeys.threadGroups(agentBaseUrl),
+        queryKey: agentQueryKeys.threadGroups(agentIdentity),
       })
       if (selectedThreadId !== null) {
         void queryClient.invalidateQueries({
-          queryKey: agentQueryKeys.thread(agentBaseUrl, selectedThreadId),
+          queryKey: agentQueryKeys.thread(agentIdentity, selectedThreadId),
         })
       }
     },

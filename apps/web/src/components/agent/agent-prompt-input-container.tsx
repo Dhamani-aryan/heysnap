@@ -23,6 +23,7 @@ export function AgentPromptInputContainer({
 }: Props = {}) {
   const auth = useAuth()
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const activeRun = useAgentChatStore((s) => s.activeRun)
   const promptModelChoice = useAgentModelSelectionStore(
@@ -46,6 +47,7 @@ export function AgentPromptInputContainer({
 
   const agentRun = useAgentRun({
     agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     currentPath,
     selectedThreadId,
     onSelectThread: handleSelectThread,
@@ -62,6 +64,7 @@ export function AgentPromptInputContainer({
       content: AgentContent
     }): boolean | Promise<boolean> => {
       if (agentBaseUrl === null) return false
+      if (agentIdentity === null) return false
       if (isRunning) return agentRun.steer(input)
       return agentRun.submit({
         ...input,
@@ -74,6 +77,7 @@ export function AgentPromptInputContainer({
     },
     [
       agentBaseUrl,
+      agentIdentity,
       agentRun,
       allowModelSelection,
       isRunning,
