@@ -1,0 +1,68 @@
+.heysnap-viewer--csv {
+  background: var(--heysnap-csv-body-bg, #ffffff);
+  color: var(--heysnap-csv-text, #15171c);
+}
+
+.heysnap-csv-cell-bar {
+  display: grid;
+  grid-template-columns: minmax(58px, max-content) minmax(0, 1fr);
+  align-items: center;
+  height: 32px;
+  flex-shrink: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--heysnap-csv-text, #15171c) 10%, transparent);
+  background: var(--heysnap-csv-bar-bg, #ffffff);
+  color: var(--heysnap-csv-text, #15171c);
+}
+
+.heysnap-csv-cell-address,
+.heysnap-csv-cell-value {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heysnap-csv-cell-address {
+  justify-content: center;
+  padding: 0 10px;
+  border-right: 1px solid color-mix(in srgb, var(--heysnap-csv-text, #15171c) 10%, transparent);
+  color: color-mix(in srgb, var(--heysnap-csv-text, #15171c) 66%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.heysnap-csv-cell-value {
+  padding: 0 12px;
+  color: color-mix(in srgb, var(--heysnap-csv-text, #15171c) 86%, transparent);
+  font-size: 12px;
+}
+
+.heysnap-csv-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--heysnap-csv-body-bg, #ffffff);
+}
+
+.heysnap-csv-grid {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.heysnap-csv-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: color-mix(in srgb, var(--heysnap-csv-text, #15171c) 58%, transparent);
+  font-size: 13px;
+}
