@@ -44,11 +44,22 @@ const headerBaseStyle: CSSProperties = {
   boxShadow: "inset 0 -1px 0 color-mix(in srgb, currentColor 10%, transparent)",
 };
 
+const headerControlColor = (foreground: string): string =>
+  `color-mix(in srgb, ${foreground} 70%, transparent)`;
+
 /** Stateless header bar — renders identically across loading / error /
  *  ready states. */
 export function HtmlHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <header
+      style={{
+        ...headerBaseStyle,
+        "--viewer-header-control-color": headerControlColor(foreground),
+        background,
+        color: foreground,
+        ...style,
+      } as CSSProperties}
+    >
       {children}
     </header>
   );
@@ -67,7 +78,7 @@ export function HtmlHeaderGroup({ align, children }: {
         gap: 6,
         minWidth: 0,
         flex: 1,
-        color: "color-mix(in srgb, currentColor 70%, transparent)",
+        color: "var(--viewer-header-control-color, inherit)",
       }}
     >
       {children}

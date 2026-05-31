@@ -64,13 +64,24 @@ const headerBaseStyle: CSSProperties = {
   boxShadow: "inset 0 -1px 0 color-mix(in srgb, currentColor 10%, transparent)",
 };
 
+const headerControlColor = (foreground: string): string =>
+  `color-mix(in srgb, ${foreground} 72%, transparent)`;
+
 /**
  * Stateless visual shell. Renders before the image has loaded so the
  * chrome is identical across loading / error / ready states.
  */
 export function ImageHeaderShell({ background, foreground, style, children }: HeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <header
+      style={{
+        ...headerBaseStyle,
+        "--viewer-header-control-color": headerControlColor(foreground),
+        background,
+        color: foreground,
+        ...style,
+      } as CSSProperties}
+    >
       {children}
     </header>
   );
@@ -91,7 +102,7 @@ export function ImageHeaderGroup({ align = "left", children }: ImageHeaderGroupP
         gap: 6,
         flex: align === "right" ? "0 0 auto" : "1 1 auto",
         minWidth: 0,
-        color: "color-mix(in srgb, currentColor 72%, transparent)",
+        color: "var(--viewer-header-control-color, inherit)",
       }}
     >
       {children}
