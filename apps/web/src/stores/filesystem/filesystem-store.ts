@@ -62,6 +62,7 @@ type FilesystemActions = {
   ingestServerMessage: (message: FilesystemServerMessage) => void
   setConnectionStatus: (status: FilesystemConnectionStatus) => void
   navigate: (path: string) => Promise<void>
+  openWorkspacePath: (path: string) => Promise<void>
   goBack: () => Promise<void>
   goForward: () => Promise<void>
   refresh: () => Promise<void>
@@ -237,6 +238,75 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
       }
     },
 
+    openWorkspacePath: async (path) => {
+      const normalizedPath = normalizeWorkspacePath(path)
+      if (normalizedPath === null) return
+
+      const openUnknownFile = () => {
+        const now = new Date().toISOString()
+        get().openFile({
+          name: getBasename(normalizedPath),
+          path: normalizedPath,
+          type: 'file',
+          size: null,
+          updatedAt: now,
+          isHidden: false,
+          isSymlink: false,
+        })
+      }
+
+      const openResolvedEntry = async (entry: FilesystemEntry) => {
+        if (entry.type === 'directory') {
+          await get().navigate(entry.path)
+          get().showDirectory()
+          return
+        }
+
+        get().openFile(entry)
+      }
+
+      if (normalizedPath.length === 0) {
+        await get().navigate('')
+        get().showDirectory()
+        return
+      }
+
+      const visibleEntry = get().listing?.entries.find(
+        (entry) => entry.path === normalizedPath,
+      )
+      if (visibleEntry !== undefined) {
+        await openResolvedEntry(visibleEntry)
+        return
+      }
+
+      if (get().openFileTabs.some((tab) => tab.path === normalizedPath)) {
+        get().selectFileTab(normalizedPath)
+        return
+      }
+
+      const manager = getActiveFilesystemManager()
+      if (!manager) return
+
+      const parentPath = getParentPath(normalizedPath)
+      if (get().listing?.path !== parentPath) {
+        await get().navigate(parentPath)
+        if (get().listing?.path !== parentPath) return
+      }
+
+      const parentListing = get().listing
+      const targetEntry =
+        parentListing?.path === parentPath
+          ? parentListing.entries.find((entry) => entry.path === normalizedPath)
+          : undefined
+
+      if (targetEntry !== undefined) {
+        await openResolvedEntry(targetEntry)
+        return
+      }
+
+      openUnknownFile()
+    },
+
     goBack: async () => {
       const manager = getActiveFilesystemManager()
       if (!manager) return
@@ -380,4 +450,22 @@ function syncOpenFiles(tabs: readonly FilesystemEntry[]): void {
   const manager = getActiveFilesystemManager()
   if (!manager) return
   void manager.setOpenFiles(tabs.map((tab) => tab.path)).catch(() => undefined)
+}
+
+function normalizeWorkspacePath(rawPath: string): string | null {
+  const path = rawPath.trim().replaceAll('\\', '/')
+  if (path.includes('\0')) return null
+  if (path.length === 0) return ''
+
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (part.length === 0 || part === '.') continue
+    if (part === '..') return null
+    parts.push(part)
+  }
+  return parts.join('/')
+}
+
+function getBasename(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path
 }

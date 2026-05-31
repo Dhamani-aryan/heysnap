@@ -219,11 +219,12 @@ function normalizeOpenFileTabs(values: readonly unknown[]): FilesystemEntry[] {
     const updatedAt =
       typeof record.updatedAt === 'string' ? record.updatedAt : null
 
+    if (record.type !== undefined && record.type !== 'file') continue
+
     if (
       path === null ||
       name === null ||
       updatedAt === null ||
-      record.type !== 'file' ||
       seenPaths.has(path)
     ) {
       continue
