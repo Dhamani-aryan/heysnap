@@ -296,8 +296,8 @@ export function BrowserViewport({
 
   useEffect(() => {
     if (activeTabId === null) {
-      clearRenderedFrame()
-      return
+      const timeoutId = window.setTimeout(clearRenderedFrame, 0)
+      return () => window.clearTimeout(timeoutId)
     }
 
     const lastFrame = getLastBrowserFrame(activeTabId)
@@ -308,7 +308,8 @@ export function BrowserViewport({
 
   useEffect(() => {
     if (activeTabId === null || shouldClearCanvasForState(screencast.state)) {
-      clearRenderedFrame()
+      const timeoutId = window.setTimeout(clearRenderedFrame, 0)
+      return () => window.clearTimeout(timeoutId)
     }
   }, [activeTabId, clearRenderedFrame, screencast.state])
 

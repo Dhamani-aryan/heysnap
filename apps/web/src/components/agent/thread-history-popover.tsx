@@ -20,6 +20,7 @@ const DEFAULT_VISIBLE_THREAD_COUNT = 2
 
 type Props = {
   agentBaseUrl: string
+  agentIdentity: string
   selectedThreadId: string | null
   onClose: () => void
   onSelectThread: (thread: AgentThreadSummary) => void
@@ -28,6 +29,7 @@ type Props = {
 
 export function ThreadHistoryPopover({
   agentBaseUrl,
+  agentIdentity,
   selectedThreadId,
   onClose,
   onSelectThread,
@@ -37,7 +39,7 @@ export function ThreadHistoryPopover({
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [query, setQuery] = useState('')
 
-  useAgentThreadGroups({ agentBaseUrl, enabled: true })
+  useAgentThreadGroups({ agentBaseUrl, agentIdentity, enabled: true })
 
   const groups = useAgentThreadListStore((s) => s.groups)
   const isLoading = useAgentThreadListStore((s) => s.isLoading)
@@ -153,18 +155,12 @@ function ThreadHistoryGroup({
   const hasSelected = group.threads.some((t) => t.id === selectedThreadId)
   const [isExpanded, setIsExpanded] = useState(defaultExpanded || hasSelected)
   const [isShowingAll, setIsShowingAll] = useState(false)
-  const expanded = forceExpanded || isExpanded
+  const expanded = forceExpanded || hasSelected || isExpanded
   const visibleThreads = isShowingAll
     ? group.threads
     : group.threads.slice(0, DEFAULT_VISIBLE_THREAD_COUNT)
   const canToggleVisibleThreads =
     group.threads.length > DEFAULT_VISIBLE_THREAD_COUNT
-
-  useEffect(() => {
-    if (hasSelected) {
-      setIsExpanded(true)
-    }
-  }, [hasSelected])
 
   return (
     <section className="grid gap-[2px]">
