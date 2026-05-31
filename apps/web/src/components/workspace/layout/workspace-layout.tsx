@@ -27,13 +27,13 @@ function WorkspaceLayoutShell({ children }: { children: ReactNode }) {
   return (
     <main
       data-right-sidebar-open={isRightSidebarOpen ? 'true' : undefined}
-      className="grid h-[100dvh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-sidebar text-heading"
+      className="fixed inset-0 grid grid-rows-[auto_minmax(0,1fr)] overflow-clip bg-sidebar text-heading"
     >
       <WorkspaceToolbar />
-      <div className="relative min-h-0 overflow-hidden">
+      <div className="relative min-h-0 overflow-clip">
         <section
           data-resizing={isResizing ? 'true' : undefined}
-          className="absolute top-0 overflow-hidden rounded-[10px] bg-background transition-[right] duration-[180ms] ease-out data-[resizing=true]:transition-none"
+          className="absolute top-0 overflow-clip rounded-[10px] bg-background transition-[right] duration-[180ms] ease-out data-[resizing=true]:transition-none"
           style={{
             left: `${FRAME_INSET_PX}px`,
             bottom: `${FRAME_INSET_PX}px`,
