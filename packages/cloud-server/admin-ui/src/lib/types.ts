@@ -115,35 +115,6 @@ export interface AdminComputerDetail {
   readonly accessSessions: AdminAccessSession[];
 }
 
-export type FeedbackReportStatus = "pending" | "complete" | "comment_only";
-
-export interface AdminFeedbackReport {
-  readonly id: string;
-  readonly userId: string;
-  readonly username: string | null;
-  readonly userEmail: string | null;
-  readonly computerId: string;
-  readonly computerName: string | null;
-  readonly machineIdentityId: string | null;
-  readonly accessSessionId: string | null;
-  readonly status: FeedbackReportStatus;
-  readonly comment: string;
-  readonly threadId: string | null;
-  readonly cwd: string | null;
-  readonly archive: {
-    readonly available: boolean;
-    readonly storageKey: string | null;
-    readonly sha256: string | null;
-    readonly bytes: number | null;
-    readonly fileCount: number | null;
-  };
-  readonly errorMessage: string | null;
-  readonly clientContext: unknown;
-  readonly machineContext: unknown;
-  readonly createdAt: string;
-  readonly completedAt: string | null;
-}
-
 export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";
 export type AiUsageBucketGranularity = "hour" | "day";
 export type AiUsageGroupBy = "provider" | "model" | "status" | "user" | "computer";

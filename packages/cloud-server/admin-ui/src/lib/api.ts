@@ -8,7 +8,6 @@ import type {
   AdminAiUsageSummary,
   AdminComputer,
   AdminComputerDetail,
-  AdminFeedbackReport,
   AdminMachineIdentity,
   AdminOverview,
   AdminRelease,
@@ -18,7 +17,6 @@ import type {
   AiUsageBucketGranularity,
   AiUsageGroupBy,
   AiUsageStatus,
-  FeedbackReportStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -89,44 +87,6 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return parsed as T;
-};
-
-const requestBlob = async (path: string, options: RequestOptions = {}): Promise<{
-  readonly blob: Blob;
-  readonly filename: string | null;
-}> => {
-  const token = options.token ?? getStoredAdminToken();
-
-  if (token === null || token.length === 0) {
-    throw new ApiError(401, "UNAUTHORIZED", "Admin token is missing");
-  }
-
-  const response = await fetch(buildUrl(path), {
-    method: options.method ?? "GET",
-    headers: {
-      authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      clearStoredAdminToken();
-    }
-
-    const text = await response.text();
-    const parsed = text.length === 0 ? {} : safeJson(text);
-    const error = (parsed as { readonly error?: { readonly code?: string; readonly message?: string } }).error;
-    throw new ApiError(
-      response.status,
-      error?.code ?? "REQUEST_FAILED",
-      error?.message ?? `Request failed with ${String(response.status)}`,
-    );
-  }
-
-  return {
-    blob: await response.blob(),
-    filename: readContentDispositionFilename(response.headers.get("content-disposition")),
-  };
 };
 
 const safeJson = (value: string): unknown => {
@@ -222,19 +182,7 @@ export const adminApi = {
     request<AdminAiUsageOverview>(
       buildPath(`/admin/computers/${encodeURIComponent(computerId)}/ai-usage`, params),
     ),
-  listFeedback: (params: FeedbackListParams = {}) =>
-    request<{ readonly feedback: AdminFeedbackReport[] }>(buildPath("/admin/feedback", params)),
-  downloadFeedbackArchive: (feedbackId: string) =>
-    requestBlob(`/admin/feedback/${encodeURIComponent(feedbackId)}/download`),
 };
-
-interface FeedbackListParams {
-  readonly userId?: string;
-  readonly computerId?: string;
-  readonly status?: FeedbackReportStatus;
-  readonly before?: string | Date;
-  readonly limit?: number;
-}
 
 interface AiUsageFilterParams {
   readonly userId?: string;
@@ -281,22 +229,4 @@ const buildPath = (basePath: string, params: object): string => {
   }
   const query = search.toString();
   return query.length === 0 ? basePath : `${basePath}?${query}`;
-};
-
-const readContentDispositionFilename = (value: string | null): string | null => {
-  if (value === null) {
-    return null;
-  }
-
-  const utf8Match = /filename\*=UTF-8''([^;]+)/iu.exec(value);
-  if (utf8Match?.[1] !== undefined) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch {
-      return utf8Match[1];
-    }
-  }
-
-  const fallbackMatch = /filename="([^"]+)"/iu.exec(value) ?? /filename=([^;]+)/iu.exec(value);
-  return fallbackMatch?.[1] ?? null;
 };

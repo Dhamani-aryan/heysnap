@@ -13,7 +13,6 @@ import { UsersListPage } from "@/pages/users-list";
 import { UserDetailPage } from "@/pages/user-detail";
 import { ComputersListPage } from "@/pages/computers-list";
 import { ComputerDetailPage } from "@/pages/computer-detail";
-import { FeedbackPage } from "@/pages/feedback";
 import { ReleasesPage } from "@/pages/releases";
 import { NotFoundPage } from "@/pages/not-found";
 
@@ -35,7 +34,6 @@ export const App = () => (
             <Route path="users/:userId" element={<UserDetailPage />} />
             <Route path="computers" element={<ComputersListPage />} />
             <Route path="computers/:computerId" element={<ComputerDetailPage />} />
-            <Route path="feedback" element={<FeedbackPage />} />
             <Route path="ai-usage" element={<AiUsagePage />} />
             <Route path="ai-usage/:usageId" element={<AiUsageDetailPage />} />
             <Route path="releases" element={<ReleasesPage />} />
