@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useAgentEditMessage } from '../../hooks/agent/use-agent-edit-message.ts'
+import { useAgentUiContext } from '../../hooks/agent/use-agent-ui-context.ts'
 import { useAgentThread } from '../../hooks/agent/use-agent-thread.ts'
 import { useAgentThreadRoute } from '../../hooks/agent/use-agent-thread-route.ts'
 import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
@@ -27,6 +28,7 @@ export function AgentPanel({
   const loadError = useAgentChatStore((s) => s.loadError)
   const currentPath = useFilesystemStore((s) => s.currentPath)
   const { navigateToThread } = useAgentThreadRoute()
+  const uiContext = useAgentUiContext()
 
   const handleThreadResolved = useCallback(
     (threadId: string) => {
@@ -47,6 +49,7 @@ export function AgentPanel({
     agentBaseUrl: agentBaseUrl ?? '',
     agentIdentity: agentIdentity ?? '',
     currentPath,
+    uiContext,
     selectedThreadId,
     onThreadResolved: handleThreadResolved,
   })

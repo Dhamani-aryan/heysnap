@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useAuth } from '../../hooks/auth/use-auth.ts'
+import { useAgentUiContext } from '../../hooks/agent/use-agent-ui-context.ts'
 import { useAgentRun } from '../../hooks/agent/use-agent-run.ts'
 import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
 import { useAgentModelSelectionStore } from '../../stores/agent/agent-model-selection-store.ts'
@@ -37,6 +38,7 @@ export function AgentPromptInputContainer({
   const activeFolderName = useFilesystemStore(
     (s) => s.listing?.name ?? 'workspace',
   )
+  const uiContext = useAgentUiContext()
 
   const handleSelectThread = useCallback(
     (thread: AgentThreadSummary) => {
@@ -49,6 +51,7 @@ export function AgentPromptInputContainer({
     agentBaseUrl: agentBaseUrl ?? '',
     agentIdentity: agentIdentity ?? '',
     currentPath,
+    uiContext,
     selectedThreadId,
     onSelectThread: handleSelectThread,
     onThreadResolved,
