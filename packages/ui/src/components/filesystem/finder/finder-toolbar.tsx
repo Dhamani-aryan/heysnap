@@ -1,7 +1,6 @@
 import {
   Add01Icon,
   Cancel01Icon,
-  ChatFeedbackIcon,
   File02Icon,
   InternetIcon,
   SidebarRightIcon,
@@ -23,7 +22,6 @@ export const FinderToolbar = ({
   isFetching,
   browserTabTitle,
   onNewThread,
-  onShareFeedback,
   isRightSidebarOpen,
   isRightWorkAreaOpen,
   onToggleRightWorkArea,
@@ -47,7 +45,6 @@ export const FinderToolbar = ({
   readonly isFetching: boolean;
   readonly browserTabTitle: string;
   readonly onNewThread?: () => void;
-  readonly onShareFeedback?: () => void;
   readonly isRightSidebarOpen: boolean;
   readonly isRightWorkAreaOpen: boolean;
   readonly onToggleRightWorkArea: () => void;
@@ -106,15 +103,6 @@ export const FinderToolbar = ({
       </div>
 
       <div className="toolbar-spinner">{isFetching ? <Spinner /> : null}</div>
-      {onShareFeedback === undefined ? null : (
-        <ToolbarButton
-          onClick={onShareFeedback}
-          ariaLabel="Share feedback"
-          title="Share feedback"
-        >
-          <HugeiconsIcon icon={ChatFeedbackIcon} size={18} color="currentColor" strokeWidth={1.8} />
-        </ToolbarButton>
-      )}
       <ToolbarButton
         onClick={onToggleRightWorkArea}
         ariaLabel={isRightWorkAreaOpen ? "Hide right work area" : "Show right work area"}

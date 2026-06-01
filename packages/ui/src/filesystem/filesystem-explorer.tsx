@@ -8,7 +8,6 @@ import type { BrowserControlStatus } from "../cloud/browser-control-bridge";
 import { CapabilitiesPanel } from "../cloud/capabilities-panel";
 import {
   ConnectorsWorkspaceToolbar,
-  FeedbackDialog,
   FinderToolbar,
   FilesystemDesktopWorkspace,
   FilesystemLeftPaneStack,
@@ -41,7 +40,6 @@ import {
   type BrowserViewportWheelInput,
   type BrowserWindowTab,
   type DirectoryPickerWindow,
-  type FeedbackSubmitState,
   type OpenFileTab,
   type UploadProgressState,
   type WorkspacePanel,
@@ -98,7 +96,6 @@ export interface FilesystemExplorerProps {
   readonly workspacePersistenceKey?: string;
   readonly filesystemPreviewBaseUrl?: string;
   readonly agentBaseUrl?: string;
-  readonly feedbackUrl?: string;
   readonly sarvamApiKey?: string;
   readonly browserControlStatus?: BrowserControlStatus;
   readonly browserWindowError?: string | null;
@@ -147,7 +144,6 @@ export function FilesystemExplorer({
   workspacePersistenceKey,
   filesystemPreviewBaseUrl,
   agentBaseUrl = "http://localhost:4000/agent",
-  feedbackUrl,
   sarvamApiKey,
   browserControlStatus,
   browserWindowError = null,
@@ -213,9 +209,6 @@ export function FilesystemExplorer({
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(getInitialRightSidebarOpen);
   const [isRightWorkAreaOpen, setIsRightWorkAreaOpen] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
-  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
-  const [feedbackComment, setFeedbackComment] = useState("");
-  const [feedbackSubmitState, setFeedbackSubmitState] = useState<FeedbackSubmitState>({ status: "idle" });
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [activeLeftPaneSurface, setActiveLeftPaneSurface] = useState<ActiveLeftPaneSurface>("directory");
@@ -501,80 +494,6 @@ export function FilesystemExplorer({
     showChatPanel();
     onNewThread?.();
   }, [onNewThread, showChatPanel]);
-
-  const openFeedbackDialog = useCallback((): void => {
-    setFeedbackSubmitState({ status: "idle" });
-    setIsFeedbackDialogOpen(true);
-  }, []);
-
-  const closeFeedbackDialog = useCallback((): void => {
-    if (feedbackSubmitState.status === "submitting") {
-      return;
-    }
-
-    setIsFeedbackDialogOpen(false);
-    setFeedbackSubmitState({ status: "idle" });
-  }, [feedbackSubmitState.status]);
-
-  const submitFeedback = useCallback(async (): Promise<void> => {
-    if (feedbackUrl === undefined) {
-      dispatchToast({ type: "error", message: "Feedback is not available for this workspace." });
-      return;
-    }
-
-    const comment = feedbackComment.trim();
-
-    if (comment.length === 0) {
-      dispatchToast({ type: "error", message: "Add a comment before sending feedback." });
-      return;
-    }
-
-    setFeedbackSubmitState({ status: "submitting" });
-
-    try {
-      const response = await fetch(feedbackUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          comment,
-          threadId: selectedThreadId,
-          cwd: currentPath,
-          clientContext: {
-            source: "workspace",
-            userAgent: window.navigator.userAgent,
-          },
-        }),
-      });
-      const payload = await response.json().catch(() => null) as {
-        readonly feedback?: { readonly status?: string };
-        readonly error?: { readonly message?: string };
-      } | null;
-
-      if (!response.ok) {
-        throw new Error(payload?.error?.message ?? "Feedback could not be sent.");
-      }
-
-      const status = payload?.feedback?.status;
-      setFeedbackComment("");
-      setFeedbackSubmitState({ status: "idle" });
-      setIsFeedbackDialogOpen(false);
-      dispatchToast({
-        type: "success",
-        message: status === "complete" ? "Feedback sent" : "Feedback saved",
-        description: status === "complete"
-          ? "A session snapshot was attached."
-          : "The machine snapshot was unavailable, so only the comment was saved.",
-      });
-    } catch (error) {
-      setFeedbackSubmitState({ status: "idle" });
-      dispatchToast({
-        type: "error",
-        message: error instanceof Error ? error.message : "Feedback could not be sent.",
-      });
-    }
-  }, [currentPath, feedbackComment, feedbackUrl, selectedThreadId]);
 
   const handleSelectThread = useCallback((thread: AgentThreadSummary): void => {
     showChatPanel();
@@ -1113,7 +1032,6 @@ export function FilesystemExplorer({
         isFetching={isFetching}
         browserTabTitle={formatBrowserControlTitle(browserControlStatus)}
         onNewThread={handleNewThread}
-        onShareFeedback={feedbackUrl === undefined ? undefined : openFeedbackDialog}
         isRightSidebarOpen={isRightSidebarOpen}
         isRightWorkAreaOpen={isRightWorkAreaOpen}
         onToggleRightWorkArea={handleToggleRightWorkArea}
@@ -1223,19 +1141,6 @@ export function FilesystemExplorer({
       </FilesystemDesktopWorkspace>
       {rightSidebar}
       {uploadProgress === null ? null : <UploadProgressDialog progress={uploadProgress} />}
-      {isFeedbackDialogOpen ? (
-        <FeedbackDialog
-          comment={feedbackComment}
-          currentPath={currentPath}
-          selectedThreadId={selectedThreadId}
-          state={feedbackSubmitState}
-          onChangeComment={(value) => {
-            setFeedbackComment(value);
-          }}
-          onClose={closeFeedbackDialog}
-          onSubmit={() => void submitFeedback()}
-        />
-      ) : null}
     </main>
   );
 }

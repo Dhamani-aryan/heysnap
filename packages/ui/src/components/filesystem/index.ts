@@ -1,5 +1,5 @@
 export { BrowserControlPanel, formatBrowserControlTitle } from "./browser";
-export { FeedbackDialog, FileViewerStack, UploadProgressDialog } from "./dialogs";
+export { FileViewerStack, UploadProgressDialog } from "./dialogs";
 export { FinderBody, FinderToolbar, Spinner, isEditableKeyboardTarget } from "./finder";
 export { formatBytes } from "./shared";
 export {
@@ -34,7 +34,7 @@ export {
   MachineStatusControl,
   WorkspaceRightSidebar,
 } from "./workspace";
-export type { FeedbackSubmitState, UploadProgressState } from "./dialogs";
+export type { UploadProgressState } from "./dialogs";
 export type {
   BrowserScreencastState,
   BrowserViewportClickInput,
