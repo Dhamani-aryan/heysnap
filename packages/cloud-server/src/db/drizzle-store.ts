@@ -6,7 +6,6 @@ import {
   aiUsageRequests,
   computerAccessSessions,
   computers,
-  feedbackReports,
   machineIdentities,
   releaseManifests,
   sessions,
@@ -24,8 +23,6 @@ import type {
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerRecord,
-  FeedbackReportRecord,
-  FeedbackReportStatus,
   MachineIdentityRecord,
   ReleaseManifestRecord,
   ReleaseTarget,
@@ -455,92 +452,6 @@ export class DrizzleCloudStore implements CloudStore {
     return deleted.length > 0;
   }
 
-  async createFeedbackReport(input: {
-    readonly userId: string;
-    readonly computerId: string;
-    readonly accessSessionId?: string | null;
-    readonly comment: string;
-    readonly threadId?: string | null;
-    readonly cwd?: string | null;
-    readonly clientContext?: unknown;
-  }): Promise<FeedbackReportRecord> {
-    const [report] = await this.db.insert(feedbackReports).values({
-      userId: input.userId,
-      computerId: input.computerId,
-      accessSessionId: input.accessSessionId ?? null,
-      comment: input.comment,
-      threadId: input.threadId ?? null,
-      cwd: input.cwd ?? null,
-      clientContext: input.clientContext ?? {},
-    }).returning();
-    return report;
-  }
-
-  async getFeedbackReportById(id: string): Promise<FeedbackReportRecord | null> {
-    const [report] = await this.db.select().from(feedbackReports).where(eq(feedbackReports.id, id)).limit(1);
-    return report ?? null;
-  }
-
-  async markFeedbackReportCommentOnly(input: {
-    readonly feedbackId: string;
-    readonly errorMessage?: string | null;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const [report] = await this.db
-      .update(feedbackReports)
-      .set({
-        status: "comment_only",
-        errorMessage: input.errorMessage ?? null,
-        ...(input.machineContext !== undefined ? { machineContext: input.machineContext } : {}),
-        completedAt: new Date(),
-      })
-      .where(eq(feedbackReports.id, input.feedbackId))
-      .returning();
-    return report ?? null;
-  }
-
-  async completeFeedbackReportArchive(input: {
-    readonly feedbackId: string;
-    readonly machineIdentityId: string;
-    readonly archiveStorageKey: string;
-    readonly archiveSha256: string;
-    readonly archiveBytes: number;
-    readonly fileCount: number;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const [report] = await this.db
-      .update(feedbackReports)
-      .set({
-        status: "complete",
-        machineIdentityId: input.machineIdentityId,
-        archiveStorageKey: input.archiveStorageKey,
-        archiveSha256: input.archiveSha256,
-        archiveBytes: input.archiveBytes,
-        fileCount: input.fileCount,
-        errorMessage: null,
-        machineContext: input.machineContext ?? {},
-        completedAt: new Date(),
-      })
-      .where(eq(feedbackReports.id, input.feedbackId))
-      .returning();
-    return report ?? null;
-  }
-
-  async listFeedbackReports(input: {
-    readonly userId?: string;
-    readonly computerId?: string;
-    readonly status?: FeedbackReportStatus;
-    readonly before?: Date;
-    readonly limit?: number;
-  } = {}): Promise<FeedbackReportRecord[]> {
-    const query = this.db
-      .select()
-      .from(feedbackReports)
-      .where(buildFeedbackReportWhere(input))
-      .orderBy(desc(feedbackReports.createdAt));
-    return input.limit !== undefined ? query.limit(input.limit) : query;
-  }
-
   async createAiUsageRequest(input: {
     readonly userId: string;
     readonly computerId: string;
@@ -707,33 +618,6 @@ export class DrizzleCloudStore implements CloudStore {
     return groupAiUsageRows(rows, input.groupBy, input.limit);
   }
 }
-
-const buildFeedbackReportWhere = (input: {
-  readonly userId?: string;
-  readonly computerId?: string;
-  readonly status?: FeedbackReportStatus;
-  readonly before?: Date;
-}): SQL | undefined => {
-  const conditions: SQL[] = [];
-
-  if (input.userId !== undefined) {
-    conditions.push(eq(feedbackReports.userId, input.userId));
-  }
-
-  if (input.computerId !== undefined) {
-    conditions.push(eq(feedbackReports.computerId, input.computerId));
-  }
-
-  if (input.status !== undefined) {
-    conditions.push(eq(feedbackReports.status, input.status));
-  }
-
-  if (input.before !== undefined) {
-    conditions.push(lt(feedbackReports.createdAt, input.before));
-  }
-
-  return conditions.length === 0 ? undefined : and(...conditions);
-};
 
 const buildAiUsageWhere = (input: {
   readonly userId?: string;

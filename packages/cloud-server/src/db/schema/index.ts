@@ -2,7 +2,6 @@ import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqu
 
 export const computerKindEnum = pgEnum("computer_kind", ["cloud", "local"]);
 export const releaseTargetEnum = pgEnum("release_target", ["machine-server"]);
-export const feedbackReportStatusEnum = pgEnum("feedback_report_status", ["pending", "complete", "comment_only"]);
 export const computerStatusEnum = pgEnum("computer_status", [
   "creating",
   "starting",
@@ -141,35 +140,6 @@ export const aiUsagePayloads = pgTable("ai_usage_payloads", {
   usageRequestUnique: uniqueIndex("ai_usage_payloads_usage_request_id_unique").on(table.usageRequestId),
 }));
 
-export const feedbackReports = pgTable("feedback_reports", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  computerId: uuid("computer_id").notNull().references(() => computers.id, { onDelete: "cascade" }),
-  machineIdentityId: uuid("machine_identity_id").references(() => machineIdentities.id, {
-    onDelete: "set null",
-  }),
-  accessSessionId: uuid("access_session_id").references(() => computerAccessSessions.id, {
-    onDelete: "set null",
-  }),
-  status: feedbackReportStatusEnum("status").notNull().default("pending"),
-  comment: text("comment").notNull(),
-  threadId: text("thread_id"),
-  cwd: text("cwd"),
-  archiveStorageKey: text("archive_storage_key"),
-  archiveSha256: text("archive_sha256"),
-  archiveBytes: integer("archive_bytes"),
-  fileCount: integer("file_count"),
-  errorMessage: text("error_message"),
-  clientContext: jsonb("client_context").notNull().default({}),
-  machineContext: jsonb("machine_context").notNull().default({}),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-}, (table) => ({
-  userCreatedAtIdx: index("feedback_reports_user_created_at_idx").on(table.userId, table.createdAt),
-  computerCreatedAtIdx: index("feedback_reports_computer_created_at_idx").on(table.computerId, table.createdAt),
-  statusCreatedAtIdx: index("feedback_reports_status_created_at_idx").on(table.status, table.createdAt),
-}));
-
 export type UserRow = typeof users.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type ComputerRow = typeof computers.$inferSelect;
@@ -178,4 +148,3 @@ export type ComputerAccessSessionRow = typeof computerAccessSessions.$inferSelec
 export type ReleaseManifestRow = typeof releaseManifests.$inferSelect;
 export type AiUsageRequestRow = typeof aiUsageRequests.$inferSelect;
 export type AiUsagePayloadRow = typeof aiUsagePayloads.$inferSelect;
-export type FeedbackReportRow = typeof feedbackReports.$inferSelect;

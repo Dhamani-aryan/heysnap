@@ -82,29 +82,6 @@ export interface ReleaseManifestRecord {
   readonly updatedAt: Date;
 }
 
-export type FeedbackReportStatus = "pending" | "complete" | "comment_only";
-
-export interface FeedbackReportRecord {
-  readonly id: string;
-  readonly userId: string;
-  readonly computerId: string;
-  readonly machineIdentityId: string | null;
-  readonly accessSessionId: string | null;
-  readonly status: FeedbackReportStatus;
-  readonly comment: string;
-  readonly threadId: string | null;
-  readonly cwd: string | null;
-  readonly archiveStorageKey: string | null;
-  readonly archiveSha256: string | null;
-  readonly archiveBytes: number | null;
-  readonly fileCount: number | null;
-  readonly errorMessage: string | null;
-  readonly clientContext: unknown;
-  readonly machineContext: unknown;
-  readonly createdAt: Date;
-  readonly completedAt: Date | null;
-}
-
 export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";
 
 export interface AiUsageRequestRecord {
@@ -321,38 +298,6 @@ export interface CloudStore {
     readonly releasedAt: Date;
   }): Promise<ReleaseManifestRecord>;
   deleteReleaseManifest(id: string): Promise<boolean>;
-
-  createFeedbackReport(input: {
-    readonly userId: string;
-    readonly computerId: string;
-    readonly accessSessionId?: string | null;
-    readonly comment: string;
-    readonly threadId?: string | null;
-    readonly cwd?: string | null;
-    readonly clientContext?: unknown;
-  }): Promise<FeedbackReportRecord>;
-  getFeedbackReportById(id: string): Promise<FeedbackReportRecord | null>;
-  markFeedbackReportCommentOnly(input: {
-    readonly feedbackId: string;
-    readonly errorMessage?: string | null;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null>;
-  completeFeedbackReportArchive(input: {
-    readonly feedbackId: string;
-    readonly machineIdentityId: string;
-    readonly archiveStorageKey: string;
-    readonly archiveSha256: string;
-    readonly archiveBytes: number;
-    readonly fileCount: number;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null>;
-  listFeedbackReports(input?: {
-    readonly userId?: string;
-    readonly computerId?: string;
-    readonly status?: FeedbackReportStatus;
-    readonly before?: Date;
-    readonly limit?: number;
-  }): Promise<FeedbackReportRecord[]>;
 
   createAiUsageRequest(input: {
     readonly userId: string;

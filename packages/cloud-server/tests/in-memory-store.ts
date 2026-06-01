@@ -14,8 +14,6 @@ import type {
   ComputerKind,
   ComputerRecord,
   ComputerStatus,
-  FeedbackReportRecord,
-  FeedbackReportStatus,
   MachineIdentityRecord,
   ReleaseManifestRecord,
   ReleaseTarget,
@@ -35,7 +33,6 @@ export class InMemoryCloudStore implements CloudStore {
   readonly machineIdentities = new Map<string, MachineIdentityRecord>();
   readonly computerAccessSessions = new Map<string, ComputerAccessSessionRecord>();
   readonly releaseManifests = new Map<string, ReleaseManifestRecord>();
-  readonly feedbackReports = new Map<string, FeedbackReportRecord>();
   readonly aiUsageRequests = new Map<string, AiUsageRequestRecord>();
   readonly aiUsagePayloads = new Map<string, AiUsagePayloadRecord>();
 
@@ -126,11 +123,6 @@ export class InMemoryCloudStore implements CloudStore {
         for (const accessSession of this.computerAccessSessions.values()) {
           if (accessSession.computerId === computer.id) {
             this.computerAccessSessions.delete(accessSession.id);
-          }
-        }
-        for (const report of this.feedbackReports.values()) {
-          if (report.computerId === computer.id) {
-            this.feedbackReports.delete(report.id);
           }
         }
       }
@@ -308,16 +300,11 @@ export class InMemoryCloudStore implements CloudStore {
     }
 
     this.computers.delete(input.computerId);
-    this.deleteFeedbackReportsForComputer(input.computerId);
     return true;
   }
 
   async deleteComputerById(computerId: string): Promise<boolean> {
-    const deleted = this.computers.delete(computerId);
-    if (deleted) {
-      this.deleteFeedbackReportsForComputer(computerId);
-    }
-    return deleted;
+    return this.computers.delete(computerId);
   }
 
   async renameComputerById(input: {
@@ -508,112 +495,6 @@ export class InMemoryCloudStore implements CloudStore {
     return false;
   }
 
-  async createFeedbackReport(input: {
-    readonly userId: string;
-    readonly computerId: string;
-    readonly accessSessionId?: string | null;
-    readonly comment: string;
-    readonly threadId?: string | null;
-    readonly cwd?: string | null;
-    readonly clientContext?: unknown;
-  }): Promise<FeedbackReportRecord> {
-    const report = {
-      id: randomUUID(),
-      userId: input.userId,
-      computerId: input.computerId,
-      machineIdentityId: null,
-      accessSessionId: input.accessSessionId ?? null,
-      status: "pending" as const,
-      comment: input.comment,
-      threadId: input.threadId ?? null,
-      cwd: input.cwd ?? null,
-      archiveStorageKey: null,
-      archiveSha256: null,
-      archiveBytes: null,
-      fileCount: null,
-      errorMessage: null,
-      clientContext: input.clientContext ?? {},
-      machineContext: {},
-      createdAt: new Date(),
-      completedAt: null,
-    };
-    this.feedbackReports.set(report.id, report);
-    return report;
-  }
-
-  async getFeedbackReportById(id: string): Promise<FeedbackReportRecord | null> {
-    return this.feedbackReports.get(id) ?? null;
-  }
-
-  async markFeedbackReportCommentOnly(input: {
-    readonly feedbackId: string;
-    readonly errorMessage?: string | null;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const report = this.feedbackReports.get(input.feedbackId);
-
-    if (report === undefined) {
-      return null;
-    }
-
-    const updated = {
-      ...report,
-      status: "comment_only" as const,
-      errorMessage: input.errorMessage ?? null,
-      ...(input.machineContext !== undefined ? { machineContext: input.machineContext } : {}),
-      completedAt: new Date(),
-    };
-    this.feedbackReports.set(input.feedbackId, updated);
-    return updated;
-  }
-
-  async completeFeedbackReportArchive(input: {
-    readonly feedbackId: string;
-    readonly machineIdentityId: string;
-    readonly archiveStorageKey: string;
-    readonly archiveSha256: string;
-    readonly archiveBytes: number;
-    readonly fileCount: number;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const report = this.feedbackReports.get(input.feedbackId);
-
-    if (report === undefined) {
-      return null;
-    }
-
-    const updated = {
-      ...report,
-      machineIdentityId: input.machineIdentityId,
-      status: "complete" as const,
-      archiveStorageKey: input.archiveStorageKey,
-      archiveSha256: input.archiveSha256,
-      archiveBytes: input.archiveBytes,
-      fileCount: input.fileCount,
-      errorMessage: null,
-      machineContext: input.machineContext ?? {},
-      completedAt: new Date(),
-    };
-    this.feedbackReports.set(input.feedbackId, updated);
-    return updated;
-  }
-
-  async listFeedbackReports(input: {
-    readonly userId?: string;
-    readonly computerId?: string;
-    readonly status?: FeedbackReportStatus;
-    readonly before?: Date;
-    readonly limit?: number;
-  } = {}): Promise<FeedbackReportRecord[]> {
-    const reports = Array.from(this.feedbackReports.values())
-      .filter((report) => input.userId === undefined || report.userId === input.userId)
-      .filter((report) => input.computerId === undefined || report.computerId === input.computerId)
-      .filter((report) => input.status === undefined || report.status === input.status)
-      .filter((report) => input.before === undefined || report.createdAt.getTime() < input.before.getTime())
-      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
-    return input.limit !== undefined ? reports.slice(0, input.limit) : reports;
-  }
-
   async createAiUsageRequest(input: {
     readonly userId: string;
     readonly computerId: string;
@@ -801,14 +682,6 @@ export class InMemoryCloudStore implements CloudStore {
       .filter((usage) => input.before === undefined || usage.startedAt.getTime() < input.before.getTime())
       .filter((usage) => input.from === undefined || usage.startedAt.getTime() >= input.from.getTime())
       .filter((usage) => input.to === undefined || usage.startedAt.getTime() <= input.to.getTime());
-  }
-
-  private deleteFeedbackReportsForComputer(computerId: string): void {
-    for (const report of this.feedbackReports.values()) {
-      if (report.computerId === computerId) {
-        this.feedbackReports.delete(report.id);
-      }
-    }
   }
 }
 
