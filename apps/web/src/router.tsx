@@ -13,7 +13,11 @@ import { MachinesCreatePage } from './pages/machines-create-page.tsx'
 import { MachineWorkspacePage } from './pages/machine-workspace-page.tsx'
 import { LoginPage } from './pages/login-page.tsx'
 import { FullPageLoader } from './components/full-page-loader.tsx'
-import { machinesQueryOptions } from './lib/machines/machines-query.ts'
+import {
+  machinesKeys,
+  machinesQueryOptions,
+} from './lib/machines/machines-query.ts'
+import type { CloudComputer } from './lib/machines/machines-api.ts'
 
 type RouterContext = {
   auth: AuthSnapshot
@@ -55,9 +59,14 @@ const machinesRoute = createRoute({
   path: '/machines',
   beforeLoad: ({ context, location }) => requireAuth(context, location),
   loader: async ({ context }) => {
-    const machines = await context.queryClient.ensureQueryData(
-      machinesQueryOptions,
+    const cachedMachines = context.queryClient.getQueryData<CloudComputer[]>(
+      machinesKeys.list,
     )
+    const machines =
+      cachedMachines && cachedMachines.length > 0
+        ? await context.queryClient.ensureQueryData(machinesQueryOptions)
+        : await context.queryClient.fetchQuery(machinesQueryOptions)
+
     if (machines.length === 0) {
       throw redirect({ to: '/machines/create', replace: true })
     }
