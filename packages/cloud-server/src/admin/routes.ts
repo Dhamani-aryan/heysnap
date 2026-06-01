@@ -14,6 +14,9 @@ import type {
   AiUsageRequestRecord,
   AiUsageStatus,
   AiUsageSummary,
+  AgentSessionHarness,
+  AgentSessionThreadRecord,
+  AgentSessionVersionRecord,
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerRecord,
@@ -21,6 +24,7 @@ import type {
   SessionRecord,
 } from "../db/types.js";
 import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
+import type { AgentSessionObjectStorage } from "../agent-sessions/storage.js";
 import { toStartComputerError } from "../provisioning/errors.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
 import {
@@ -29,7 +33,7 @@ import {
   readReleasePlatform,
 } from "../releases/routes.js";
 import type { AppVariables } from "../shared/context.js";
-import { badRequest, notFound, unauthorized } from "../shared/errors.js";
+import { badRequest, notFound, serviceUnavailable, unauthorized } from "../shared/errors.js";
 import { clearSleepMachineHealth } from "../shared/machine-health.js";
 import { serializeComputer, serializeUser } from "../shared/serialization.js";
 import { readJsonBody, stringField } from "../shared/validation.js";
@@ -40,6 +44,7 @@ export const createAdminRoutes = (
   config: CloudServerConfig,
   provisioner: ComputerProvisioner,
   tunnelRegistry: TunnelStatusRegistry,
+  agentSessionStorage?: AgentSessionObjectStorage,
 ): Hono<{ Variables: AppVariables }> => {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -233,6 +238,62 @@ export const createAdminRoutes = (
       usage: {
         ...serializeAiUsageRequestAdmin(usage, users, computers),
         payload: payload === null ? null : serializeAiUsagePayload(payload),
+      },
+    });
+  });
+
+  app.get("/agent-sessions", async (context) => {
+    const [threads, users, computers] = await Promise.all([
+      store.listAgentSessionThreads({
+        userId: readOptionalQueryString(context.req.query("userId")),
+        computerId: readOptionalQueryString(context.req.query("computerId")),
+        harness: readAgentSessionHarness(context.req.query("harness")),
+        limit: readLimit(context.req.query("limit")),
+      }),
+      store.listUsers(),
+      store.listComputers(),
+    ]);
+
+    return context.json({
+      sessions: threads.map((thread) => serializeAgentSessionThreadAdmin(thread, users, computers)),
+    });
+  });
+
+  app.get("/agent-sessions/:sessionId/versions", async (context) => {
+    const thread = await store.getAgentSessionThreadById(context.req.param("sessionId"));
+
+    if (thread === null) {
+      throw notFound("AGENT_SESSION_NOT_FOUND", "Agent session not found");
+    }
+
+    const versions = await store.listAgentSessionVersions(thread.id);
+
+    return context.json({
+      session: serializeAgentSessionThreadAdmin(thread, await store.listUsers(), await store.listComputers()),
+      versions: versions.map(serializeAgentSessionVersionAdmin),
+    });
+  });
+
+  app.get("/agent-sessions/:sessionId/raw", async (context) => {
+    if (agentSessionStorage === undefined) {
+      throw serviceUnavailable(
+        "AGENT_SESSION_STORAGE_DISABLED",
+        "Agent session storage is not configured",
+      );
+    }
+
+    const thread = await store.getAgentSessionThreadById(context.req.param("sessionId"));
+
+    if (thread === null || thread.latestObjectKey === null) {
+      throw notFound("AGENT_SESSION_NOT_FOUND", "Agent session not found");
+    }
+
+    const bytes = await agentSessionStorage.getObject({ key: thread.latestObjectKey });
+
+    return new Response(bytes, {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "content-disposition": `attachment; filename="${thread.harness}-${safeFilenameSegment(thread.nativeThreadId)}.jsonl"`,
       },
     });
   });
@@ -670,6 +731,64 @@ const serializeAiUsagePayload = (payload: AiUsagePayloadRecord) => ({
   createdAt: payload.createdAt.toISOString(),
 });
 
+const serializeAgentSessionThreadAdmin = (
+  thread: AgentSessionThreadRecord,
+  users: ReadonlyArray<{ readonly id: string; readonly email: string; readonly username: string }>,
+  computers: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+) => {
+  const user = users.find((candidate) => candidate.id === thread.userId);
+
+  return {
+    id: thread.id,
+    userId: thread.userId,
+    username: user?.username ?? null,
+    userEmail: user?.email ?? null,
+    computerId: thread.computerId,
+    computerName: computers.find((computer) => computer.id === thread.computerId)?.name ?? null,
+    machineIdentityId: thread.machineIdentityId,
+    harness: thread.harness,
+    nativeThreadId: thread.nativeThreadId,
+    threadId: thread.threadId,
+    sourcePath: thread.sourcePath,
+    relativePath: thread.relativePath,
+    latestVersionId: thread.latestVersionId,
+    latestSha256: thread.latestSha256,
+    latestObjectKey: thread.latestObjectKey,
+    latestSizeBytes: thread.latestSizeBytes,
+    latestMtime: thread.latestMtime?.toISOString() ?? null,
+    sourceCreatedAt: thread.sourceCreatedAt?.toISOString() ?? null,
+    sourceUpdatedAt: thread.sourceUpdatedAt?.toISOString() ?? null,
+    firstSyncedAt: thread.firstSyncedAt.toISOString(),
+    lastSyncedAt: thread.lastSyncedAt.toISOString(),
+    metadata: thread.metadata,
+    createdAt: thread.createdAt.toISOString(),
+    updatedAt: thread.updatedAt.toISOString(),
+  };
+};
+
+const serializeAgentSessionVersionAdmin = (version: AgentSessionVersionRecord) => ({
+  id: version.id,
+  agentSessionThreadId: version.agentSessionThreadId,
+  userId: version.userId,
+  computerId: version.computerId,
+  machineIdentityId: version.machineIdentityId,
+  harness: version.harness,
+  nativeThreadId: version.nativeThreadId,
+  threadId: version.threadId,
+  sha256: version.sha256,
+  objectBucket: version.objectBucket,
+  objectKey: version.objectKey,
+  sizeBytes: version.sizeBytes,
+  sourceMtime: version.sourceMtime.toISOString(),
+  sourcePath: version.sourcePath,
+  relativePath: version.relativePath,
+  sourceCreatedAt: version.sourceCreatedAt?.toISOString() ?? null,
+  sourceUpdatedAt: version.sourceUpdatedAt?.toISOString() ?? null,
+  metadata: version.metadata,
+  uploadedAt: version.uploadedAt.toISOString(),
+  createdAt: version.createdAt.toISOString(),
+});
+
 const serializeAiUsageSummary = (summary: AiUsageSummary) => ({
   requestCount: summary.requestCount,
   estimatedCostUsd: summary.estimatedCostUsd,
@@ -775,6 +894,16 @@ const readOptionalDate = (value: string | undefined): Date | undefined => {
   return Number.isNaN(date.getTime()) ? undefined : date;
 };
 
+const readAgentSessionHarness = (value: string | undefined): AgentSessionHarness | undefined => {
+  const trimmed = value?.trim();
+
+  if (trimmed === undefined || trimmed.length === 0) {
+    return undefined;
+  }
+
+  return trimmed === "codex" || trimmed === "pi" ? trimmed : undefined;
+};
+
 const readLimit = (value: string | undefined): number => {
   const parsed = Number.parseInt(value ?? "", 10);
 
@@ -861,6 +990,9 @@ const readBearerToken = (authorizationHeader: string | undefined): string | null
 
   return token;
 };
+
+const safeFilenameSegment = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9._-]+/gu, "_").slice(0, 120) || "thread";
 
 const safeTokenEquals = (actual: string, expected: string): boolean => {
   const actualBuffer = Buffer.from(actual);

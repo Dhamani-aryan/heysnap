@@ -27,6 +27,11 @@ export interface CloudServerConfig {
   readonly firecrawlBaseUrl?: string;
   readonly firecrawlApiKey?: string;
   readonly sarvamApiKey?: string;
+  readonly agentSessionStorageBucket?: string;
+  readonly agentSessionStoragePrefix?: string;
+  readonly agentSessionStorageKmsKeyId?: string;
+  readonly agentSessionStorageDirectory?: string;
+  readonly agentSessionMaxFileBytes?: number;
   readonly allowedOrigins: readonly string[];
   readonly adminToken: string;
 }
@@ -65,6 +70,11 @@ export const getCloudServerConfig = (
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
   firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
   sarvamApiKey: readOptionalEnv(env, "SARVAM_API_KEY"),
+  agentSessionStorageBucket: readOptionalEnv(env, "AGENT_SESSION_STORAGE_BUCKET"),
+  agentSessionStoragePrefix: readStoragePrefix(env.AGENT_SESSION_STORAGE_PREFIX),
+  agentSessionStorageKmsKeyId: readOptionalEnv(env, "AGENT_SESSION_STORAGE_KMS_KEY_ID"),
+  agentSessionStorageDirectory: readOptionalEnv(env, "AGENT_SESSION_STORAGE_DIR"),
+  agentSessionMaxFileBytes: parsePositiveInteger(env.AGENT_SESSION_MAX_FILE_BYTES, 536_870_912),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS),
   adminToken: readRequiredEnv(env, "CLOUD_SERVER_ADMIN_TOKEN"),
 });
@@ -100,6 +110,11 @@ export const getDevelopmentCloudServerConfig = (
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
   firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
   sarvamApiKey: readOptionalEnv(env, "SARVAM_API_KEY"),
+  agentSessionStorageBucket: readOptionalEnv(env, "AGENT_SESSION_STORAGE_BUCKET"),
+  agentSessionStoragePrefix: readStoragePrefix(env.AGENT_SESSION_STORAGE_PREFIX),
+  agentSessionStorageKmsKeyId: readOptionalEnv(env, "AGENT_SESSION_STORAGE_KMS_KEY_ID"),
+  agentSessionStorageDirectory: readOptionalEnv(env, "AGENT_SESSION_STORAGE_DIR"),
+  agentSessionMaxFileBytes: parsePositiveInteger(env.AGENT_SESSION_MAX_FILE_BYTES, 536_870_912),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS, [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -186,4 +201,9 @@ const parseCsvEnv = (rawValue: string | undefined, defaultValue: readonly string
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
+};
+
+const readStoragePrefix = (rawValue: string | undefined): string => {
+  const normalized = rawValue?.trim().replace(/^\/+|\/+$/g, "") ?? "agent-sessions";
+  return normalized.length === 0 ? "" : `${normalized}/`;
 };

@@ -109,6 +109,25 @@ Optional debug body capture is disabled by default. Enable it with
 `AI_GATEWAY_CAPTURE_BODIES=true`; captured headers are redacted and bodies are
 capped by `AI_GATEWAY_CAPTURE_BODY_MAX_BYTES`.
 
+## Agent Session Storage
+
+Cloud machines sync raw Codex and Pi JSONL session files on machine-server
+startup. Production should configure S3:
+
+```sh
+AGENT_SESSION_STORAGE_BUCKET=...
+AGENT_SESSION_STORAGE_PREFIX=agent-sessions/
+AGENT_SESSION_STORAGE_KMS_KEY_ID=... # optional
+```
+
+Local development can use filesystem storage instead:
+
+```sh
+AGENT_SESSION_STORAGE_DIR=.local/agent-session-storage
+```
+
+`pnpm dev:local` sets `AGENT_SESSION_STORAGE_DIR` automatically.
+
 ## Firecrawl Gateway
 
 Cloud machines can send Firecrawl API requests to `/firecrawl/*` with their
