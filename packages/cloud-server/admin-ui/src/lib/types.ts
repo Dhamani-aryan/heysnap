@@ -115,6 +115,58 @@ export interface AdminComputerDetail {
   readonly accessSessions: AdminAccessSession[];
 }
 
+export type AgentSessionHarness = "codex" | "pi";
+
+export interface AdminAgentSession {
+  readonly id: string;
+  readonly userId: string;
+  readonly username: string | null;
+  readonly userEmail: string | null;
+  readonly computerId: string;
+  readonly computerName: string | null;
+  readonly machineIdentityId: string;
+  readonly harness: AgentSessionHarness | string;
+  readonly nativeThreadId: string;
+  readonly threadId: string;
+  readonly sourcePath: string | null;
+  readonly relativePath: string;
+  readonly latestVersionId: string | null;
+  readonly latestSha256: string | null;
+  readonly latestObjectKey: string | null;
+  readonly latestSizeBytes: number | null;
+  readonly latestMtime: string | null;
+  readonly sourceCreatedAt: string | null;
+  readonly sourceUpdatedAt: string | null;
+  readonly firstSyncedAt: string;
+  readonly lastSyncedAt: string;
+  readonly metadata: unknown;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface AdminAgentSessionVersion {
+  readonly id: string;
+  readonly agentSessionThreadId: string;
+  readonly userId: string;
+  readonly computerId: string;
+  readonly machineIdentityId: string;
+  readonly harness: AgentSessionHarness | string;
+  readonly nativeThreadId: string;
+  readonly threadId: string;
+  readonly sha256: string;
+  readonly objectBucket: string;
+  readonly objectKey: string;
+  readonly sizeBytes: number;
+  readonly sourceMtime: string;
+  readonly sourcePath: string | null;
+  readonly relativePath: string;
+  readonly sourceCreatedAt: string | null;
+  readonly sourceUpdatedAt: string | null;
+  readonly metadata: unknown;
+  readonly uploadedAt: string;
+  readonly createdAt: string;
+}
+
 export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";
 export type AiUsageBucketGranularity = "hour" | "day";
 export type AiUsageGroupBy = "provider" | "model" | "status" | "user" | "computer";

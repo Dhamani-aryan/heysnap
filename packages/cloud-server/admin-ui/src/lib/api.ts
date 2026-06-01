@@ -1,5 +1,7 @@
 import { clearStoredAdminToken, getStoredAdminToken } from "./auth";
 import type {
+  AdminAgentSession,
+  AdminAgentSessionVersion,
   AdminAiUsageBreakdownRow,
   AdminAiUsageBucket,
   AdminAiUsageDetail,
@@ -87,6 +89,43 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return parsed as T;
+};
+
+const requestBlob = async (path: string): Promise<{
+  readonly blob: Blob;
+  readonly filename: string | null;
+}> => {
+  const token = getStoredAdminToken();
+
+  if (token === null || token.length === 0) {
+    throw new ApiError(401, "UNAUTHORIZED", "Admin token is missing");
+  }
+
+  const response = await fetch(buildUrl(path), {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredAdminToken();
+    }
+
+    const text = await response.text();
+    const parsed = text.length === 0 ? {} : safeJson(text);
+    const error = (parsed as { readonly error?: { readonly code?: string; readonly message?: string } }).error;
+    throw new ApiError(
+      response.status,
+      error?.code ?? "REQUEST_FAILED",
+      error?.message ?? `Request failed with ${String(response.status)}`,
+    );
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: readContentDispositionFilename(response.headers.get("content-disposition")),
+  };
 };
 
 const safeJson = (value: string): unknown => {
@@ -182,6 +221,14 @@ export const adminApi = {
     request<AdminAiUsageOverview>(
       buildPath(`/admin/computers/${encodeURIComponent(computerId)}/ai-usage`, params),
     ),
+  listAgentSessions: (params: AgentSessionListParams = {}) =>
+    request<{ readonly sessions: AdminAgentSession[] }>(buildPath("/admin/agent-sessions", params)),
+  listAgentSessionVersions: (sessionId: string) =>
+    request<{ readonly session: AdminAgentSession; readonly versions: AdminAgentSessionVersion[] }>(
+      `/admin/agent-sessions/${encodeURIComponent(sessionId)}/versions`,
+    ),
+  downloadAgentSessionRaw: (sessionId: string) =>
+    requestBlob(`/admin/agent-sessions/${encodeURIComponent(sessionId)}/raw`),
 };
 
 interface AiUsageFilterParams {
@@ -215,6 +262,13 @@ interface AiUsageRangeParams {
   readonly breakdownLimit?: number;
 }
 
+interface AgentSessionListParams {
+  readonly userId?: string;
+  readonly computerId?: string;
+  readonly harness?: "codex" | "pi";
+  readonly limit?: number;
+}
+
 const buildPath = (basePath: string, params: object): string => {
   const search = new URLSearchParams();
   for (const [key, rawValue] of Object.entries(params)) {
@@ -229,4 +283,13 @@ const buildPath = (basePath: string, params: object): string => {
   }
   const query = search.toString();
   return query.length === 0 ? basePath : `${basePath}?${query}`;
+};
+
+const readContentDispositionFilename = (value: string | null): string | null => {
+  if (value === null) {
+    return null;
+  }
+
+  const match = /filename="([^"]+)"/iu.exec(value) ?? /filename=([^;]+)/iu.exec(value);
+  return match?.[1]?.trim() ?? null;
 };
