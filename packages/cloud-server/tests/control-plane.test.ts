@@ -548,6 +548,7 @@ describe("cloud server computer access sessions", () => {
       token: expect.any(String),
       scopes: DEFAULT_GATEWAY_ACCESS_SCOPES,
     });
+    expect(body.accessSession.scopes).not.toContain("feedback:http");
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
       filesystemPreviewBaseUrl: `/gateway/computers/${computer.id}/preview`,
