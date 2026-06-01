@@ -17,12 +17,9 @@ import type {
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerRecord,
-  FeedbackReportStatus,
   MachineIdentityRecord,
   SessionRecord,
 } from "../db/types.js";
-import { serializeAdminFeedbackReport } from "../feedback/serialization.js";
-import type { FeedbackArchiveStorage } from "../feedback/storage.js";
 import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
 import { toStartComputerError } from "../provisioning/errors.js";
 import type { ComputerProvisioner } from "../provisioning/types.js";
@@ -43,7 +40,6 @@ export const createAdminRoutes = (
   config: CloudServerConfig,
   provisioner: ComputerProvisioner,
   tunnelRegistry: TunnelStatusRegistry,
-  feedbackArchiveStorage: FeedbackArchiveStorage,
 ): Hono<{ Variables: AppVariables }> => {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -81,62 +77,6 @@ export const createAdminRoutes = (
       releases: releases
         .filter((release) => release.target === "machine-server")
         .map(serializeReleaseManifest),
-    });
-  });
-
-  app.get("/feedback", async (context) => {
-    const [feedback, users, computers] = await Promise.all([
-      store.listFeedbackReports({
-        userId: readOptionalQueryString(context.req.query("userId")),
-        computerId: readOptionalQueryString(context.req.query("computerId")),
-        status: readFeedbackStatus(context.req.query("status")),
-        before: readOptionalDate(context.req.query("before")),
-        limit: readLimit(context.req.query("limit")),
-      }),
-      store.listUsers(),
-      store.listComputers(),
-    ]);
-
-    return context.json({
-      feedback: feedback.map((report) => serializeAdminFeedbackReport(report, users, computers)),
-    });
-  });
-
-  app.get("/feedback/:feedbackId/download", async (context) => {
-    const report = await store.getFeedbackReportById(context.req.param("feedbackId"));
-
-    if (report === null) {
-      throw notFound("FEEDBACK_NOT_FOUND", "Feedback report not found");
-    }
-
-    if (report.archiveStorageKey === null) {
-      return context.json({
-        error: {
-          code: "FEEDBACK_ARCHIVE_UNAVAILABLE",
-          message: "Feedback archive is not available",
-        },
-      }, report.status === "comment_only" ? 409 : 404);
-    }
-
-    const archive = await feedbackArchiveStorage.getArchive(report.archiveStorageKey);
-
-    if (archive === null) {
-      return context.json({
-        error: {
-          code: "FEEDBACK_ARCHIVE_NOT_FOUND",
-          message: "Feedback archive was not found",
-        },
-      }, 404);
-    }
-
-    return new Response(new Uint8Array(archive.body), {
-      status: 200,
-      headers: {
-        "content-type": archive.contentType ?? "application/zip",
-        "content-length": String(archive.body.byteLength),
-        "content-disposition": contentDisposition(`feedback-${report.id}.zip`),
-        "cache-control": "private, no-store",
-      },
     });
   });
 
@@ -872,22 +812,6 @@ const readAiUsageStatus = (value: string | undefined): AiUsageStatus | undefined
     : undefined;
 };
 
-const VALID_FEEDBACK_STATUSES: ReadonlySet<FeedbackReportStatus> = new Set([
-  "pending",
-  "complete",
-  "comment_only",
-]);
-
-const readFeedbackStatus = (value: string | undefined): FeedbackReportStatus | undefined => {
-  const trimmed = value?.trim();
-  if (trimmed === undefined || trimmed.length === 0) {
-    return undefined;
-  }
-  return VALID_FEEDBACK_STATUSES.has(trimmed as FeedbackReportStatus)
-    ? (trimmed as FeedbackReportStatus)
-    : undefined;
-};
-
 const readBucketGranularity = (value: string | undefined): AiUsageBucketGranularity => {
   return value === "hour" ? "hour" : "day";
 };
@@ -937,15 +861,6 @@ const readBearerToken = (authorizationHeader: string | undefined): string | null
 
   return token;
 };
-
-const contentDisposition = (filename: string): string => {
-  const fallback = filename.replace(/[^A-Za-z0-9._-]+/gu, "_") || "feedback.zip";
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeRFC5987ValueChars(filename)}`;
-};
-
-const encodeRFC5987ValueChars = (value: string): string =>
-  encodeURIComponent(value)
-    .replace(/['()*]/gu, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 
 const safeTokenEquals = (actual: string, expected: string): boolean => {
   const actualBuffer = Buffer.from(actual);
