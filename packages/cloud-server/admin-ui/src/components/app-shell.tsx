@@ -1,4 +1,4 @@
-import { Cpu, LayoutDashboard, LogOut, MessageSquareText, Package, Server, Sparkles, Users } from "lucide-react";
+import { Cpu, LayoutDashboard, LogOut, Package, Server, Sparkles, Users } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -18,7 +18,6 @@ const NAV_ITEMS = [
   { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/users", label: "Users", icon: Users },
   { to: "/computers", label: "Machines", icon: Server },
-  { to: "/feedback", label: "Feedback", icon: MessageSquareText },
   { to: "/ai-usage", label: "AI usage", icon: Sparkles },
   { to: "/releases", label: "Releases", icon: Package },
 ];

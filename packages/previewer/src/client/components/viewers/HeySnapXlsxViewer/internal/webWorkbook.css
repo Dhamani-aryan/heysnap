@@ -22,6 +22,7 @@
   --web-workbook-muted-text: #5b6472;
   --web-workbook-sheet-bg: var(--web-workbook-light-bg);
   --web-workbook-strong-text: #15171c;
+  --web-workbook-header-control-color: color-mix(in srgb, #15171c 70%, transparent);
 }
 
 .theme-dark .web-workbook {
@@ -34,6 +35,7 @@
   --web-workbook-muted-text: #a4a9b3;
   --web-workbook-sheet-bg: var(--web-workbook-dark-bg);
   --web-workbook-strong-text: #f4f6fb;
+  --web-workbook-header-control-color: color-mix(in srgb, #f4f6fb 70%, transparent);
 }
 
 .web-workbook-header {
@@ -55,7 +57,7 @@
   align-items: center;
   gap: 6px;
   flex: 1;
-  color: color-mix(in srgb, currentColor 70%, transparent);
+  color: var(--web-workbook-header-control-color);
 }
 
 .web-workbook-header-group-left {

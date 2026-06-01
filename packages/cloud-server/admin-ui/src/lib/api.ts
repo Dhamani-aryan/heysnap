@@ -1,5 +1,7 @@
 import { clearStoredAdminToken, getStoredAdminToken } from "./auth";
 import type {
+  AdminAgentSession,
+  AdminAgentSessionVersion,
   AdminAiUsageBreakdownRow,
   AdminAiUsageBucket,
   AdminAiUsageDetail,
@@ -8,7 +10,6 @@ import type {
   AdminAiUsageSummary,
   AdminComputer,
   AdminComputerDetail,
-  AdminFeedbackReport,
   AdminMachineIdentity,
   AdminOverview,
   AdminRelease,
@@ -18,7 +19,6 @@ import type {
   AiUsageBucketGranularity,
   AiUsageGroupBy,
   AiUsageStatus,
-  FeedbackReportStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -91,18 +91,17 @@ const request = async <T>(path: string, options: RequestOptions = {}): Promise<T
   return parsed as T;
 };
 
-const requestBlob = async (path: string, options: RequestOptions = {}): Promise<{
+const requestBlob = async (path: string): Promise<{
   readonly blob: Blob;
   readonly filename: string | null;
 }> => {
-  const token = options.token ?? getStoredAdminToken();
+  const token = getStoredAdminToken();
 
   if (token === null || token.length === 0) {
     throw new ApiError(401, "UNAUTHORIZED", "Admin token is missing");
   }
 
   const response = await fetch(buildUrl(path), {
-    method: options.method ?? "GET",
     headers: {
       authorization: `Bearer ${token}`,
     },
@@ -222,19 +221,15 @@ export const adminApi = {
     request<AdminAiUsageOverview>(
       buildPath(`/admin/computers/${encodeURIComponent(computerId)}/ai-usage`, params),
     ),
-  listFeedback: (params: FeedbackListParams = {}) =>
-    request<{ readonly feedback: AdminFeedbackReport[] }>(buildPath("/admin/feedback", params)),
-  downloadFeedbackArchive: (feedbackId: string) =>
-    requestBlob(`/admin/feedback/${encodeURIComponent(feedbackId)}/download`),
+  listAgentSessions: (params: AgentSessionListParams = {}) =>
+    request<{ readonly sessions: AdminAgentSession[] }>(buildPath("/admin/agent-sessions", params)),
+  listAgentSessionVersions: (sessionId: string) =>
+    request<{ readonly session: AdminAgentSession; readonly versions: AdminAgentSessionVersion[] }>(
+      `/admin/agent-sessions/${encodeURIComponent(sessionId)}/versions`,
+    ),
+  downloadAgentSessionRaw: (sessionId: string) =>
+    requestBlob(`/admin/agent-sessions/${encodeURIComponent(sessionId)}/raw`),
 };
-
-interface FeedbackListParams {
-  readonly userId?: string;
-  readonly computerId?: string;
-  readonly status?: FeedbackReportStatus;
-  readonly before?: string | Date;
-  readonly limit?: number;
-}
 
 interface AiUsageFilterParams {
   readonly userId?: string;
@@ -267,6 +262,13 @@ interface AiUsageRangeParams {
   readonly breakdownLimit?: number;
 }
 
+interface AgentSessionListParams {
+  readonly userId?: string;
+  readonly computerId?: string;
+  readonly harness?: "codex" | "pi";
+  readonly limit?: number;
+}
+
 const buildPath = (basePath: string, params: object): string => {
   const search = new URLSearchParams();
   for (const [key, rawValue] of Object.entries(params)) {
@@ -288,15 +290,6 @@ const readContentDispositionFilename = (value: string | null): string | null => 
     return null;
   }
 
-  const utf8Match = /filename\*=UTF-8''([^;]+)/iu.exec(value);
-  if (utf8Match?.[1] !== undefined) {
-    try {
-      return decodeURIComponent(utf8Match[1]);
-    } catch {
-      return utf8Match[1];
-    }
-  }
-
-  const fallbackMatch = /filename="([^"]+)"/iu.exec(value) ?? /filename=([^;]+)/iu.exec(value);
-  return fallbackMatch?.[1] ?? null;
+  const match = /filename="([^"]+)"/iu.exec(value) ?? /filename=([^;]+)/iu.exec(value);
+  return match?.[1]?.trim() ?? null;
 };

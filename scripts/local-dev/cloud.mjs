@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 
-import { inherit, spawnInherit } from "./common.mjs";
+import { inherit, localDir, spawnInherit } from "./common.mjs";
 
 export const createLocalCloudEnv = () => ({
   ...process.env,
@@ -17,6 +17,7 @@ export const createLocalCloudEnv = () => ({
   LOCAL_DOCKER_CLOUD_URL: process.env.LOCAL_DOCKER_CLOUD_URL || "http://host.docker.internal:4100",
   MACHINE_SERVER_CHANNEL: process.env.MACHINE_SERVER_CHANNEL || "local",
   AI_GATEWAY_CAPTURE_BODIES: process.env.AI_GATEWAY_CAPTURE_BODIES || "true",
+  AGENT_SESSION_STORAGE_DIR: process.env.AGENT_SESSION_STORAGE_DIR || `${localDir}/agent-session-storage`,
 });
 
 export const runLocalCloudServer = () => {

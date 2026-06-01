@@ -5,6 +5,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
 import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
+import { getFilesystemFileTypeIconSrc } from '../../../lib/filesystem/filesystem-icons.ts'
 
 const LONG_NAME_THRESHOLD = 24
 
@@ -19,6 +20,7 @@ export function WorkspaceTabsStrip() {
   const showBrowser = useFilesystemStore((s) => s.showBrowser)
   const extensionStatus = useBrowserStore((s) => s.extensionStatus)
   const windowId = useBrowserStore((s) => s.windowId)
+  const isWindowHydrated = useBrowserStore((s) => s.isWindowHydrated)
   const isOpeningWindow = useBrowserStore((s) => s.isOpeningWindow)
   const ensureBrowserWindow = useBrowserStore((s) => s.ensureBrowserWindow)
   const closeBrowserWindow = useBrowserStore((s) => s.closeBrowserWindow)
@@ -34,13 +36,21 @@ export function WorkspaceTabsStrip() {
   useEffect(() => {
     if (
       activeSurface === 'browser' &&
+      isWindowHydrated &&
       windowId === null &&
       !isOpeningWindow &&
       windowError === null
     ) {
       showDirectory()
     }
-  }, [activeSurface, windowId, isOpeningWindow, windowError, showDirectory])
+  }, [
+    activeSurface,
+    isWindowHydrated,
+    windowId,
+    isOpeningWindow,
+    windowError,
+    showDirectory,
+  ])
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-[8px] overflow-hidden">
@@ -213,7 +223,7 @@ function FileTab({
   onSelect: () => void
   onClose: () => void
 }) {
-  const iconSrc = getTypedFileIconSrc(tab.name)
+  const iconSrc = getFilesystemFileTypeIconSrc(tab.name)
   const isLongName = tab.name.length > LONG_NAME_THRESHOLD
 
   return (
@@ -301,12 +311,4 @@ function CloseGlyph() {
       />
     </svg>
   )
-}
-
-function getTypedFileIconSrc(fileName: string): string | null {
-  const lower = fileName.toLowerCase()
-  if (lower.endsWith('.pdf')) return '/filesystem/pdf_file_icon.png'
-  if (lower.endsWith('.docx')) return '/filesystem/docx_file_icon.png'
-  if (/\.(xls|xlsx)$/iu.test(lower)) return '/filesystem/xlsx_file_icon.png'
-  return null
 }

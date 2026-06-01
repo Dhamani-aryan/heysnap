@@ -36,6 +36,9 @@ const headerBaseStyle: CSSProperties = {
   boxShadow: "inset 0 -1px 0 color-mix(in srgb, currentColor 10%, transparent)",
 };
 
+const headerControlColor = (foreground: string): string =>
+  `color-mix(in srgb, ${foreground} 72%, transparent)`;
+
 export function ViewerHeaderShell({
   background,
   foreground,
@@ -43,7 +46,15 @@ export function ViewerHeaderShell({
   children,
 }: ViewerHeaderShellProps) {
   return (
-    <header style={{ ...headerBaseStyle, background, color: foreground, ...style }}>
+    <header
+      style={{
+        ...headerBaseStyle,
+        "--viewer-header-control-color": headerControlColor(foreground),
+        background,
+        color: foreground,
+        ...style,
+      } as CSSProperties}
+    >
       {children}
     </header>
   );
@@ -65,7 +76,7 @@ export function ViewerHeaderGroup({
         gap: 6,
         flex: align === "right" ? "0 0 auto" : "1 1 auto",
         minWidth: 0,
-        color: "color-mix(in srgb, currentColor 72%, transparent)",
+        color: "var(--viewer-header-control-color, inherit)",
       }}
     >
       {children}

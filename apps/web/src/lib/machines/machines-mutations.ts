@@ -1,12 +1,17 @@
 import { useMutation } from '@tanstack/react-query'
 import { queryClient } from '../query-client.ts'
 import { createComputer, startComputer, stopComputer } from './machines-api.ts'
+import type { CloudComputer } from './machines-api.ts'
+import { upsertComputerInList } from './machines-cache.ts'
 import { machinesKeys } from './machines-query.ts'
 
 export function useCreateComputerMutation() {
   return useMutation({
     mutationFn: createComputer,
-    onSuccess: () => {
+    onSuccess: (computer) => {
+      queryClient.setQueryData<CloudComputer[]>(machinesKeys.list, (computers) =>
+        upsertComputerInList(computers, computer),
+      )
       void queryClient.invalidateQueries({ queryKey: machinesKeys.list })
     },
   })

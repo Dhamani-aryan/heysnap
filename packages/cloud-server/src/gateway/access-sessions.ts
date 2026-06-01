@@ -11,8 +11,7 @@ export type GatewayAccessScope =
   | "preview:http"
   | "preview:ws"
   | "agent:http"
-  | "capabilities:http"
-  | "feedback:http";
+  | "capabilities:http";
 
 export const DEFAULT_GATEWAY_ACCESS_SCOPES: readonly GatewayAccessScope[] = [
   "filesystem:ws",
@@ -23,7 +22,6 @@ export const DEFAULT_GATEWAY_ACCESS_SCOPES: readonly GatewayAccessScope[] = [
   "preview:ws",
   "agent:http",
   "capabilities:http",
-  "feedback:http",
 ];
 
 export interface GatewayAccessSessionResult {

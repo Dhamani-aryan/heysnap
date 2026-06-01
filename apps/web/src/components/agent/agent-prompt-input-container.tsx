@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useAuth } from '../../hooks/auth/use-auth.ts'
+import { useAgentUiContext } from '../../hooks/agent/use-agent-ui-context.ts'
 import { useAgentRun } from '../../hooks/agent/use-agent-run.ts'
 import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
 import { useAgentModelSelectionStore } from '../../stores/agent/agent-model-selection-store.ts'
@@ -23,6 +24,7 @@ export function AgentPromptInputContainer({
 }: Props = {}) {
   const auth = useAuth()
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const activeRun = useAgentChatStore((s) => s.activeRun)
   const promptModelChoice = useAgentModelSelectionStore(
@@ -36,6 +38,7 @@ export function AgentPromptInputContainer({
   const activeFolderName = useFilesystemStore(
     (s) => s.listing?.name ?? 'workspace',
   )
+  const uiContext = useAgentUiContext()
 
   const handleSelectThread = useCallback(
     (thread: AgentThreadSummary) => {
@@ -46,7 +49,9 @@ export function AgentPromptInputContainer({
 
   const agentRun = useAgentRun({
     agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     currentPath,
+    uiContext,
     selectedThreadId,
     onSelectThread: handleSelectThread,
     onThreadResolved,
@@ -62,6 +67,7 @@ export function AgentPromptInputContainer({
       content: AgentContent
     }): boolean | Promise<boolean> => {
       if (agentBaseUrl === null) return false
+      if (agentIdentity === null) return false
       if (isRunning) return agentRun.steer(input)
       return agentRun.submit({
         ...input,
@@ -74,6 +80,7 @@ export function AgentPromptInputContainer({
     },
     [
       agentBaseUrl,
+      agentIdentity,
       agentRun,
       allowModelSelection,
       isRunning,

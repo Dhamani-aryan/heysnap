@@ -10,8 +10,12 @@ import {
   createInitialNavigationHistory,
   getParentPath,
 } from '../../lib/filesystem/filesystem-paths.ts'
+import {
+  readPersistedFilesystemWorkspaceState,
+  reconcileFilesystemViewState,
+} from './filesystem-persistence.ts'
 
-const HISTORY_LIMIT = 64
+export const FILESYSTEM_HISTORY_LIMIT = 64
 
 export type LeftPaneSurface = 'directory' | 'file' | 'browser'
 export type FilesystemClipboardMode = 'copy' | 'cut'
@@ -34,6 +38,8 @@ export function getActiveFilesystemManager(): FilesystemConnectionManager | null
 }
 
 type FilesystemState = {
+  workspaceIdentity: string | null
+  hasHydratedWorkspace: boolean
   connectionStatus: FilesystemConnectionStatus
   currentPath: string
   listing: FilesystemListing | null
@@ -49,9 +55,14 @@ type FilesystemState = {
 }
 
 type FilesystemActions = {
+  hydrateWorkspace: (input: {
+    readonly workspaceIdentity: string
+    readonly canRestoreBrowser: boolean
+  }) => void
   ingestServerMessage: (message: FilesystemServerMessage) => void
   setConnectionStatus: (status: FilesystemConnectionStatus) => void
   navigate: (path: string) => Promise<void>
+  openWorkspacePath: (path: string) => Promise<void>
   goBack: () => Promise<void>
   goForward: () => Promise<void>
   refresh: () => Promise<void>
@@ -69,6 +80,8 @@ type FilesystemActions = {
 }
 
 const initialState: FilesystemState = {
+  workspaceIdentity: null,
+  hasHydratedWorkspace: false,
   connectionStatus: 'idle',
   currentPath: '',
   listing: null,
@@ -86,6 +99,48 @@ const initialState: FilesystemState = {
 export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
   (set, get) => ({
     ...initialState,
+
+    hydrateWorkspace: ({ workspaceIdentity, canRestoreBrowser }) => {
+      const current = get()
+      if (
+        current.workspaceIdentity === workspaceIdentity &&
+        current.hasHydratedWorkspace
+      ) {
+        return
+      }
+
+      const persisted =
+        typeof window === 'undefined'
+          ? null
+          : readPersistedFilesystemWorkspaceState(
+              window.localStorage,
+              workspaceIdentity,
+              FILESYSTEM_HISTORY_LIMIT,
+              { canRestoreBrowser },
+            )
+
+      if (persisted === null) {
+        set({
+          ...initialState,
+          workspaceIdentity,
+          hasHydratedWorkspace: true,
+        })
+        return
+      }
+
+      set({
+        ...initialState,
+        workspaceIdentity,
+        hasHydratedWorkspace: true,
+        currentPath: persisted.currentPath,
+        history: persisted.history,
+        historyIndex: persisted.historyIndex,
+        openFileTabs: persisted.openFileTabs,
+        activeFilePath: persisted.activeFilePath,
+        activeLeftPaneSurface: persisted.activeLeftPaneSurface,
+        hasHydratedOpenFiles: true,
+      })
+    },
 
     ingestServerMessage: (message) => {
       switch (message.type) {
@@ -110,15 +165,28 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
           return
         }
         case 'hello': {
-          if (!get().hasHydratedOpenFiles) {
-            const openFiles = message.viewState?.openFiles ?? []
+          const viewState = message.viewState
+          const state = get()
+          if (viewState !== undefined) {
+            const reconciled = reconcileFilesystemViewState({
+              currentOpenFileTabs: state.openFileTabs,
+              activeFilePath: state.activeFilePath,
+              activeLeftPaneSurface: state.activeLeftPaneSurface,
+              viewState,
+              shouldHydrateFromServer: !state.hasHydratedOpenFiles,
+            })
             set({
-              openFileTabs: [...openFiles],
+              openFileTabs: reconciled.openFileTabs,
+              activeFilePath: reconciled.activeFilePath,
+              activeLeftPaneSurface: reconciled.activeLeftPaneSurface,
               hasHydratedOpenFiles: true,
             })
+            syncOpenFiles(reconciled.openFileTabs)
             return
           }
-          syncOpenFiles(get().openFileTabs)
+
+          set({ hasHydratedOpenFiles: true })
+          syncOpenFiles(state.openFileTabs)
           return
         }
         case 'error': {
@@ -146,8 +214,8 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
       const truncated = history.slice(0, historyIndex + 1)
       const appended = [...truncated, path]
       const nextHistory =
-        appended.length > HISTORY_LIMIT
-          ? appended.slice(appended.length - HISTORY_LIMIT)
+        appended.length > FILESYSTEM_HISTORY_LIMIT
+          ? appended.slice(appended.length - FILESYSTEM_HISTORY_LIMIT)
           : appended
 
       set({
@@ -168,6 +236,75 @@ export const useFilesystemStore = create<FilesystemState & FilesystemActions>(
           listingError: (error as Error).message,
         })
       }
+    },
+
+    openWorkspacePath: async (path) => {
+      const normalizedPath = normalizeWorkspacePath(path)
+      if (normalizedPath === null) return
+
+      const openUnknownFile = () => {
+        const now = new Date().toISOString()
+        get().openFile({
+          name: getBasename(normalizedPath),
+          path: normalizedPath,
+          type: 'file',
+          size: null,
+          updatedAt: now,
+          isHidden: false,
+          isSymlink: false,
+        })
+      }
+
+      const openResolvedEntry = async (entry: FilesystemEntry) => {
+        if (entry.type === 'directory') {
+          await get().navigate(entry.path)
+          get().showDirectory()
+          return
+        }
+
+        get().openFile(entry)
+      }
+
+      if (normalizedPath.length === 0) {
+        await get().navigate('')
+        get().showDirectory()
+        return
+      }
+
+      const visibleEntry = get().listing?.entries.find(
+        (entry) => entry.path === normalizedPath,
+      )
+      if (visibleEntry !== undefined) {
+        await openResolvedEntry(visibleEntry)
+        return
+      }
+
+      if (get().openFileTabs.some((tab) => tab.path === normalizedPath)) {
+        get().selectFileTab(normalizedPath)
+        return
+      }
+
+      const manager = getActiveFilesystemManager()
+      if (!manager) return
+
+      const parentPath = getParentPath(normalizedPath)
+      if (get().listing?.path !== parentPath) {
+        await get().navigate(parentPath)
+        if (get().listing?.path !== parentPath) return
+      }
+
+      const parentListing = get().listing
+      const targetEntry =
+        parentListing?.path === parentPath
+          ? parentListing.entries.find((entry) => entry.path === normalizedPath)
+          : undefined
+
+      if (targetEntry !== undefined) {
+        await openResolvedEntry(targetEntry)
+        return
+      }
+
+      openUnknownFile()
     },
 
     goBack: async () => {
@@ -313,4 +450,22 @@ function syncOpenFiles(tabs: readonly FilesystemEntry[]): void {
   const manager = getActiveFilesystemManager()
   if (!manager) return
   void manager.setOpenFiles(tabs.map((tab) => tab.path)).catch(() => undefined)
+}
+
+function normalizeWorkspacePath(rawPath: string): string | null {
+  const path = rawPath.trim().replaceAll('\\', '/')
+  if (path.includes('\0')) return null
+  if (path.length === 0) return ''
+
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (part.length === 0 || part === '.') continue
+    if (part === '..') return null
+    parts.push(part)
+  }
+  return parts.join('/')
+}
+
+function getBasename(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path
 }

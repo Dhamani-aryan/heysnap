@@ -71,6 +71,20 @@
       "when": 1779835188340,
       "tag": "0009_clammy_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780302190183,
+      "tag": "0010_sad_adam_destine",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780331006595,
+      "tag": "0011_flowery_speed_demon",
+      "breakpoints": true
     }
   ]
 }

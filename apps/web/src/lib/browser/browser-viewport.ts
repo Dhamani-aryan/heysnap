@@ -37,11 +37,11 @@ export function getBrowserViewportInputPoint(
   clientX: number,
   clientY: number,
 ): BrowserViewportInputPoint | null {
-  const image = viewport.querySelector('img')
+  const frame = getBrowserViewportFrameElement(viewport)
   const rect = getViewportInputRect(viewport)
   if (rect.width <= 0 || rect.height <= 0) return null
-  const naturalWidth = image?.naturalWidth || rect.width
-  const naturalHeight = image?.naturalHeight || rect.height
+  const naturalWidth = frame?.width || rect.width
+  const naturalHeight = frame?.height || rect.height
   return {
     x: clamp(((clientX - rect.left) / rect.width) * naturalWidth, 0, naturalWidth),
     y: clamp(((clientY - rect.top) / rect.height) * naturalHeight, 0, naturalHeight),
@@ -62,12 +62,12 @@ export function getBrowserViewportInputRatio(
 }
 
 function getViewportInputRect(viewport: HTMLDivElement): DOMRectReadOnly {
-  const image = viewport.querySelector('img')
-  if (image === null || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+  const frame = getBrowserViewportFrameElement(viewport)
+  if (frame === null || frame.width <= 0 || frame.height <= 0) {
     return viewport.getBoundingClientRect()
   }
-  const rect = image.getBoundingClientRect()
-  const objectFit = window.getComputedStyle(image).objectFit
+  const rect = frame.getBoundingClientRect()
+  const objectFit = window.getComputedStyle(frame).objectFit
   if (
     objectFit !== 'contain' &&
     objectFit !== 'cover' &&
@@ -75,7 +75,7 @@ function getViewportInputRect(viewport: HTMLDivElement): DOMRectReadOnly {
   ) {
     return rect
   }
-  const naturalAspectRatio = image.naturalWidth / image.naturalHeight
+  const naturalAspectRatio = frame.width / frame.height
   const renderedAspectRatio = rect.width / rect.height
   const shouldFitWidth =
     objectFit === 'cover'
@@ -89,6 +89,12 @@ function getViewportInputRect(viewport: HTMLDivElement): DOMRectReadOnly {
     width,
     height,
   )
+}
+
+function getBrowserViewportFrameElement(
+  viewport: HTMLDivElement,
+): HTMLCanvasElement | null {
+  return viewport.querySelector('canvas[data-browser-frame="true"]')
 }
 
 export function readBrowserFrameAspectRatio(

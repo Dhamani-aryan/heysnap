@@ -9,13 +9,14 @@ import type {
   AiUsageRequestRecord,
   AiUsageStatus,
   AiUsageSummary,
+  AgentSessionHarness,
+  AgentSessionThreadRecord,
+  AgentSessionVersionRecord,
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerKind,
   ComputerRecord,
   ComputerStatus,
-  FeedbackReportRecord,
-  FeedbackReportStatus,
   MachineIdentityRecord,
   ReleaseManifestRecord,
   ReleaseTarget,
@@ -35,9 +36,10 @@ export class InMemoryCloudStore implements CloudStore {
   readonly machineIdentities = new Map<string, MachineIdentityRecord>();
   readonly computerAccessSessions = new Map<string, ComputerAccessSessionRecord>();
   readonly releaseManifests = new Map<string, ReleaseManifestRecord>();
-  readonly feedbackReports = new Map<string, FeedbackReportRecord>();
   readonly aiUsageRequests = new Map<string, AiUsageRequestRecord>();
   readonly aiUsagePayloads = new Map<string, AiUsagePayloadRecord>();
+  readonly agentSessionThreads = new Map<string, AgentSessionThreadRecord>();
+  readonly agentSessionVersions = new Map<string, AgentSessionVersionRecord>();
 
   async createUser(input: {
     readonly email: string;
@@ -128,11 +130,7 @@ export class InMemoryCloudStore implements CloudStore {
             this.computerAccessSessions.delete(accessSession.id);
           }
         }
-        for (const report of this.feedbackReports.values()) {
-          if (report.computerId === computer.id) {
-            this.feedbackReports.delete(report.id);
-          }
-        }
+        this.deleteAgentSessionsForComputer(computer.id);
       }
     }
     return true;
@@ -308,14 +306,14 @@ export class InMemoryCloudStore implements CloudStore {
     }
 
     this.computers.delete(input.computerId);
-    this.deleteFeedbackReportsForComputer(input.computerId);
+    this.deleteAgentSessionsForComputer(input.computerId);
     return true;
   }
 
   async deleteComputerById(computerId: string): Promise<boolean> {
     const deleted = this.computers.delete(computerId);
     if (deleted) {
-      this.deleteFeedbackReportsForComputer(computerId);
+      this.deleteAgentSessionsForComputer(computerId);
     }
     return deleted;
   }
@@ -508,112 +506,6 @@ export class InMemoryCloudStore implements CloudStore {
     return false;
   }
 
-  async createFeedbackReport(input: {
-    readonly userId: string;
-    readonly computerId: string;
-    readonly accessSessionId?: string | null;
-    readonly comment: string;
-    readonly threadId?: string | null;
-    readonly cwd?: string | null;
-    readonly clientContext?: unknown;
-  }): Promise<FeedbackReportRecord> {
-    const report = {
-      id: randomUUID(),
-      userId: input.userId,
-      computerId: input.computerId,
-      machineIdentityId: null,
-      accessSessionId: input.accessSessionId ?? null,
-      status: "pending" as const,
-      comment: input.comment,
-      threadId: input.threadId ?? null,
-      cwd: input.cwd ?? null,
-      archiveStorageKey: null,
-      archiveSha256: null,
-      archiveBytes: null,
-      fileCount: null,
-      errorMessage: null,
-      clientContext: input.clientContext ?? {},
-      machineContext: {},
-      createdAt: new Date(),
-      completedAt: null,
-    };
-    this.feedbackReports.set(report.id, report);
-    return report;
-  }
-
-  async getFeedbackReportById(id: string): Promise<FeedbackReportRecord | null> {
-    return this.feedbackReports.get(id) ?? null;
-  }
-
-  async markFeedbackReportCommentOnly(input: {
-    readonly feedbackId: string;
-    readonly errorMessage?: string | null;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const report = this.feedbackReports.get(input.feedbackId);
-
-    if (report === undefined) {
-      return null;
-    }
-
-    const updated = {
-      ...report,
-      status: "comment_only" as const,
-      errorMessage: input.errorMessage ?? null,
-      ...(input.machineContext !== undefined ? { machineContext: input.machineContext } : {}),
-      completedAt: new Date(),
-    };
-    this.feedbackReports.set(input.feedbackId, updated);
-    return updated;
-  }
-
-  async completeFeedbackReportArchive(input: {
-    readonly feedbackId: string;
-    readonly machineIdentityId: string;
-    readonly archiveStorageKey: string;
-    readonly archiveSha256: string;
-    readonly archiveBytes: number;
-    readonly fileCount: number;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const report = this.feedbackReports.get(input.feedbackId);
-
-    if (report === undefined) {
-      return null;
-    }
-
-    const updated = {
-      ...report,
-      machineIdentityId: input.machineIdentityId,
-      status: "complete" as const,
-      archiveStorageKey: input.archiveStorageKey,
-      archiveSha256: input.archiveSha256,
-      archiveBytes: input.archiveBytes,
-      fileCount: input.fileCount,
-      errorMessage: null,
-      machineContext: input.machineContext ?? {},
-      completedAt: new Date(),
-    };
-    this.feedbackReports.set(input.feedbackId, updated);
-    return updated;
-  }
-
-  async listFeedbackReports(input: {
-    readonly userId?: string;
-    readonly computerId?: string;
-    readonly status?: FeedbackReportStatus;
-    readonly before?: Date;
-    readonly limit?: number;
-  } = {}): Promise<FeedbackReportRecord[]> {
-    const reports = Array.from(this.feedbackReports.values())
-      .filter((report) => input.userId === undefined || report.userId === input.userId)
-      .filter((report) => input.computerId === undefined || report.computerId === input.computerId)
-      .filter((report) => input.status === undefined || report.status === input.status)
-      .filter((report) => input.before === undefined || report.createdAt.getTime() < input.before.getTime())
-      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
-    return input.limit !== undefined ? reports.slice(0, input.limit) : reports;
-  }
-
   async createAiUsageRequest(input: {
     readonly userId: string;
     readonly computerId: string;
@@ -782,6 +674,150 @@ export class InMemoryCloudStore implements CloudStore {
     return groupAiUsageRows(this.filterAiUsageRows(input), input.groupBy, input.limit);
   }
 
+  async getAgentSessionVersionByContent(input: {
+    readonly computerId: string;
+    readonly harness: AgentSessionHarness;
+    readonly nativeThreadId: string;
+    readonly sha256: string;
+  }): Promise<AgentSessionVersionRecord | null> {
+    return Array.from(this.agentSessionVersions.values()).find((version) =>
+      version.computerId === input.computerId &&
+      version.harness === input.harness &&
+      version.nativeThreadId === input.nativeThreadId &&
+      version.sha256 === input.sha256
+    ) ?? null;
+  }
+
+  async upsertAgentSessionUpload(input: {
+    readonly userId: string;
+    readonly computerId: string;
+    readonly machineIdentityId: string;
+    readonly harness: AgentSessionHarness;
+    readonly nativeThreadId: string;
+    readonly threadId: string;
+    readonly sha256: string;
+    readonly objectBucket: string;
+    readonly objectKey: string;
+    readonly sizeBytes: number;
+    readonly sourceMtime: Date;
+    readonly sourcePath?: string | null;
+    readonly relativePath: string;
+    readonly sourceCreatedAt?: Date | null;
+    readonly sourceUpdatedAt?: Date | null;
+    readonly metadata?: unknown;
+  }): Promise<{
+    readonly thread: AgentSessionThreadRecord;
+    readonly version: AgentSessionVersionRecord;
+    readonly created: boolean;
+  }> {
+    const now = new Date();
+    const threadKey = agentSessionThreadKey(input);
+    const existingThread = Array.from(this.agentSessionThreads.values())
+      .find((thread) => agentSessionThreadKey(thread) === threadKey);
+    const sourcePath = input.sourcePath ?? null;
+    const sourceCreatedAt = input.sourceCreatedAt ?? null;
+    const sourceUpdatedAt = input.sourceUpdatedAt ?? input.sourceMtime;
+    const metadata = input.metadata ?? {};
+    let thread: AgentSessionThreadRecord = {
+      id: existingThread?.id ?? randomUUID(),
+      userId: input.userId,
+      computerId: input.computerId,
+      machineIdentityId: input.machineIdentityId,
+      harness: input.harness,
+      nativeThreadId: input.nativeThreadId,
+      threadId: input.threadId,
+      sourcePath,
+      relativePath: input.relativePath,
+      latestVersionId: existingThread?.latestVersionId ?? null,
+      latestSha256: existingThread?.latestSha256 ?? null,
+      latestObjectKey: existingThread?.latestObjectKey ?? null,
+      latestSizeBytes: existingThread?.latestSizeBytes ?? null,
+      latestMtime: existingThread?.latestMtime ?? null,
+      sourceCreatedAt,
+      sourceUpdatedAt,
+      firstSyncedAt: existingThread?.firstSyncedAt ?? now,
+      lastSyncedAt: now,
+      metadata,
+      createdAt: existingThread?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.agentSessionThreads.set(thread.id, thread);
+
+    const existingVersion = await this.getAgentSessionVersionByContent({
+      computerId: input.computerId,
+      harness: input.harness,
+      nativeThreadId: input.nativeThreadId,
+      sha256: input.sha256,
+    });
+    const created = existingVersion === null;
+    const version: AgentSessionVersionRecord = existingVersion ?? {
+      id: randomUUID(),
+      agentSessionThreadId: thread.id,
+      userId: input.userId,
+      computerId: input.computerId,
+      machineIdentityId: input.machineIdentityId,
+      harness: input.harness,
+      nativeThreadId: input.nativeThreadId,
+      threadId: input.threadId,
+      sha256: input.sha256,
+      objectBucket: input.objectBucket,
+      objectKey: input.objectKey,
+      sizeBytes: input.sizeBytes,
+      sourceMtime: input.sourceMtime,
+      sourcePath,
+      relativePath: input.relativePath,
+      sourceCreatedAt,
+      sourceUpdatedAt,
+      metadata,
+      uploadedAt: now,
+      createdAt: now,
+    };
+
+    if (created) {
+      this.agentSessionVersions.set(version.id, version);
+    }
+
+    if (thread.latestMtime === null || input.sourceMtime.getTime() >= thread.latestMtime.getTime()) {
+      thread = {
+        ...thread,
+        latestVersionId: version.id,
+        latestSha256: version.sha256,
+        latestObjectKey: version.objectKey,
+        latestSizeBytes: version.sizeBytes,
+        latestMtime: version.sourceMtime,
+        updatedAt: now,
+      };
+      this.agentSessionThreads.set(thread.id, thread);
+    }
+
+    return { thread, version, created };
+  }
+
+  async listAgentSessionThreads(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly harness?: AgentSessionHarness;
+    readonly limit?: number;
+  } = {}): Promise<AgentSessionThreadRecord[]> {
+    const rows = Array.from(this.agentSessionThreads.values())
+      .filter((thread) => input.userId === undefined || thread.userId === input.userId)
+      .filter((thread) => input.computerId === undefined || thread.computerId === input.computerId)
+      .filter((thread) => input.harness === undefined || thread.harness === input.harness)
+      .sort((left, right) => right.lastSyncedAt.getTime() - left.lastSyncedAt.getTime());
+    return input.limit !== undefined ? rows.slice(0, input.limit) : rows;
+  }
+
+  async getAgentSessionThreadById(id: string): Promise<AgentSessionThreadRecord | null> {
+    return this.agentSessionThreads.get(id) ?? null;
+  }
+
+  async listAgentSessionVersions(agentSessionThreadId: string): Promise<AgentSessionVersionRecord[]> {
+    return Array.from(this.agentSessionVersions.values())
+      .filter((version) => version.agentSessionThreadId === agentSessionThreadId)
+      .sort((left, right) => right.uploadedAt.getTime() - left.uploadedAt.getTime());
+  }
+
   private filterAiUsageRows(input: {
     readonly userId?: string;
     readonly computerId?: string;
@@ -803,10 +839,16 @@ export class InMemoryCloudStore implements CloudStore {
       .filter((usage) => input.to === undefined || usage.startedAt.getTime() <= input.to.getTime());
   }
 
-  private deleteFeedbackReportsForComputer(computerId: string): void {
-    for (const report of this.feedbackReports.values()) {
-      if (report.computerId === computerId) {
-        this.feedbackReports.delete(report.id);
+  private deleteAgentSessionsForComputer(computerId: string): void {
+    for (const thread of this.agentSessionThreads.values()) {
+      if (thread.computerId === computerId) {
+        this.agentSessionThreads.delete(thread.id);
+      }
+    }
+
+    for (const version of this.agentSessionVersions.values()) {
+      if (version.computerId === computerId) {
+        this.agentSessionVersions.delete(version.id);
       }
     }
   }
@@ -817,3 +859,9 @@ const releaseKey = (input: {
   readonly channel: string;
   readonly platform: string;
 }): string => `${input.target}:${input.channel}:${input.platform}`;
+
+const agentSessionThreadKey = (input: {
+  readonly computerId: string;
+  readonly harness: string;
+  readonly nativeThreadId: string;
+}): string => `${input.computerId}:${input.harness}:${input.nativeThreadId}`;

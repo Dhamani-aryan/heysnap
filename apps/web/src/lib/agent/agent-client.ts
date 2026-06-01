@@ -67,6 +67,8 @@ export type AgentRunHandle = {
   readonly done: Promise<void>
 }
 
+export type AgentBaseUrlProvider = string | (() => string | null | undefined)
+
 export async function retrieveAgentThreadGroups(
   agentBaseUrl: string,
   input: { readonly rootPath?: string; readonly limit?: number } = {},
@@ -95,17 +97,18 @@ export async function getAgentThread(
 }
 
 export function startAgentRun(
-  agentBaseUrl: string,
+  agentBaseUrl: AgentBaseUrlProvider,
   input: StartAgentRunInput,
   callbacks: AgentRunCallbacks,
 ): AgentRunHandle {
   const requestId = createRequestId()
   const clientRunId = createRequestId()
   const state = createRunStreamState(agentBaseUrl, callbacks, requestId)
+  const requestBaseUrl = state.getAgentBaseUrl()
 
   void runStreamLoop(state, {
     method: 'POST',
-    url: buildAgentUrl(agentBaseUrl, '/runs').toString(),
+    url: buildAgentUrl(requestBaseUrl, '/runs').toString(),
     body: JSON.stringify({ ...input, clientRunId }),
   })
 
@@ -113,18 +116,19 @@ export function startAgentRun(
 }
 
 export function editAgentThreadUserMessage(
-  agentBaseUrl: string,
+  agentBaseUrl: AgentBaseUrlProvider,
   input: Required<Pick<StartAgentRunInput, 'threadId'>> & StartAgentRunInput,
   callbacks: AgentRunCallbacks,
 ): AgentRunHandle {
   const requestId = createRequestId()
   const clientRunId = createRequestId()
   const state = createRunStreamState(agentBaseUrl, callbacks, requestId)
+  const requestBaseUrl = state.getAgentBaseUrl()
 
   void runStreamLoop(state, {
     method: 'POST',
     url: buildAgentUrl(
-      agentBaseUrl,
+      requestBaseUrl,
       `/threads/${encodeURIComponent(input.threadId)}/edit`,
     ).toString(),
     body: JSON.stringify({
@@ -140,12 +144,13 @@ export function editAgentThreadUserMessage(
 }
 
 export function resumeAgentRun(
-  agentBaseUrl: string,
+  agentBaseUrl: AgentBaseUrlProvider,
   activeRun: AgentActiveRun,
   callbacks: AgentRunCallbacks,
 ): AgentRunHandle {
   const requestId = createRequestId()
   const state = createRunStreamState(agentBaseUrl, callbacks, requestId)
+  const requestBaseUrl = state.getAgentBaseUrl()
   state.runId = activeRun.runId
   state.threadId = activeRun.threadId
   state.lastEventId = activeRun.replayAfterEventId ?? 0
@@ -155,7 +160,7 @@ export function resumeAgentRun(
     threadId: activeRun.threadId,
   })
 
-  const eventsUrl = resolveAgentUrl(agentBaseUrl, activeRun.eventsUrl)
+  const eventsUrl = resolveAgentUrl(requestBaseUrl, activeRun.eventsUrl)
 
   if (state.lastEventId > 0) {
     eventsUrl.searchParams.set('after', String(state.lastEventId))
@@ -190,7 +195,7 @@ export async function steerAgentRun(
 }
 
 type RunStreamState = {
-  readonly agentBaseUrl: string
+  readonly getAgentBaseUrl: () => string
   readonly callbacks: AgentRunCallbacks
   readonly requestId: string
   readonly abortController: AbortController
@@ -240,10 +245,11 @@ type AgentSseMessage =
     }
 
 function createRunStreamState(
-  agentBaseUrl: string,
+  agentBaseUrl: AgentBaseUrlProvider,
   callbacks: AgentRunCallbacks,
   requestId: string,
 ): RunStreamState {
+  const fallbackBaseUrl = resolveAgentBaseUrl(agentBaseUrl)
   let resolveDone: () => void = () => {}
   let rejectDone: (error: Error) => void = () => {}
   const done = new Promise<void>((resolve, reject) => {
@@ -252,7 +258,7 @@ function createRunStreamState(
   })
 
   return {
-    agentBaseUrl,
+    getAgentBaseUrl: () => resolveAgentBaseUrl(agentBaseUrl, fallbackBaseUrl),
     callbacks,
     requestId,
     abortController: new AbortController(),
@@ -315,7 +321,7 @@ async function runStreamLoop(
 
       if (state.runId !== null) {
         const url = buildAgentUrl(
-          state.agentBaseUrl,
+          state.getAgentBaseUrl(),
           `/runs/${encodeURIComponent(state.runId)}/events`,
         )
         url.searchParams.set('after', String(state.lastEventId))
@@ -417,7 +423,7 @@ async function sendCancelIfReady(state: RunStreamState): Promise<void> {
 
   state.cancelRequestSent = true
   const url = buildAgentUrl(
-    state.agentBaseUrl,
+    state.getAgentBaseUrl(),
     `/threads/${encodeURIComponent(state.threadId)}/runs/${encodeURIComponent(state.runId)}/cancel`,
   )
 
@@ -580,6 +586,19 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 function buildAgentUrl(agentBaseUrl: string, path: string): URL {
   return resolveAgentUrl(agentBaseUrl, `/agent${path}`)
+}
+
+function resolveAgentBaseUrl(
+  agentBaseUrl: AgentBaseUrlProvider,
+  fallback?: string,
+): string {
+  const resolved =
+    typeof agentBaseUrl === 'function' ? agentBaseUrl() : agentBaseUrl
+  if (typeof resolved === 'string' && resolved.length > 0) {
+    return resolved
+  }
+  if (fallback !== undefined && fallback.length > 0) return fallback
+  throw new Error('Agent connection is not available.')
 }
 
 function resolveAgentUrl(agentBaseUrl: string, pathOrUrl: string): URL {

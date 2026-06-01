@@ -7,6 +7,12 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 
 import { createAdminRoutes } from "./admin/routes.js";
+import { createAgentSessionMachineRoutes } from "./agent-sessions/routes.js";
+import {
+  FileAgentSessionObjectStorage,
+  S3AgentSessionObjectStorage,
+  type AgentSessionObjectStorage,
+} from "./agent-sessions/storage.js";
 import { createAiGatewayRoutes } from "./ai-gateway/routes.js";
 import { AuthService } from "./auth/service.js";
 import { createAuthRoutes } from "./auth/routes.js";
@@ -14,8 +20,6 @@ import type { CloudServerConfig } from "./config.js";
 import { createComputerRoutes } from "./control-plane/computers.js";
 import { createDiagnosticsRoutes } from "./diagnostics/routes.js";
 import type { CloudStore } from "./db/types.js";
-import { handleGatewayFeedbackRequest } from "./feedback/gateway.js";
-import { createFeedbackArchiveStorage } from "./feedback/storage.js";
 import { createFirecrawlGatewayRoutes } from "./firecrawl-gateway/routes.js";
 import { GatewayAccessService, hasAccessScope, type GatewayAccessScope } from "./gateway/access-sessions.js";
 import { createMachineRoutes } from "./machines/routes.js";
@@ -39,6 +43,7 @@ export interface CreateAppOptions {
   readonly config: CloudServerConfig;
   readonly provisioner?: ComputerProvisioner;
   readonly tunnelRegistry?: TunnelStatusRegistry;
+  readonly agentSessionStorage?: AgentSessionObjectStorage;
 }
 
 const noopTunnelRegistry: TunnelStatusRegistry = {
@@ -51,7 +56,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   const gatewayAccessService = new GatewayAccessService(options.store, options.config);
   const provisioner = options.provisioner ?? new AwsEc2Provisioner();
   const tunnelRegistry = options.tunnelRegistry ?? noopTunnelRegistry;
-  const feedbackArchiveStorage = createFeedbackArchiveStorage(options.config);
+  const agentSessionStorage = options.agentSessionStorage ?? createAgentSessionObjectStorage(options.config);
 
   app.use("*", cors({
     origin: (origin) => {
@@ -75,7 +80,7 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
     options.config,
     provisioner,
     tunnelRegistry,
-    feedbackArchiveStorage,
+    agentSessionStorage,
   ));
   app.route("/auth", createAuthRoutes(authService, options.config));
   app.route("/diagnostics", createDiagnosticsRoutes(authService));
@@ -101,13 +106,6 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.all("/gateway/computers/:computerId/filesystem/uploads/*", async (context) => {
     return await proxyGatewayFilesystemUploadRequest(context, gatewayAccessService, tunnelRegistry);
   });
-  app.post("/gateway/computers/:computerId/feedback", async (context) => {
-    return await handleGatewayFeedbackRequest(context, {
-      store: options.store,
-      gatewayAccessService,
-      tunnelRegistry,
-    });
-  });
   app.get("/gateway/computers/:computerId/preview", async (context) => {
     return await proxyGatewayPreviewHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
@@ -123,7 +121,12 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.all("/gateway/computers/:computerId/agent/*", async (context) => {
     return await proxyGatewayAgentHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
-  app.route("/machines", createMachineRoutes(options.store, options.config, feedbackArchiveStorage, provisioner));
+  app.route("/machines/agent-sessions", createAgentSessionMachineRoutes(
+    options.store,
+    options.config,
+    agentSessionStorage,
+  ));
+  app.route("/machines", createMachineRoutes(options.store, options.config, provisioner));
   app.route("/llm", createAiGatewayRoutes(options.store, options.config));
   app.route("/firecrawl", createFirecrawlGatewayRoutes(options.store, options.config));
   app.route("/sarvam", createSarvamGatewayRoutes(authService, options.config));
@@ -162,6 +165,22 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   });
 
   return app;
+};
+
+const createAgentSessionObjectStorage = (
+  config: CloudServerConfig,
+): AgentSessionObjectStorage | undefined => {
+  if (config.agentSessionStorageBucket === undefined) {
+    return config.agentSessionStorageDirectory === undefined
+      ? undefined
+      : new FileAgentSessionObjectStorage(config.agentSessionStorageDirectory);
+  }
+
+  return new S3AgentSessionObjectStorage({
+    bucket: config.agentSessionStorageBucket,
+    region: config.awsRegion,
+    kmsKeyId: config.agentSessionStorageKmsKeyId,
+  });
 };
 
 const proxyGatewayFilesystemHttpRequest = async (

@@ -73,7 +73,6 @@ export interface MachineWorkspaceProps {
   readonly computer: CloudComputer;
   readonly filesystemPreviewBaseUrl?: string;
   readonly filesystemWebsocketUrl: string;
-  readonly feedbackUrl?: string;
   readonly allowModelSelection?: boolean;
   readonly sarvamApiKey?: string;
   readonly selectedThreadId?: string | null;
@@ -97,7 +96,6 @@ export function MachineWorkspace({
   computer,
   filesystemPreviewBaseUrl,
   filesystemWebsocketUrl,
-  feedbackUrl,
   allowModelSelection = false,
   sarvamApiKey,
   selectedThreadId = null,
@@ -1279,7 +1277,6 @@ export function MachineWorkspace({
           websocketUrl={filesystemWebsocketUrl}
           workspacePersistenceKey={`filesystem:${computer.id}`}
           filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
-          feedbackUrl={feedbackUrl}
           allowModelSelection={allowModelSelection}
           agentBaseUrl={agentBaseUrl}
           sarvamApiKey={sarvamApiKey}

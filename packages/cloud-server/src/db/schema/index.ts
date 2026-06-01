@@ -2,7 +2,6 @@ import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqu
 
 export const computerKindEnum = pgEnum("computer_kind", ["cloud", "local"]);
 export const releaseTargetEnum = pgEnum("release_target", ["machine-server"]);
-export const feedbackReportStatusEnum = pgEnum("feedback_report_status", ["pending", "complete", "comment_only"]);
 export const computerStatusEnum = pgEnum("computer_status", [
   "creating",
   "starting",
@@ -141,33 +140,68 @@ export const aiUsagePayloads = pgTable("ai_usage_payloads", {
   usageRequestUnique: uniqueIndex("ai_usage_payloads_usage_request_id_unique").on(table.usageRequestId),
 }));
 
-export const feedbackReports = pgTable("feedback_reports", {
+export const agentSessionThreads = pgTable("agent_session_threads", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   computerId: uuid("computer_id").notNull().references(() => computers.id, { onDelete: "cascade" }),
-  machineIdentityId: uuid("machine_identity_id").references(() => machineIdentities.id, {
-    onDelete: "set null",
+  machineIdentityId: uuid("machine_identity_id").notNull().references(() => machineIdentities.id, {
+    onDelete: "cascade",
   }),
-  accessSessionId: uuid("access_session_id").references(() => computerAccessSessions.id, {
-    onDelete: "set null",
-  }),
-  status: feedbackReportStatusEnum("status").notNull().default("pending"),
-  comment: text("comment").notNull(),
-  threadId: text("thread_id"),
-  cwd: text("cwd"),
-  archiveStorageKey: text("archive_storage_key"),
-  archiveSha256: text("archive_sha256"),
-  archiveBytes: integer("archive_bytes"),
-  fileCount: integer("file_count"),
-  errorMessage: text("error_message"),
-  clientContext: jsonb("client_context").notNull().default({}),
-  machineContext: jsonb("machine_context").notNull().default({}),
+  harness: text("harness").notNull(),
+  nativeThreadId: text("native_thread_id").notNull(),
+  threadId: text("thread_id").notNull(),
+  sourcePath: text("source_path"),
+  relativePath: text("relative_path").notNull(),
+  latestVersionId: uuid("latest_version_id"),
+  latestSha256: text("latest_sha256"),
+  latestObjectKey: text("latest_object_key"),
+  latestSizeBytes: integer("latest_size_bytes"),
+  latestMtime: timestamp("latest_mtime", { withTimezone: true }),
+  sourceCreatedAt: timestamp("source_created_at", { withTimezone: true }),
+  sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
+  firstSyncedAt: timestamp("first_synced_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).notNull().defaultNow(),
+  metadata: jsonb("metadata").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
-  userCreatedAtIdx: index("feedback_reports_user_created_at_idx").on(table.userId, table.createdAt),
-  computerCreatedAtIdx: index("feedback_reports_computer_created_at_idx").on(table.computerId, table.createdAt),
-  statusCreatedAtIdx: index("feedback_reports_status_created_at_idx").on(table.status, table.createdAt),
+  computerHarnessNativeUnique: uniqueIndex("agent_session_threads_computer_harness_native_unique")
+    .on(table.computerId, table.harness, table.nativeThreadId),
+  userUpdatedAtIdx: index("agent_session_threads_user_updated_at_idx").on(table.userId, table.sourceUpdatedAt),
+  computerUpdatedAtIdx: index("agent_session_threads_computer_updated_at_idx")
+    .on(table.computerId, table.sourceUpdatedAt),
+}));
+
+export const agentSessionVersions = pgTable("agent_session_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agentSessionThreadId: uuid("agent_session_thread_id").notNull().references(() => agentSessionThreads.id, {
+    onDelete: "cascade",
+  }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  computerId: uuid("computer_id").notNull().references(() => computers.id, { onDelete: "cascade" }),
+  machineIdentityId: uuid("machine_identity_id").notNull().references(() => machineIdentities.id, {
+    onDelete: "cascade",
+  }),
+  harness: text("harness").notNull(),
+  nativeThreadId: text("native_thread_id").notNull(),
+  threadId: text("thread_id").notNull(),
+  sha256: text("sha256").notNull(),
+  objectBucket: text("object_bucket").notNull(),
+  objectKey: text("object_key").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sourceMtime: timestamp("source_mtime", { withTimezone: true }).notNull(),
+  sourcePath: text("source_path"),
+  relativePath: text("relative_path").notNull(),
+  sourceCreatedAt: timestamp("source_created_at", { withTimezone: true }),
+  sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
+  metadata: jsonb("metadata").notNull().default({}),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  computerHarnessNativeShaUnique: uniqueIndex("agent_session_versions_computer_harness_native_sha_unique")
+    .on(table.computerId, table.harness, table.nativeThreadId, table.sha256),
+  threadUploadedAtIdx: index("agent_session_versions_thread_uploaded_at_idx")
+    .on(table.agentSessionThreadId, table.uploadedAt),
 }));
 
 export type UserRow = typeof users.$inferSelect;
@@ -178,4 +212,5 @@ export type ComputerAccessSessionRow = typeof computerAccessSessions.$inferSelec
 export type ReleaseManifestRow = typeof releaseManifests.$inferSelect;
 export type AiUsageRequestRow = typeof aiUsageRequests.$inferSelect;
 export type AiUsagePayloadRow = typeof aiUsagePayloads.$inferSelect;
-export type FeedbackReportRow = typeof feedbackReports.$inferSelect;
+export type AgentSessionThreadRow = typeof agentSessionThreads.$inferSelect;
+export type AgentSessionVersionRow = typeof agentSessionVersions.$inferSelect;

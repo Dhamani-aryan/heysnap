@@ -21,8 +21,10 @@ import {
 } from 'react'
 
 import {
+  resolveMarkdownChromeLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
+  type MarkdownChromeLinkMeta,
   type MarkdownFileLinkMeta,
 } from '../../lib/agent/markdown-links.ts'
 
@@ -32,6 +34,7 @@ export type ChatMarkdownProps = {
   readonly workspaceRoot?: string
   readonly isStreaming?: boolean
   readonly onOpenFilePath?: (path: string) => void
+  readonly onOpenChromeTab?: (tabId: number) => void
 }
 
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/gu
@@ -56,6 +59,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   workspaceRoot,
   isStreaming = false,
   onOpenFilePath,
+  onOpenChromeTab,
 }: ChatMarkdownProps) {
   const fileLinkMetaByHref = useMemo(() => {
     const result = new Map<string, MarkdownFileLinkMeta>()
@@ -79,6 +83,22 @@ export const ChatMarkdown = memo(function ChatMarkdown({
       a({ node, href, children, ...props }: ComponentProps<'a'> & { readonly node?: unknown }) {
         void node
         const normalizedHref = href ? rewriteMarkdownFileUriHref(href) ?? href : ''
+        const chromeMeta = normalizedHref.length > 0
+          ? resolveMarkdownChromeLinkMeta(normalizedHref)
+          : null
+        if (chromeMeta !== null) {
+          return (
+            <MarkdownChromeLink
+              href={href ?? `/chrome/${String(chromeMeta.tabId)}`}
+              meta={chromeMeta}
+              onOpenChromeTab={onOpenChromeTab}
+              {...props}
+            >
+              {children}
+            </MarkdownChromeLink>
+          )
+        }
+
         const meta = normalizedHref.length > 0
           ? fileLinkMetaByHref.get(normalizedHref) ?? resolveMarkdownFileLinkMeta(normalizedHref, cwd, workspaceRoot)
           : null
@@ -102,7 +122,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
         )
       },
     }),
-    [cwd, fileLinkMetaByHref, onOpenFilePath, workspaceRoot],
+    [cwd, fileLinkMetaByHref, onOpenChromeTab, onOpenFilePath, workspaceRoot],
   )
 
   return (
@@ -126,6 +146,35 @@ export const ChatMarkdown = memo(function ChatMarkdown({
     >
       {text}
     </Streamdown>
+  )
+})
+
+const MarkdownChromeLink = memo(function MarkdownChromeLink({
+  href,
+  meta,
+  onOpenChromeTab,
+  children,
+  className,
+  ...props
+}: {
+  readonly href: string
+  readonly meta: MarkdownChromeLinkMeta
+  readonly onOpenChromeTab?: (tabId: number) => void
+  readonly children: ReactNode
+} & Omit<ComponentProps<'a'>, 'children' | 'href' | 'onClick'>) {
+  return (
+    <a
+      href={href}
+      className={className === undefined ? undefined : className}
+      {...props}
+      title={`Chrome tab ${String(meta.tabId)}`}
+      onClick={(event) => {
+        event.preventDefault()
+        onOpenChromeTab?.(meta.tabId)
+      }}
+    >
+      {children}
+    </a>
   )
 })
 

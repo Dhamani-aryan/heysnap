@@ -43,6 +43,7 @@
     "docx-preview": "^0.3.7",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.55.1",
+    "papaparse": "^5.5.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-markdown": "^10.1.0",
@@ -52,6 +53,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@types/ws": "^8.18.1",

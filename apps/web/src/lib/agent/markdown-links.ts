@@ -9,6 +9,11 @@ export type MarkdownFileLinkMeta = {
   readonly column?: number
 }
 
+export type MarkdownChromeLinkMeta = {
+  readonly href: string
+  readonly tabId: number
+}
+
 const ABSOLUTE_PATH_PATTERN = /^\/[^#:]*/u
 const FILE_URI_PREFIX = 'file://'
 
@@ -32,11 +37,15 @@ export function resolveMarkdownFileLinkMeta(
   cwd: string | undefined,
   workspaceRoot: string | undefined,
 ): MarkdownFileLinkMeta | null {
-  if (href === undefined || href.length === 0 || isExternalHref(href)) {
+  if (href === undefined || href.length === 0) {
     return null
   }
 
   const rewritten = toWorkspaceHref(href)
+  if (rewritten === null) {
+    return null
+  }
+
   const parsed = splitLineColumn(rewritten)
   const targetPath = toClientPath(parsed.path, cwd, workspaceRoot)
 
@@ -58,31 +67,26 @@ export function resolveMarkdownFileLinkMeta(
   }
 }
 
-function isExternalHref(href: string): boolean {
-  return (
-    /^[a-z][a-z0-9+.-]*:/iu.test(href) &&
-    !href.startsWith(FILE_URI_PREFIX) &&
-    toWorkspaceUrlPath(href) === null
-  )
-}
-
-function toWorkspaceHref(href: string): string {
-  return rewriteMarkdownFileUriHref(href) ?? toWorkspaceUrlPath(href) ?? decodePath(href)
-}
-
-function toWorkspaceUrlPath(href: string): string | null {
-  try {
-    const url = new URL(href)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return null
-    }
-
-    return url.pathname === '/workspace' || url.pathname.startsWith('/workspace/')
-      ? `${decodePath(url.pathname)}${url.hash}`
-      : null
-  } catch {
+export function resolveMarkdownChromeLinkMeta(
+  href: string | undefined,
+): MarkdownChromeLinkMeta | null {
+  if (href === undefined || href.length === 0) {
     return null
   }
+
+  const path = stripSearchAndHash(decodePath(href))
+  const match = path.match(/^\/chrome\/(\d+)\/?$/u)
+  if (match === null) {
+    return null
+  }
+
+  const tabId = Number.parseInt(match[1] ?? '', 10)
+  return Number.isSafeInteger(tabId) ? { href, tabId } : null
+}
+
+function toWorkspaceHref(href: string): string | null {
+  const path = rewriteMarkdownFileUriHref(href) ?? stripSearch(decodePath(href))
+  return path === '/workspace' || path.startsWith('/workspace/') ? path : null
 }
 
 function decodePath(value: string): string {
@@ -91,6 +95,14 @@ function decodePath(value: string): string {
   } catch {
     return value
   }
+}
+
+function stripSearchAndHash(value: string): string {
+  return value.split(/[?#]/u, 1)[0] ?? value
+}
+
+function stripSearch(value: string): string {
+  return value.split('?', 1)[0] ?? value
 }
 
 function splitLineColumn(value: string): {

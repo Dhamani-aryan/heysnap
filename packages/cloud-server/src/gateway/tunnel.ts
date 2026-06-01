@@ -1165,10 +1165,6 @@ const inferHttpTrafficClass = (path: string): TunnelTrafficClass => {
     return "preview:http";
   }
 
-  if (path.startsWith("/feedback")) {
-    return "feedback:http";
-  }
-
   return "generic:http";
 };
 

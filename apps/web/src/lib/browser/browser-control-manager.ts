@@ -50,7 +50,7 @@ type PendingOutputWrite = {
 }
 
 export class BrowserControlManager {
-  private readonly url: string
+  private url: string
   private readonly bridge: BrowserExtensionBridge
   private readonly callbacks: Callbacks
   private readonly clientId: string
@@ -103,6 +103,10 @@ export class BrowserControlManager {
 
   getStatus(): BrowserControlConnectionStatus {
     return this.status
+  }
+
+  setUrl(url: string): void {
+    this.url = url
   }
 
   private openSocket(): void {

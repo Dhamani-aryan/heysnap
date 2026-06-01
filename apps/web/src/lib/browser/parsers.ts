@@ -14,6 +14,12 @@ function isBrowserWindowTab(value: unknown): value is BrowserWindowTab {
   return typeof record.id === 'number' && typeof record.index === 'number'
 }
 
+export function parseBrowserWindowTab(
+  value: unknown,
+): BrowserWindowTab | null {
+  return isBrowserWindowTab(value) ? value : null
+}
+
 export function parseBrowserWindowTabs(value: unknown): BrowserWindowTab[] {
   if (!Array.isArray(value)) return []
   return value

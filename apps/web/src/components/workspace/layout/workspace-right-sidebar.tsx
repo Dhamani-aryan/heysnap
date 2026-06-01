@@ -1,6 +1,7 @@
 import { useCallback, type PointerEvent as ReactPointerEvent } from 'react'
 import { useWorkspaceLayout } from './use-workspace-layout.ts'
 import { AgentPanel } from '../../agent/agent-panel.tsx'
+import { useWorkspaceMarkdownLinkActions } from '../../../hooks/workspace/use-workspace-markdown-link-actions.ts'
 
 type Props = {
   insetPx: number
@@ -15,6 +16,7 @@ export function WorkspaceRightSidebar({
 }: Props) {
   const { isRightSidebarOpen, rightSidebarWidth, setRightSidebarWidth } =
     useWorkspaceLayout()
+  const { openWorkspacePath, openChromeTab } = useWorkspaceMarkdownLinkActions()
 
   const handleResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -75,7 +77,11 @@ export function WorkspaceRightSidebar({
         </div>
       ) : null}
       <div className="pointer-events-auto flex flex-1 flex-col overflow-hidden">
-        <AgentPanel showPrompt={isRightSidebarOpen} />
+        <AgentPanel
+          showPrompt={isRightSidebarOpen}
+          onOpenWorkspacePath={openWorkspacePath}
+          onOpenChromeTab={openChromeTab}
+        />
       </div>
     </aside>
   )

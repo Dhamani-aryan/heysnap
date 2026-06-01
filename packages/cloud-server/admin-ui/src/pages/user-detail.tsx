@@ -1,4 +1,4 @@
-import { ArrowLeft, KeyRound, RefreshCw, ShieldOff, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, KeyRound, RefreshCw, ShieldOff, Sparkles, Trash2 } from "lucide-react";
 import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -36,17 +36,23 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAdminQuery } from "@/hooks/use-admin-query";
 import { adminApi } from "@/lib/api";
+import type { AdminAgentSession } from "@/lib/types";
 
 export const UserDetailPage = () => {
   const params = useParams<{ readonly userId: string }>();
   const navigate = useNavigate();
   const userId = params.userId ?? "";
   const detail = useAdminQuery(() => adminApi.getUserDetail(userId), [userId]);
+  const agentSessions = useAdminQuery(
+    () => adminApi.listAgentSessions({ userId, limit: 200 }).then((data) => data.sessions),
+    [userId],
+  );
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [resetOpen, setResetOpen] = React.useState(false);
   const [revokeBusy, setRevokeBusy] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [modelAccessBusy, setModelAccessBusy] = React.useState(false);
+  const [downloadBusyId, setDownloadBusyId] = React.useState<string | null>(null);
   const user = detail.data?.user;
 
   const handleDeleteConfirm = async () => {
@@ -92,6 +98,23 @@ export const UserDetailPage = () => {
     }
   };
 
+  const handleRefresh = () => {
+    detail.reload();
+    agentSessions.reload();
+  };
+
+  const handleDownloadAgentSession = async (session: AdminAgentSession) => {
+    setDownloadBusyId(session.id);
+    try {
+      const { blob, filename } = await adminApi.downloadAgentSessionRaw(session.id);
+      downloadBlob(blob, filename ?? `${session.harness}-${safeFilenameSegment(session.nativeThreadId)}.jsonl`);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Download failed");
+    } finally {
+      setDownloadBusyId(null);
+    }
+  };
+
   if (detail.error !== null) {
     return (
       <>
@@ -111,10 +134,11 @@ export const UserDetailPage = () => {
   }
 
   const computers = detail.data?.computers ?? [];
-  const sessions = detail.data?.sessions ?? [];
-  const activeSessions = sessions.filter(
+  const authSessions = detail.data?.sessions ?? [];
+  const activeAuthSessions = authSessions.filter(
     (session) => session.revokedAt === null && new Date(session.expiresAt).getTime() > Date.now(),
   );
+  const syncedSessions = agentSessions.data ?? [];
 
   return (
     <>
@@ -142,7 +166,13 @@ export const UserDetailPage = () => {
                 <ArrowLeft className="h-3.5 w-3.5" /> Back
               </Link>
             </Button>
-            <Button variant="outline" size="sm" onClick={detail.reload} disabled={detail.loading} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={detail.loading || agentSessions.loading}
+              className="gap-2"
+            >
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={() => setResetOpen(true)} className="gap-2">
@@ -176,10 +206,10 @@ export const UserDetailPage = () => {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Active sessions</CardDescription>
+            <CardDescription>Synced sessions</CardDescription>
           </CardHeader>
           <CardContent>
-            <span className="text-2xl font-semibold">{activeSessions.length}</span>
+            <span className="text-2xl font-semibold">{syncedSessions.length}</span>
           </CardContent>
         </Card>
         <Card>
@@ -217,6 +247,7 @@ export const UserDetailPage = () => {
           <TabsTrigger value="computers">Machines</TabsTrigger>
           <TabsTrigger value="ai-usage">AI usage</TabsTrigger>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="auth-sessions">Auth sessions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="computers">
@@ -290,18 +321,106 @@ export const UserDetailPage = () => {
 
         <TabsContent value="sessions">
           <Card>
+            <CardHeader>
+              <CardTitle>Sessions</CardTitle>
+              <CardDescription>Raw Pi and Codex JSONL sessions synced from this user&apos;s machines.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {agentSessions.error !== null ? (
+                <div className="p-4">
+                  <ErrorState message={agentSessions.error} onRetry={agentSessions.reload} />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Session</TableHead>
+                      <TableHead>Harness</TableHead>
+                      <TableHead>Machine</TableHead>
+                      <TableHead className="w-32">Size</TableHead>
+                      <TableHead className="w-36">Synced</TableHead>
+                      <TableHead className="w-28 text-right">Download</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {agentSessions.loading ? (
+                      <TableRow>
+                        <TableCell colSpan={6}>
+                          <Skeleton className="h-5" />
+                        </TableCell>
+                      </TableRow>
+                    ) : syncedSessions.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                          No synced sessions yet
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      syncedSessions.map((session) => (
+                        <TableRow key={session.id}>
+                          <TableCell>
+                            <div className="font-mono text-xs">{session.threadId}</div>
+                            <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                              {session.nativeThreadId}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={session.harness === "pi" ? "secondary" : "outline"} className="font-medium">
+                              {session.harness}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {session.computerName !== null ? (
+                              <Link to={`/computers/${session.computerId}`} className="font-medium hover:underline">
+                                {session.computerName}
+                              </Link>
+                            ) : (
+                              <span className="text-muted-foreground">Unknown</span>
+                            )}
+                            <div className="font-mono text-xs text-muted-foreground">{session.computerId}</div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {formatBytes(session.latestSizeBytes)}
+                          </TableCell>
+                          <TableCell>
+                            <RelativeTime value={session.lastSyncedAt} />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleDownloadAgentSession(session)}
+                              disabled={downloadBusyId === session.id || session.latestObjectKey === null}
+                              className="gap-2"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              {downloadBusyId === session.id ? "..." : "JSONL"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="auth-sessions">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <div>
-                <CardTitle>Sessions</CardTitle>
+                <CardTitle>Auth sessions</CardTitle>
                 <CardDescription>
-                  {activeSessions.length} active · {sessions.length - activeSessions.length} revoked or expired
+                  {activeAuthSessions.length} active · {authSessions.length - activeAuthSessions.length} revoked or expired
                 </CardDescription>
               </div>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleRevokeAll}
-                disabled={revokeBusy || activeSessions.length === 0}
+                disabled={revokeBusy || activeAuthSessions.length === 0}
                 className="gap-2"
               >
                 <ShieldOff className="h-3.5 w-3.5" />
@@ -326,14 +445,14 @@ export const UserDetailPage = () => {
                         <Skeleton className="h-5" />
                       </TableCell>
                     </TableRow>
-                  ) : sessions.length === 0 ? (
+                  ) : authSessions.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                        No sessions yet
+                        No auth sessions yet
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sessions.map((session) => {
+                    authSessions.map((session) => {
                       const expired = new Date(session.expiresAt).getTime() <= Date.now();
                       const status =
                         session.revokedAt !== null
@@ -475,3 +594,38 @@ const ResetPasswordPopover = ({
     </Dialog>
   );
 };
+
+const formatBytes = (value: number | null): string => {
+  if (value === null) {
+    return "—";
+  }
+
+  if (value < 1024) {
+    return `${value.toLocaleString()} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let amount = value / 1024;
+  let unitIndex = 0;
+
+  while (amount >= 1024 && unitIndex < units.length - 1) {
+    amount /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+};
+
+const downloadBlob = (blob: Blob, filename: string): void => {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+};
+
+const safeFilenameSegment = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9._-]+/gu, "_").slice(0, 120) || "thread";

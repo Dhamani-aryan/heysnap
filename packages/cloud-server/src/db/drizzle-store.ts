@@ -2,11 +2,12 @@ import { and, desc, eq, gte, isNull, lt, lte, type SQL } from "drizzle-orm";
 
 import type { DbClient } from "./client.js";
 import {
+  agentSessionThreads,
+  agentSessionVersions,
   aiUsagePayloads,
   aiUsageRequests,
   computerAccessSessions,
   computers,
-  feedbackReports,
   machineIdentities,
   releaseManifests,
   sessions,
@@ -21,11 +22,12 @@ import type {
   AiUsageRequestRecord,
   AiUsageStatus,
   AiUsageSummary,
+  AgentSessionHarness,
+  AgentSessionThreadRecord,
+  AgentSessionVersionRecord,
   CloudStore,
   ComputerAccessSessionRecord,
   ComputerRecord,
-  FeedbackReportRecord,
-  FeedbackReportStatus,
   MachineIdentityRecord,
   ReleaseManifestRecord,
   ReleaseTarget,
@@ -455,92 +457,6 @@ export class DrizzleCloudStore implements CloudStore {
     return deleted.length > 0;
   }
 
-  async createFeedbackReport(input: {
-    readonly userId: string;
-    readonly computerId: string;
-    readonly accessSessionId?: string | null;
-    readonly comment: string;
-    readonly threadId?: string | null;
-    readonly cwd?: string | null;
-    readonly clientContext?: unknown;
-  }): Promise<FeedbackReportRecord> {
-    const [report] = await this.db.insert(feedbackReports).values({
-      userId: input.userId,
-      computerId: input.computerId,
-      accessSessionId: input.accessSessionId ?? null,
-      comment: input.comment,
-      threadId: input.threadId ?? null,
-      cwd: input.cwd ?? null,
-      clientContext: input.clientContext ?? {},
-    }).returning();
-    return report;
-  }
-
-  async getFeedbackReportById(id: string): Promise<FeedbackReportRecord | null> {
-    const [report] = await this.db.select().from(feedbackReports).where(eq(feedbackReports.id, id)).limit(1);
-    return report ?? null;
-  }
-
-  async markFeedbackReportCommentOnly(input: {
-    readonly feedbackId: string;
-    readonly errorMessage?: string | null;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const [report] = await this.db
-      .update(feedbackReports)
-      .set({
-        status: "comment_only",
-        errorMessage: input.errorMessage ?? null,
-        ...(input.machineContext !== undefined ? { machineContext: input.machineContext } : {}),
-        completedAt: new Date(),
-      })
-      .where(eq(feedbackReports.id, input.feedbackId))
-      .returning();
-    return report ?? null;
-  }
-
-  async completeFeedbackReportArchive(input: {
-    readonly feedbackId: string;
-    readonly machineIdentityId: string;
-    readonly archiveStorageKey: string;
-    readonly archiveSha256: string;
-    readonly archiveBytes: number;
-    readonly fileCount: number;
-    readonly machineContext?: unknown;
-  }): Promise<FeedbackReportRecord | null> {
-    const [report] = await this.db
-      .update(feedbackReports)
-      .set({
-        status: "complete",
-        machineIdentityId: input.machineIdentityId,
-        archiveStorageKey: input.archiveStorageKey,
-        archiveSha256: input.archiveSha256,
-        archiveBytes: input.archiveBytes,
-        fileCount: input.fileCount,
-        errorMessage: null,
-        machineContext: input.machineContext ?? {},
-        completedAt: new Date(),
-      })
-      .where(eq(feedbackReports.id, input.feedbackId))
-      .returning();
-    return report ?? null;
-  }
-
-  async listFeedbackReports(input: {
-    readonly userId?: string;
-    readonly computerId?: string;
-    readonly status?: FeedbackReportStatus;
-    readonly before?: Date;
-    readonly limit?: number;
-  } = {}): Promise<FeedbackReportRecord[]> {
-    const query = this.db
-      .select()
-      .from(feedbackReports)
-      .where(buildFeedbackReportWhere(input))
-      .orderBy(desc(feedbackReports.createdAt));
-    return input.limit !== undefined ? query.limit(input.limit) : query;
-  }
-
   async createAiUsageRequest(input: {
     readonly userId: string;
     readonly computerId: string;
@@ -706,30 +622,210 @@ export class DrizzleCloudStore implements CloudStore {
       .where(buildAiUsageWhere(input));
     return groupAiUsageRows(rows, input.groupBy, input.limit);
   }
+
+  async getAgentSessionVersionByContent(input: {
+    readonly computerId: string;
+    readonly harness: AgentSessionHarness;
+    readonly nativeThreadId: string;
+    readonly sha256: string;
+  }): Promise<AgentSessionVersionRecord | null> {
+    const [version] = await this.db
+      .select()
+      .from(agentSessionVersions)
+      .where(and(
+        eq(agentSessionVersions.computerId, input.computerId),
+        eq(agentSessionVersions.harness, input.harness),
+        eq(agentSessionVersions.nativeThreadId, input.nativeThreadId),
+        eq(agentSessionVersions.sha256, input.sha256),
+      ))
+      .limit(1);
+    return version ?? null;
+  }
+
+  async upsertAgentSessionUpload(input: {
+    readonly userId: string;
+    readonly computerId: string;
+    readonly machineIdentityId: string;
+    readonly harness: AgentSessionHarness;
+    readonly nativeThreadId: string;
+    readonly threadId: string;
+    readonly sha256: string;
+    readonly objectBucket: string;
+    readonly objectKey: string;
+    readonly sizeBytes: number;
+    readonly sourceMtime: Date;
+    readonly sourcePath?: string | null;
+    readonly relativePath: string;
+    readonly sourceCreatedAt?: Date | null;
+    readonly sourceUpdatedAt?: Date | null;
+    readonly metadata?: unknown;
+  }): Promise<{
+    readonly thread: AgentSessionThreadRecord;
+    readonly version: AgentSessionVersionRecord;
+    readonly created: boolean;
+  }> {
+    const now = new Date();
+    const sourceUpdatedAt = input.sourceUpdatedAt ?? input.sourceMtime;
+    const sourcePath = input.sourcePath ?? null;
+    const sourceCreatedAt = input.sourceCreatedAt ?? null;
+    const metadata = input.metadata ?? {};
+
+    const [thread] = await this.db
+      .insert(agentSessionThreads)
+      .values({
+        userId: input.userId,
+        computerId: input.computerId,
+        machineIdentityId: input.machineIdentityId,
+        harness: input.harness,
+        nativeThreadId: input.nativeThreadId,
+        threadId: input.threadId,
+        sourcePath,
+        relativePath: input.relativePath,
+        sourceCreatedAt,
+        sourceUpdatedAt,
+        metadata,
+        lastSyncedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [agentSessionThreads.computerId, agentSessionThreads.harness, agentSessionThreads.nativeThreadId],
+        set: {
+          userId: input.userId,
+          machineIdentityId: input.machineIdentityId,
+          threadId: input.threadId,
+          sourcePath,
+          relativePath: input.relativePath,
+          sourceCreatedAt,
+          sourceUpdatedAt,
+          metadata,
+          lastSyncedAt: now,
+          updatedAt: now,
+        },
+      })
+      .returning();
+
+    const existingVersion = await this.getAgentSessionVersionByContent({
+      computerId: input.computerId,
+      harness: input.harness,
+      nativeThreadId: input.nativeThreadId,
+      sha256: input.sha256,
+    });
+
+    let version = existingVersion;
+    let created = false;
+
+    if (version === null) {
+      const [insertedVersion] = await this.db
+        .insert(agentSessionVersions)
+        .values({
+          agentSessionThreadId: thread.id,
+          userId: input.userId,
+          computerId: input.computerId,
+          machineIdentityId: input.machineIdentityId,
+          harness: input.harness,
+          nativeThreadId: input.nativeThreadId,
+          threadId: input.threadId,
+          sha256: input.sha256,
+          objectBucket: input.objectBucket,
+          objectKey: input.objectKey,
+          sizeBytes: input.sizeBytes,
+          sourceMtime: input.sourceMtime,
+          sourcePath,
+          relativePath: input.relativePath,
+          sourceCreatedAt,
+          sourceUpdatedAt,
+          metadata,
+          uploadedAt: now,
+        })
+        .onConflictDoNothing()
+        .returning();
+
+      version = insertedVersion ?? await this.getAgentSessionVersionByContent({
+        computerId: input.computerId,
+        harness: input.harness,
+        nativeThreadId: input.nativeThreadId,
+        sha256: input.sha256,
+      });
+      created = insertedVersion !== undefined;
+    }
+
+    if (version === null) {
+      throw new Error("Failed to create or retrieve agent session version");
+    }
+
+    const shouldUpdateLatest = thread.latestMtime === null ||
+      input.sourceMtime.getTime() >= thread.latestMtime.getTime();
+    const [updatedThread] = shouldUpdateLatest
+      ? await this.db
+        .update(agentSessionThreads)
+        .set({
+          latestVersionId: version.id,
+          latestSha256: version.sha256,
+          latestObjectKey: version.objectKey,
+          latestSizeBytes: version.sizeBytes,
+          latestMtime: version.sourceMtime,
+          sourcePath,
+          relativePath: input.relativePath,
+          sourceCreatedAt,
+          sourceUpdatedAt,
+          lastSyncedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(agentSessionThreads.id, thread.id))
+        .returning()
+      : [thread];
+
+    return { thread: updatedThread ?? thread, version, created };
+  }
+
+  async listAgentSessionThreads(input: {
+    readonly userId?: string;
+    readonly computerId?: string;
+    readonly harness?: AgentSessionHarness;
+    readonly limit?: number;
+  } = {}): Promise<AgentSessionThreadRecord[]> {
+    const query = this.db
+      .select()
+      .from(agentSessionThreads)
+      .where(buildAgentSessionThreadWhere(input))
+      .orderBy(desc(agentSessionThreads.lastSyncedAt));
+    return input.limit !== undefined ? query.limit(input.limit) : query;
+  }
+
+  async getAgentSessionThreadById(id: string): Promise<AgentSessionThreadRecord | null> {
+    const [thread] = await this.db
+      .select()
+      .from(agentSessionThreads)
+      .where(eq(agentSessionThreads.id, id))
+      .limit(1);
+    return thread ?? null;
+  }
+
+  async listAgentSessionVersions(agentSessionThreadId: string): Promise<AgentSessionVersionRecord[]> {
+    return this.db
+      .select()
+      .from(agentSessionVersions)
+      .where(eq(agentSessionVersions.agentSessionThreadId, agentSessionThreadId))
+      .orderBy(desc(agentSessionVersions.uploadedAt));
+  }
 }
 
-const buildFeedbackReportWhere = (input: {
+const buildAgentSessionThreadWhere = (input: {
   readonly userId?: string;
   readonly computerId?: string;
-  readonly status?: FeedbackReportStatus;
-  readonly before?: Date;
+  readonly harness?: AgentSessionHarness;
 }): SQL | undefined => {
   const conditions: SQL[] = [];
 
   if (input.userId !== undefined) {
-    conditions.push(eq(feedbackReports.userId, input.userId));
+    conditions.push(eq(agentSessionThreads.userId, input.userId));
   }
 
   if (input.computerId !== undefined) {
-    conditions.push(eq(feedbackReports.computerId, input.computerId));
+    conditions.push(eq(agentSessionThreads.computerId, input.computerId));
   }
 
-  if (input.status !== undefined) {
-    conditions.push(eq(feedbackReports.status, input.status));
-  }
-
-  if (input.before !== undefined) {
-    conditions.push(lt(feedbackReports.createdAt, input.before));
+  if (input.harness !== undefined) {
+    conditions.push(eq(agentSessionThreads.harness, input.harness));
   }
 
   return conditions.length === 0 ? undefined : and(...conditions);

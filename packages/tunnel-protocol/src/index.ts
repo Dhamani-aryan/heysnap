@@ -33,7 +33,6 @@ export type TunnelTrafficClass =
   | "capabilities:http"
   | "filesystem:download"
   | "filesystem:upload"
-  | "feedback:http"
   | "generic:http";
 
 export interface TunnelRouteMetadata {
@@ -155,13 +154,6 @@ export const TUNNEL_QUEUE_PROFILES: Record<TunnelTrafficClass, TunnelQueueProfil
     weight: 1,
     maxQueuedBytes: 32 * MIB,
     bulk: true,
-  },
-  "feedback:http": {
-    trafficClass: "feedback:http",
-    priority: 50,
-    weight: 2,
-    maxQueuedBytes: 16 * MIB,
-    bulk: false,
   },
   "generic:http": {
     trafficClass: "generic:http",

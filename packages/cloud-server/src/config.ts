@@ -27,10 +27,11 @@ export interface CloudServerConfig {
   readonly firecrawlBaseUrl?: string;
   readonly firecrawlApiKey?: string;
   readonly sarvamApiKey?: string;
-  readonly feedbackArchiveS3Bucket?: string;
-  readonly feedbackArchiveS3Prefix?: string;
-  readonly feedbackArchiveLocalDir?: string;
-  readonly feedbackArchiveMaxBytes?: number;
+  readonly agentSessionStorageBucket?: string;
+  readonly agentSessionStoragePrefix?: string;
+  readonly agentSessionStorageKmsKeyId?: string;
+  readonly agentSessionStorageDirectory?: string;
+  readonly agentSessionMaxFileBytes?: number;
   readonly allowedOrigins: readonly string[];
   readonly adminToken: string;
 }
@@ -69,10 +70,11 @@ export const getCloudServerConfig = (
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
   firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
   sarvamApiKey: readOptionalEnv(env, "SARVAM_API_KEY"),
-  feedbackArchiveS3Bucket: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_BUCKET"),
-  feedbackArchiveS3Prefix: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_PREFIX"),
-  feedbackArchiveLocalDir: readOptionalEnv(env, "FEEDBACK_ARCHIVE_LOCAL_DIR") ?? ".local/feedback-archives",
-  feedbackArchiveMaxBytes: parsePositiveInteger(env.FEEDBACK_ARCHIVE_MAX_BYTES, 100 * 1024 * 1024),
+  agentSessionStorageBucket: readOptionalEnv(env, "AGENT_SESSION_STORAGE_BUCKET"),
+  agentSessionStoragePrefix: readStoragePrefix(env.AGENT_SESSION_STORAGE_PREFIX),
+  agentSessionStorageKmsKeyId: readOptionalEnv(env, "AGENT_SESSION_STORAGE_KMS_KEY_ID"),
+  agentSessionStorageDirectory: readOptionalEnv(env, "AGENT_SESSION_STORAGE_DIR"),
+  agentSessionMaxFileBytes: parsePositiveInteger(env.AGENT_SESSION_MAX_FILE_BYTES, 536_870_912),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS),
   adminToken: readRequiredEnv(env, "CLOUD_SERVER_ADMIN_TOKEN"),
 });
@@ -108,10 +110,11 @@ export const getDevelopmentCloudServerConfig = (
   firecrawlBaseUrl: readOptionalEnv(env, "FIRECRAWL_BASE_URL"),
   firecrawlApiKey: readOptionalEnv(env, "FIRECRAWL_API_KEY"),
   sarvamApiKey: readOptionalEnv(env, "SARVAM_API_KEY"),
-  feedbackArchiveS3Bucket: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_BUCKET"),
-  feedbackArchiveS3Prefix: readOptionalEnv(env, "FEEDBACK_ARCHIVE_S3_PREFIX"),
-  feedbackArchiveLocalDir: readOptionalEnv(env, "FEEDBACK_ARCHIVE_LOCAL_DIR") ?? ".local/feedback-archives",
-  feedbackArchiveMaxBytes: parsePositiveInteger(env.FEEDBACK_ARCHIVE_MAX_BYTES, 100 * 1024 * 1024),
+  agentSessionStorageBucket: readOptionalEnv(env, "AGENT_SESSION_STORAGE_BUCKET"),
+  agentSessionStoragePrefix: readStoragePrefix(env.AGENT_SESSION_STORAGE_PREFIX),
+  agentSessionStorageKmsKeyId: readOptionalEnv(env, "AGENT_SESSION_STORAGE_KMS_KEY_ID"),
+  agentSessionStorageDirectory: readOptionalEnv(env, "AGENT_SESSION_STORAGE_DIR"),
+  agentSessionMaxFileBytes: parsePositiveInteger(env.AGENT_SESSION_MAX_FILE_BYTES, 536_870_912),
   allowedOrigins: parseCsvEnv(env.CLOUD_SERVER_ALLOWED_ORIGINS, [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -198,4 +201,9 @@ const parseCsvEnv = (rawValue: string | undefined, defaultValue: readonly string
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
+};
+
+const readStoragePrefix = (rawValue: string | undefined): string => {
+  const normalized = rawValue?.trim().replace(/^\/+|\/+$/g, "") ?? "agent-sessions";
+  return normalized.length === 0 ? "" : `${normalized}/`;
 };

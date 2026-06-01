@@ -41,6 +41,7 @@ export type AgentTimelineProps = {
   readonly currentPath: string
   readonly workspaceRoot?: string
   readonly onOpenFilePath?: (path: string) => void
+  readonly onOpenChromeTab?: (tabId: number) => void
   readonly onSubmitUserMessageEdit?: (input: {
     readonly messageId: string
     readonly content: AgentContent
@@ -51,6 +52,7 @@ export const AgentTimeline = memo(function AgentTimeline({
   currentPath,
   workspaceRoot,
   onOpenFilePath,
+  onOpenChromeTab,
   onSubmitUserMessageEdit,
 }: AgentTimelineProps) {
   const listRef = useRef<LegendListRef | null>(null)
@@ -105,6 +107,7 @@ export const AgentTimeline = memo(function AgentTimeline({
           currentPath={currentPath}
           workspaceRoot={workspaceRoot}
           onOpenFilePath={onOpenFilePath}
+          onOpenChromeTab={onOpenChromeTab}
           onSubmitUserMessageEdit={onSubmitUserMessageEdit}
         />
       )}
@@ -117,12 +120,14 @@ const TimelineRowContent = memo(function TimelineRowContent({
   currentPath,
   workspaceRoot,
   onOpenFilePath,
+  onOpenChromeTab,
   onSubmitUserMessageEdit,
 }: {
   readonly row: AgentTimelineRow
   readonly currentPath: string
   readonly workspaceRoot?: string
   readonly onOpenFilePath?: (path: string) => void
+  readonly onOpenChromeTab?: (tabId: number) => void
   readonly onSubmitUserMessageEdit?: (input: {
     readonly messageId: string
     readonly content: AgentContent
@@ -147,6 +152,7 @@ const TimelineRowContent = memo(function TimelineRowContent({
       currentPath={currentPath}
       workspaceRoot={workspaceRoot}
       onOpenFilePath={onOpenFilePath}
+      onOpenChromeTab={onOpenChromeTab}
     />
   )
 })
@@ -434,11 +440,13 @@ const AssistantMessageBlock = memo(function AssistantMessageBlock({
   currentPath,
   workspaceRoot,
   onOpenFilePath,
+  onOpenChromeTab,
 }: {
   readonly messageId: string
   readonly currentPath: string
   readonly workspaceRoot?: string
   readonly onOpenFilePath?: (path: string) => void
+  readonly onOpenChromeTab?: (tabId: number) => void
 }) {
   const markdown = useAgentChatStore((state) => {
     const message = state.messagesById[messageId]
@@ -465,6 +473,7 @@ const AssistantMessageBlock = memo(function AssistantMessageBlock({
               isStreaming={!isTurnCompleted}
               workspaceRoot={workspaceRoot}
               onOpenFilePath={onOpenFilePath}
+              onOpenChromeTab={onOpenChromeTab}
             />
           </Suspense>
         </div>

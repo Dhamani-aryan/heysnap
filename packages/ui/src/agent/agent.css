@@ -951,47 +951,63 @@
 .chat-markdown [data-streamdown="code-block-actions"],
 .chat-markdown [data-streamdown="mermaid-block-actions"] {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 7px;
+  right: 8px;
   z-index: 1;
   display: flex;
-  gap: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.88);
-  padding: 3px;
-  backdrop-filter: blur(8px);
+  height: 28px;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  backdrop-filter: none;
 }
 
 :root.dark .chat-markdown [data-streamdown="code-block-actions"],
 :root.dark .chat-markdown [data-streamdown="mermaid-block-actions"] {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(17, 17, 19, 0.86);
+  background: transparent;
 }
 
 .chat-markdown [data-streamdown="code-block-actions"] button,
 .chat-markdown [data-streamdown="mermaid-block-actions"] button {
   display: inline-flex;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
+  font-size: 0;
+  line-height: 0;
+  opacity: 0.72;
   padding: 0;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
 }
 
 .chat-markdown [data-streamdown="code-block-actions"] button:hover,
 .chat-markdown [data-streamdown="mermaid-block-actions"] button:hover {
   background: rgba(0, 0, 0, 0.07);
+  opacity: 1;
 }
 
 :root.dark .chat-markdown [data-streamdown="code-block-actions"] button:hover,
 :root.dark .chat-markdown [data-streamdown="mermaid-block-actions"] button:hover {
   background: rgba(255, 255, 255, 0.09);
+}
+
+.chat-markdown [data-streamdown="code-block-actions"] button svg,
+.chat-markdown [data-streamdown="mermaid-block-actions"] button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
 }
 
 .chat-markdown [data-streamdown="code-block-body"] {

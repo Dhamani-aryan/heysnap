@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useAgentEditMessage } from '../../hooks/agent/use-agent-edit-message.ts'
+import { useAgentUiContext } from '../../hooks/agent/use-agent-ui-context.ts'
 import { useAgentThread } from '../../hooks/agent/use-agent-thread.ts'
 import { useAgentThreadRoute } from '../../hooks/agent/use-agent-thread-route.ts'
 import { useAgentChatStore } from '../../stores/agent/agent-chat-store.ts'
@@ -9,10 +10,17 @@ import { AgentTimeline } from './agent-timeline.tsx'
 
 type Props = {
   readonly showPrompt?: boolean
+  readonly onOpenWorkspacePath?: (path: string) => void
+  readonly onOpenChromeTab?: (tabId: number) => void
 }
 
-export function AgentPanel({ showPrompt = true }: Props = {}) {
+export function AgentPanel({
+  showPrompt = true,
+  onOpenWorkspacePath,
+  onOpenChromeTab,
+}: Props = {}) {
   const agentBaseUrl = useAgentChatStore((s) => s.agentBaseUrl)
+  const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const hasMessages = useAgentChatStore((s) => s.messageOrder.length > 0)
   const activeRun = useAgentChatStore((s) => s.activeRun)
@@ -20,6 +28,7 @@ export function AgentPanel({ showPrompt = true }: Props = {}) {
   const loadError = useAgentChatStore((s) => s.loadError)
   const currentPath = useFilesystemStore((s) => s.currentPath)
   const { navigateToThread } = useAgentThreadRoute()
+  const uiContext = useAgentUiContext()
 
   const handleThreadResolved = useCallback(
     (threadId: string) => {
@@ -32,12 +41,15 @@ export function AgentPanel({ showPrompt = true }: Props = {}) {
 
   useAgentThread(selectedThreadId, {
     agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     onThreadResolved: handleThreadResolved,
   })
 
   const editMessage = useAgentEditMessage({
     agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     currentPath,
+    uiContext,
     selectedThreadId,
     onThreadResolved: handleThreadResolved,
   })
@@ -67,9 +79,11 @@ export function AgentPanel({ showPrompt = true }: Props = {}) {
         {loadError !== null ? (
           <div className="agent-panel-state error">{loadError}</div>
         ) : null}
-        {loadStatus !== 'loading' && loadError === null ? (
+        {(loadStatus !== 'loading' || hasMessages) && loadError === null ? (
           <AgentTimeline
             currentPath={currentPath}
+            onOpenChromeTab={onOpenChromeTab}
+            onOpenFilePath={onOpenWorkspacePath}
             onSubmitUserMessageEdit={editMessage.submit}
           />
         ) : null}

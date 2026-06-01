@@ -9,6 +9,12 @@ import {
   createBrowserKeyboardEventParams,
   readBrowserViewportSize,
 } from './browser-viewport.ts'
+import {
+  parseBrowserWindowTab,
+  parseBrowserWindowTabs,
+  parseChromeWindow,
+} from './parsers.ts'
+import type { BrowserWindowTab } from './types.ts'
 
 export async function clickBrowserViewport(input: {
   readonly bridge: BrowserExtensionBridge
@@ -176,8 +182,8 @@ export async function createBrowserTab(input: {
   readonly bridge: BrowserExtensionBridge
   readonly windowId: number
   readonly signal: AbortSignal
-}): Promise<void> {
-  await input.bridge.executeCommand(
+}): Promise<BrowserWindowTab | null> {
+  const result = await input.bridge.executeCommand(
     'chrome.call',
     {
       api: 'tabs.create',
@@ -185,30 +191,33 @@ export async function createBrowserTab(input: {
     },
     input.signal,
   )
+  return parseBrowserWindowTab(result)
 }
 
 export async function closeBrowserTab(input: {
   readonly bridge: BrowserExtensionBridge
   readonly tabId: number
   readonly signal: AbortSignal
-}): Promise<void> {
-  await input.bridge.executeCommand(
+}): Promise<BrowserWindowTab[] | null> {
+  const result = await input.bridge.executeCommand(
     'managedWindow.closeTab',
     { tabId: input.tabId },
     input.signal,
   )
+  return parseTabsFromCommandResult(result)
 }
 
 export async function activateBrowserTab(input: {
   readonly bridge: BrowserExtensionBridge
   readonly tabId: number
   readonly signal: AbortSignal
-}): Promise<void> {
-  await input.bridge.executeCommand(
+}): Promise<BrowserWindowTab[] | null> {
+  const result = await input.bridge.executeCommand(
     'managedWindow.activateTab',
     { tabId: input.tabId },
     input.signal,
   )
+  return parseTabsFromCommandResult(result)
 }
 
 export async function readBrowserNavigationState(input: {
@@ -253,4 +262,26 @@ function parseNavigationHistory(
     }
   }
   return { currentIndex: record.currentIndex, entries }
+}
+
+function parseTabsFromCommandResult(value: unknown): BrowserWindowTab[] | null {
+  if (Array.isArray(value)) return parseBrowserWindowTabs(value)
+  if (typeof value !== 'object' || value === null) return null
+
+  try {
+    return parseChromeWindow(value).tabs
+  } catch {
+    // Some managed-window commands return nested records instead of a Chrome
+    // window. Try the common nested tab collections before falling back to the
+    // event stream.
+  }
+
+  const record = value as Record<string, unknown>
+  if (Array.isArray(record.tabs)) return parseBrowserWindowTabs(record.tabs)
+  const windowRecord = record.window
+  if (typeof windowRecord === 'object' && windowRecord !== null) {
+    const tabs = (windowRecord as Record<string, unknown>).tabs
+    if (Array.isArray(tabs)) return parseBrowserWindowTabs(tabs)
+  }
+  return null
 }

@@ -19,6 +19,7 @@ import { WorkspaceLayout } from '../components/workspace/layout/workspace-layout
 import {
   buildGatewayHttpUrl,
   buildGatewayWebsocketUrl,
+  normalizeGatewayConnectionIdentity,
 } from '../lib/gateway-url.ts'
 import { env } from '../lib/env.ts'
 import { useFilesystemConnection } from '../hooks/filesystem/use-filesystem-connection.ts'
@@ -52,6 +53,10 @@ export function MachineWorkspacePage() {
   const stopMutation = useStopComputerMutation()
   const didAutoStartRef = useRef(false)
   const [isShuttingDown, setIsShuttingDown] = useState(false)
+  const [mountedWorkspaceComputerId, setMountedWorkspaceComputerId] = useState<
+    string | null
+  >(null)
+  const hasMountedWorkspace = mountedWorkspaceComputerId === computerId
 
   useEffect(() => {
     if (!computer) return
@@ -84,6 +89,10 @@ export function MachineWorkspacePage() {
   const goBackToMachines = useCallback((): void => {
     void navigate({ to: '/machines' })
   }, [navigate])
+
+  const markWorkspaceMounted = useCallback((): void => {
+    setMountedWorkspaceComputerId(computerId)
+  }, [computerId])
 
   const shutDownMachine = useCallback(async (): Promise<void> => {
     if (stopMutation.isPending || isShuttingDown) return
@@ -121,6 +130,10 @@ export function MachineWorkspacePage() {
     return <MachineStartingLoader label="Connecting" />
   }
 
+  if (computer.tunnelConnected !== true && !hasMountedWorkspace) {
+    return <MachineStartingLoader label="Connecting" />
+  }
+
   return (
     <WorkspaceLayout>
       <WorkspaceContent
@@ -128,6 +141,7 @@ export function MachineWorkspacePage() {
         accessSession={accessQuery.data}
         isShuttingDown={isShuttingDown}
         onBackToMachines={goBackToMachines}
+        onMounted={markWorkspaceMounted}
         onShutDownMachine={shutDownMachine}
       />
     </WorkspaceLayout>
@@ -136,16 +150,20 @@ export function MachineWorkspacePage() {
 
 function WorkspaceContent({
   accessSession,
+  computer,
   isShuttingDown,
   onBackToMachines,
+  onMounted,
   onShutDownMachine,
 }: {
   computer: CloudComputer
   accessSession: AccessSessionResponse
   isShuttingDown: boolean
   onBackToMachines: () => void
+  onMounted: () => void
   onShutDownMachine: () => Promise<void>
 }) {
+  const workspaceIdentity = computer.id
   const wsUrl = buildGatewayWebsocketUrl({
     baseUrl: env.cloudServerUrl,
     path: accessSession.routes.filesystemWebSocketUrl,
@@ -171,10 +189,29 @@ function WorkspaceContent({
     path: accessSession.routes.agentBaseUrl,
     token: accessSession.accessSession.token,
   })
+  const filesystemConnectionIdentity =
+    normalizeGatewayConnectionIdentity(wsUrl)
+  const browserControlConnectionIdentity = controlWebSocketUrl
+    ? normalizeGatewayConnectionIdentity(controlWebSocketUrl)
+    : undefined
+  const agentIdentity = normalizeGatewayConnectionIdentity(agentBaseUrl)
 
-  useFilesystemConnection({ wsUrl, previewBaseUrl })
-  useBrowserConnection({ controlWebSocketUrl })
-  useAgentConnection({ agentBaseUrl })
+  useEffect(() => {
+    onMounted()
+  }, [onMounted])
+
+  useBrowserConnection({
+    controlWebSocketUrl,
+    controlConnectionIdentity: browserControlConnectionIdentity,
+    workspaceIdentity,
+  })
+  useFilesystemConnection({
+    wsUrl,
+    previewBaseUrl,
+    connectionIdentity: filesystemConnectionIdentity,
+    workspaceIdentity,
+  })
+  useAgentConnection({ agentBaseUrl, agentIdentity })
   useAgentThreadRoute()
 
   return (

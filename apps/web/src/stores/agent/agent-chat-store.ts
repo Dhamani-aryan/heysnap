@@ -16,8 +16,11 @@ import type {
   UserMessage,
 } from '../../lib/agent/types.ts'
 
-export function setActiveAgentBaseUrl(url: string | null): void {
-  useAgentChatStore.setState({ agentBaseUrl: url })
+export function setActiveAgentConnection(input: {
+  readonly agentBaseUrl: string | null
+  readonly agentIdentity: string | null
+}): void {
+  useAgentChatStore.setState(input)
 }
 
 export function getActiveAgentBaseUrl(): string | null {
@@ -53,6 +56,7 @@ type AgentChatActions = {
 
 type AgentConnectionState = {
   agentBaseUrl: string | null
+  agentIdentity: string | null
 }
 
 export type AgentChatState = AgentChatData &
@@ -62,6 +66,7 @@ export type AgentChatState = AgentChatData &
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   ...createEmptyAgentChatData(),
   agentBaseUrl: null,
+  agentIdentity: null,
 
   setSelectedThreadId: (threadId) => {
     set({ selectedThreadId: threadId })

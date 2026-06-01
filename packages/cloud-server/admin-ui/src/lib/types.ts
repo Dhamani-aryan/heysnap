@@ -115,33 +115,56 @@ export interface AdminComputerDetail {
   readonly accessSessions: AdminAccessSession[];
 }
 
-export type FeedbackReportStatus = "pending" | "complete" | "comment_only";
+export type AgentSessionHarness = "codex" | "pi";
 
-export interface AdminFeedbackReport {
+export interface AdminAgentSession {
   readonly id: string;
   readonly userId: string;
   readonly username: string | null;
   readonly userEmail: string | null;
   readonly computerId: string;
   readonly computerName: string | null;
-  readonly machineIdentityId: string | null;
-  readonly accessSessionId: string | null;
-  readonly status: FeedbackReportStatus;
-  readonly comment: string;
-  readonly threadId: string | null;
-  readonly cwd: string | null;
-  readonly archive: {
-    readonly available: boolean;
-    readonly storageKey: string | null;
-    readonly sha256: string | null;
-    readonly bytes: number | null;
-    readonly fileCount: number | null;
-  };
-  readonly errorMessage: string | null;
-  readonly clientContext: unknown;
-  readonly machineContext: unknown;
+  readonly machineIdentityId: string;
+  readonly harness: AgentSessionHarness | string;
+  readonly nativeThreadId: string;
+  readonly threadId: string;
+  readonly sourcePath: string | null;
+  readonly relativePath: string;
+  readonly latestVersionId: string | null;
+  readonly latestSha256: string | null;
+  readonly latestObjectKey: string | null;
+  readonly latestSizeBytes: number | null;
+  readonly latestMtime: string | null;
+  readonly sourceCreatedAt: string | null;
+  readonly sourceUpdatedAt: string | null;
+  readonly firstSyncedAt: string;
+  readonly lastSyncedAt: string;
+  readonly metadata: unknown;
   readonly createdAt: string;
-  readonly completedAt: string | null;
+  readonly updatedAt: string;
+}
+
+export interface AdminAgentSessionVersion {
+  readonly id: string;
+  readonly agentSessionThreadId: string;
+  readonly userId: string;
+  readonly computerId: string;
+  readonly machineIdentityId: string;
+  readonly harness: AgentSessionHarness | string;
+  readonly nativeThreadId: string;
+  readonly threadId: string;
+  readonly sha256: string;
+  readonly objectBucket: string;
+  readonly objectKey: string;
+  readonly sizeBytes: number;
+  readonly sourceMtime: string;
+  readonly sourcePath: string | null;
+  readonly relativePath: string;
+  readonly sourceCreatedAt: string | null;
+  readonly sourceUpdatedAt: string | null;
+  readonly metadata: unknown;
+  readonly uploadedAt: string;
+  readonly createdAt: string;
 }
 
 export type AiUsageStatus = "started" | "succeeded" | "failed" | "aborted";

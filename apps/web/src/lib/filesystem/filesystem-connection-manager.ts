@@ -37,7 +37,9 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
 type RequestPayload = DistributiveOmit<FilesystemClientMessage, 'requestId'>
 
 export class FilesystemConnectionManager {
-  private readonly options: FilesystemConnectionManagerOptions
+  private url: string
+  private previewBaseUrl: string | undefined
+  private readonly callbacks: ManagerCallbacks
   private socket: WebSocket | null = null
   private status: FilesystemConnectionStatus = 'idle'
   private shouldReconnect = false
@@ -52,7 +54,9 @@ export class FilesystemConnectionManager {
   private visibilityListener: (() => void) | null = null
 
   constructor(options: FilesystemConnectionManagerOptions) {
-    this.options = options
+    this.url = options.url
+    this.previewBaseUrl = options.previewBaseUrl
+    this.callbacks = options.callbacks
     this.subscribedPath = options.initialPath ?? ''
   }
 
@@ -83,6 +87,17 @@ export class FilesystemConnectionManager {
 
   getStatus(): FilesystemConnectionStatus {
     return this.status
+  }
+
+  setUrls(input: { readonly url: string; readonly previewBaseUrl?: string }): void {
+    const didUrlChange = this.url !== input.url
+    this.url = input.url
+    this.previewBaseUrl = input.previewBaseUrl
+    if (didUrlChange && this.shouldReconnect && this.socket === null) {
+      this.reconnectAttempt = 0
+      this.clearReconnectTimer()
+      this.openSocket()
+    }
   }
 
   async subscribe(path: string): Promise<FilesystemListing> {
@@ -163,7 +178,7 @@ export class FilesystemConnectionManager {
   }
 
   private resolvePreviewBaseUrl(): URL | null {
-    const explicit = this.options.previewBaseUrl?.trim()
+    const explicit = this.previewBaseUrl?.trim()
     if (explicit) {
       try {
         return new URL(explicit, getDocumentBaseHref())
@@ -182,7 +197,7 @@ export class FilesystemConnectionManager {
 
   private isGatewayFilesystemUrl(): boolean {
     try {
-      const url = new URL(this.options.url, getDocumentBaseHref())
+      const url = new URL(this.url, getDocumentBaseHref())
       return /^\/gateway\/computers\/[^/]+\/filesystem\/?$/u.test(url.pathname)
     } catch {
       return false
@@ -190,7 +205,7 @@ export class FilesystemConnectionManager {
   }
 
   private toHttpUrl(): URL {
-    const url = new URL(this.options.url)
+    const url = new URL(this.url)
     if (url.protocol === 'ws:') url.protocol = 'http:'
     else if (url.protocol === 'wss:') url.protocol = 'https:'
     return url
@@ -211,7 +226,7 @@ export class FilesystemConnectionManager {
 
     let socketUrl: URL
     try {
-      socketUrl = new URL(this.options.url)
+      socketUrl = new URL(this.url)
     } catch {
       this.shouldReconnect = false
       this.setStatus('closed')
@@ -265,23 +280,34 @@ export class FilesystemConnectionManager {
   }
 
   private handleServerMessage(message: FilesystemServerMessage): void {
-    this.options.callbacks.onMessage(message)
-
     switch (message.type) {
       case 'snapshot':
+        if (
+          message.requestId === undefined &&
+          message.listing.path !== this.subscribedPath
+        ) {
+          return
+        }
+        if (message.requestId !== undefined) {
+          this.subscribedPath = message.listing.path
+        }
+        this.callbacks.onMessage(message)
         if (message.requestId !== undefined) {
           this.resolvePending(message.requestId, message.listing)
         }
         return
       case 'ack':
+        this.callbacks.onMessage(message)
         this.resolvePending(message.requestId, message.result)
         return
       case 'error':
+        this.callbacks.onMessage(message)
         if (message.requestId !== undefined) {
           this.rejectPending(message.requestId, message.message)
         }
         return
       case 'pong':
+        this.callbacks.onMessage(message)
         if (message.requestId === this.pendingHeartbeatRequestId) {
           this.pendingHeartbeatRequestId = null
           if (this.heartbeatTimeout) {
@@ -292,6 +318,8 @@ export class FilesystemConnectionManager {
         this.resolvePending(message.requestId, message)
         return
       case 'hello':
+        this.callbacks.onMessage(message)
+        this.resubscribeAfterReconnect()
         return
     }
   }
@@ -422,7 +450,7 @@ export class FilesystemConnectionManager {
   private setStatus(next: FilesystemConnectionStatus): void {
     if (this.status === next) return
     this.status = next
-    this.options.callbacks.onStatusChange(next)
+    this.callbacks.onStatusChange(next)
   }
 
   private nextRequestId(): string {
@@ -434,14 +462,20 @@ export class FilesystemConnectionManager {
     if (this.visibilityListener) return
     if (typeof document === 'undefined') return
     const listener = () => {
-      if (
-        document.visibilityState === 'visible' &&
-        this.shouldReconnect &&
-        !this.socket
-      ) {
-        this.reconnectAttempt = 0
-        this.clearReconnectTimer()
+      if (document.visibilityState !== 'visible' || !this.shouldReconnect) {
+        return
+      }
+
+      this.reconnectAttempt = 0
+      this.clearReconnectTimer()
+
+      if (!this.socket || this.socket.readyState >= WebSocket.CLOSING) {
         this.openSocket()
+        return
+      }
+
+      if (this.socket.readyState === WebSocket.OPEN) {
+        this.resubscribeAfterReconnect()
       }
     }
     this.visibilityListener = listener
@@ -454,6 +488,15 @@ export class FilesystemConnectionManager {
       document.removeEventListener('visibilitychange', this.visibilityListener)
     }
     this.visibilityListener = null
+  }
+
+  private resubscribeAfterReconnect(): void {
+    if (!this.shouldReconnect) return
+    void this.subscribe(this.subscribedPath).catch(() => {
+      if (this.shouldReconnect) {
+        this.forceReconnect()
+      }
+    })
   }
 }
 
