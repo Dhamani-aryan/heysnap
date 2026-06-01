@@ -20,7 +20,6 @@
   "dependencies": {
     "@ank1015-app/tunnel-protocol": "workspace:*",
     "@aws-sdk/client-ec2": "^3.954.0",
-    "@aws-sdk/client-s3": "3.954.0",
     "@aws-sdk/client-ssm": "^3.954.0",
     "@axiomhq/pino": "^1.6.1",
     "@hono/node-server": "^1.19.6",
