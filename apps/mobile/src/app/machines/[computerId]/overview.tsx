@@ -81,7 +81,10 @@ export default function MachineOverviewScreen() {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
   const windowDimensions = useWindowDimensions();
-  const { browserViewSubscribeWebSocketUrl } = useMobileMachineWorkspace();
+  const {
+    browserViewSubscribeWebSocketUrl,
+    setBrowserConnected,
+  } = useMobileMachineWorkspace();
   const browserView = useBrowserViewSubscription({
     enabled: isFocused && browserViewSubscribeWebSocketUrl !== null,
     url: browserViewSubscribeWebSocketUrl,
@@ -168,6 +171,11 @@ export default function MachineOverviewScreen() {
     startX: 0,
     startY: 0,
   });
+
+  useEffect(() => {
+    if (!isFocused) return;
+    setBrowserConnected(browserConnected);
+  }, [browserConnected, isFocused, setBrowserConnected]);
 
   const sendViewportWheel = useCallback(
     (locationX: number, locationY: number, deltaX: number, deltaY: number) => {
@@ -757,6 +765,7 @@ function BrowserTabsDropdown({
   onCloseTab: (tabId: number) => void;
   onSelectTab: (tabId: number) => void;
 }) {
+  const canCloseTabs = tabs.length > 1;
   const menuHeight = Math.min(
     TABS_DROPDOWN_MAX_HEIGHT,
     tabs.length * TABS_DROPDOWN_ITEM_HEIGHT + TABS_DROPDOWN_PADDING * 2,
@@ -832,25 +841,27 @@ function BrowserTabsDropdown({
                       {formatBrowserUrl(tab.url) ?? 'New Tab'}
                     </ThemedText>
                   </View>
-                  <Pressable
-                    accessibilityLabel={`Close ${getBrowserTabTitle(tab)}`}
-                    accessibilityRole="button"
-                    hitSlop={8}
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      onCloseTab(tab.id);
-                    }}
-                    style={({ pressed }) => [
-                      styles.tabCloseButton,
-                      pressed && { backgroundColor: PRESSED_COLOR },
-                    ]}>
-                    <HugeiconsIcon
-                      icon={Cancel01Icon}
-                      size={17}
-                      color={MUTED_TEXT_COLOR}
-                      strokeWidth={2.2}
-                    />
-                  </Pressable>
+                  {canCloseTabs ? (
+                    <Pressable
+                      accessibilityLabel={`Close ${getBrowserTabTitle(tab)}`}
+                      accessibilityRole="button"
+                      hitSlop={8}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        onCloseTab(tab.id);
+                      }}
+                      style={({ pressed }) => [
+                        styles.tabCloseButton,
+                        pressed && { backgroundColor: PRESSED_COLOR },
+                      ]}>
+                      <HugeiconsIcon
+                        icon={Cancel01Icon}
+                        size={17}
+                        color={MUTED_TEXT_COLOR}
+                        strokeWidth={2.2}
+                      />
+                    </Pressable>
+                  ) : null}
                 </Pressable>
               );
             })}

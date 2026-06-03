@@ -57,6 +57,7 @@ type MobileMachineWorkspaceSessionState = {
 type MobileMachineWorkspaceContextValue = {
   agentBaseUrl: string | null;
   agentIdentity: string | null;
+  browserConnected: boolean;
   browserViewSubscribeWebSocketUrl: string | null;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -80,6 +81,7 @@ type MobileMachineWorkspaceContextValue = {
   selectedAgentThreadId: string | null;
   session: MobileMachineWorkspaceSessionState;
   closeOpenFile: () => void;
+  setBrowserConnected: (connected: boolean) => void;
   setSelectedAgentThreadId: Dispatch<SetStateAction<string | null>>;
   setOpenFilePath: (path: string | null) => void;
   viewState: FilesystemViewState | null;
@@ -126,17 +128,11 @@ export function MobileMachineWorkspaceProvider({
     machinesQuery.data?.find((machine) => machine.id === computerId) ?? null;
   const startMutation = useStartComputerMutation();
   const didAutoStartComputerIdRef = useRef<string | null>(null);
+  const [browserConnected, setBrowserConnected] = useState(false);
   const [selectedAgentThreadId, setSelectedAgentThreadIdState] = useState<string | null>(null);
   const setSelectedAgentThreadId = useCallback<Dispatch<SetStateAction<string | null>>>(
     (nextThreadId) => {
-      setSelectedAgentThreadIdState((currentThreadId) => {
-        const resolvedThreadId =
-          typeof nextThreadId === 'function'
-            ? nextThreadId(currentThreadId)
-            : nextThreadId;
-        useAgentChatStore.getState().setSelectedThreadId(resolvedThreadId);
-        return resolvedThreadId;
-      });
+      setSelectedAgentThreadIdState(nextThreadId);
     },
     [],
   );
@@ -150,8 +146,13 @@ export function MobileMachineWorkspaceProvider({
 
   useEffect(() => {
     didAutoStartComputerIdRef.current = null;
+    setBrowserConnected(false);
     setSelectedAgentThreadId(null);
   }, [computerId, setSelectedAgentThreadId]);
+
+  useEffect(() => {
+    useAgentChatStore.getState().setSelectedThreadId(selectedAgentThreadId);
+  }, [selectedAgentThreadId]);
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
@@ -411,6 +412,7 @@ export function MobileMachineWorkspaceProvider({
   const value = useMemo<MobileMachineWorkspaceContextValue>(() => ({
     agentBaseUrl,
     agentIdentity,
+    browserConnected,
     browserViewSubscribeWebSocketUrl,
     canGoBack: historyIndex > 0,
     canGoForward: historyIndex >= 0 && historyIndex < history.length - 1,
@@ -434,12 +436,14 @@ export function MobileMachineWorkspaceProvider({
     selectedAgentThreadId,
     session,
     closeOpenFile,
+    setBrowserConnected,
     setSelectedAgentThreadId,
     setOpenFilePath,
     viewState,
   }), [
     agentBaseUrl,
     agentIdentity,
+    browserConnected,
     browserViewSubscribeWebSocketUrl,
     closeOpenFile,
     computer,
