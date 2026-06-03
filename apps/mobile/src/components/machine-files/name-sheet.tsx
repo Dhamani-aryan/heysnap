@@ -8,9 +8,9 @@ import {
 } from 'react-native';
 import { KeyboardProvider, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
 import { ThemedText } from '@/components/themed-text';
+import type { FilesystemEntry } from '@/lib/filesystem/types';
 import type { FilePalette, FileStyles } from './file-screen-styles';
 import { validateFilesystemName } from './file-utils';
 
