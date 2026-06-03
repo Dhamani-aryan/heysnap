@@ -8,18 +8,11 @@ import { FilesToolbar } from '@/components/machine-files/files-toolbar';
 import { createFileStyles, filePalettes } from '@/components/machine-files/file-screen-styles';
 import { validateFilesystemName } from '@/components/machine-files/file-utils';
 import { FilesystemBody } from '@/components/machine-files/filesystem-body';
-import { FilesOrbMicButton } from '@/components/machine-files/files-orb-mic-button';
 import { NameSheet, type NameDialogState } from '@/components/machine-files/name-sheet';
 import { FilePreviewPane } from '@/components/machine-files/file-preview-pane';
 import { ThemedView } from '@/components/themed-view';
 import { useMobileMachineWorkspace } from '@/components/mobile-machine-workspace-provider';
-import { useAgentRun } from '@/hooks/agent/use-agent-run';
-import { useAuth } from '@/hooks/auth/use-auth';
-import { getNewThreadModelSelection } from '@/lib/agent/model-selection';
-import type { AgentContent, AgentUiContext } from '@/lib/agent/types';
 import type { FilesystemEntry, FilesystemUploadFile } from '@/lib/filesystem/types';
-import { useAgentChatStore } from '@/stores/agent/agent-chat-store';
-import { useAgentModelSelectionStore } from '@/stores/agent/agent-model-selection-store';
 import { useFilesystemStore } from '@/stores/filesystem/filesystem-store';
 
 const DEFAULT_NEW_FOLDER_NAME = 'untitled folder';
@@ -37,7 +30,6 @@ export default function MachineScreen() {
   const {
     canGoBack,
     canGoForward,
-    agentBaseUrl,
     currentDirectoryName,
     currentPath,
     error,
@@ -268,12 +260,6 @@ export default function MachineScreen() {
         />
       )}
 
-      {agentBaseUrl === null ? (
-        <FilesOrbMicButton palette={palette} />
-      ) : (
-        <FilesAgentVoiceButton palette={palette} />
-      )}
-
       <NameSheet
         dialog={nameDialog}
         isSubmitting={isNameSubmitting}
@@ -310,68 +296,4 @@ function stripDataUrlPrefix(value: string): string {
   return value.startsWith('data:') && commaIndex >= 0
     ? value.slice(commaIndex + 1)
     : value;
-}
-
-function FilesAgentVoiceButton({
-  palette,
-}: {
-  palette: (typeof filePalettes)['light'] | (typeof filePalettes)['dark'];
-}) {
-  const {
-    agentBaseUrl,
-    agentIdentity,
-    currentPath,
-    openFilePath,
-    selectedAgentThreadId,
-    setSelectedAgentThreadId,
-  } = useMobileMachineWorkspace();
-  const auth = useAuth();
-  const isRunning = useAgentChatStore((state) => state.activeRun !== null);
-  const promptModelChoice = useAgentModelSelectionStore((state) => state.promptModelChoice);
-
-  const uiContext = useMemo<AgentUiContext>(
-    () => ({
-      openFiles:
-        openFilePath !== null ? [{ path: openFilePath, isFocused: true }] : [],
-    }),
-    [openFilePath],
-  );
-
-  const { submit, steer } = useAgentRun({
-    agentBaseUrl: agentBaseUrl ?? '',
-    agentIdentity: agentIdentity ?? '',
-    currentPath,
-    selectedThreadId: selectedAgentThreadId,
-    uiContext,
-    onThreadResolved: (threadId) => {
-      setSelectedAgentThreadId((current) => current ?? threadId);
-    },
-  });
-
-  const sendTranscript = useCallback(
-    (transcript: string) => {
-      const content: AgentContent = [{ type: 'text', content: transcript }];
-      if (isRunning) {
-        return steer({ content });
-      }
-
-      return submit({
-        content,
-        ...getNewThreadModelSelection({
-          allowModelSelection: auth.user?.allowPiModels === true,
-          selectedThreadId: selectedAgentThreadId,
-          promptModelChoice,
-        }),
-      });
-    },
-    [auth.user?.allowPiModels, isRunning, promptModelChoice, selectedAgentThreadId, steer, submit],
-  );
-
-  return (
-    <FilesOrbMicButton
-      isStreaming={isRunning}
-      palette={palette}
-      onSendTranscript={sendTranscript}
-    />
-  );
 }
