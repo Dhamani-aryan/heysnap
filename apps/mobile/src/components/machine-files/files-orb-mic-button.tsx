@@ -57,6 +57,28 @@ const estimateTranscriptInputHeight = (text: string, viewportWidth: number): num
   );
 };
 
+const getRecordingDurationSeconds = ({
+  currentTime,
+  durationMillis,
+  startedAt,
+}: {
+  currentTime: number;
+  durationMillis: number;
+  startedAt: number | null;
+}): number | undefined => {
+  const candidates = [
+    Number.isFinite(currentTime) ? currentTime : 0,
+    Number.isFinite(durationMillis) ? durationMillis / 1000 : 0,
+    startedAt === null ? 0 : (Date.now() - startedAt) / 1000,
+  ].filter((value) => value > 0);
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return Math.max(...candidates);
+};
+
 type FilesOrbMicButtonProps = {
   isStreaming?: boolean;
   palette: FilePalette;
@@ -75,6 +97,7 @@ export function FilesOrbMicButton({
   const intensity = useSharedValue(0);
   const buttonProgress = useSharedValue(0);
   const isListeningRef = useRef(false);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const [isOrbVisible, setIsOrbVisible] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSendingTranscript, setIsSendingTranscript] = useState(false);
@@ -83,6 +106,7 @@ export function FilesOrbMicButton({
 
   const resetButton = useCallback(() => {
     isListeningRef.current = false;
+    recordingStartedAtRef.current = null;
     buttonProgress.value = withTiming(0, { duration: 180 });
     cancelAnimation(intensity);
     intensity.value = withTiming(0, { duration: 180 });
@@ -124,6 +148,12 @@ export function FilesOrbMicButton({
       return;
     }
 
+    const durationSeconds = getRecordingDurationSeconds({
+      currentTime: recorder.currentTime,
+      durationMillis: recorder.getStatus().durationMillis,
+      startedAt: recordingStartedAtRef.current,
+    });
+
     resetButton();
     setIsTranscribing(true);
 
@@ -136,7 +166,7 @@ export function FilesOrbMicButton({
           throw new Error('Recording did not produce an audio file.');
         }
 
-        const transcript = await transliterateSpeech(recordingUri);
+        const transcript = await transliterateSpeech(recordingUri, { durationSeconds });
         setTranscriptDraft(transcript);
         setDialogInputHeight(MIN_TRANSCRIPT_INPUT_HEIGHT);
       } catch (error) {
@@ -185,6 +215,7 @@ export function FilesOrbMicButton({
         }
 
         recorder.record();
+        recordingStartedAtRef.current = Date.now();
       } catch (error) {
         Alert.alert(
           'Microphone',
