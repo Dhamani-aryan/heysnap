@@ -9,6 +9,7 @@ import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   LayoutAlignRightIcon,
   PlusSignIcon,
+  SmartPhone02Icon,
   WorkHistoryIcon,
 } from '@hugeicons/core-free-icons'
 import { ThemeToggle } from '../../theme-toggle.tsx'
@@ -19,8 +20,16 @@ import { ThreadHistoryPopover } from '../../agent/thread-history-popover.tsx'
 import { useAgentChatStore } from '../../../stores/agent/agent-chat-store.ts'
 import { useAgentThreadRoute } from '../../../hooks/agent/use-agent-thread-route.ts'
 import type { AgentThreadSummary } from '../../../lib/agent/types.ts'
+import { WorkspaceMobileDrawer } from './workspace-mobile-drawer.tsx'
+import { useBrowserViewPublisher } from '../../../hooks/browser/use-browser-view-publisher.ts'
 
-export function WorkspaceToolbar() {
+type WorkspaceToolbarProps = {
+  browserViewPublishWebSocketUrl?: string
+}
+
+export function WorkspaceToolbar({
+  browserViewPublishWebSocketUrl,
+}: WorkspaceToolbarProps) {
   const { isRightSidebarOpen, toggleRightSidebar } = useWorkspaceLayout()
   const goBack = useFilesystemStore((s) => s.goBack)
   const goForward = useFilesystemStore((s) => s.goForward)
@@ -37,10 +46,21 @@ export function WorkspaceToolbar() {
 
   const historyButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false)
 
   const closeHistory = useCallback(() => setIsHistoryOpen(false), [])
+  const closeMobileDrawer = useCallback(() => setIsMobileDrawerOpen(false), [])
+  const browserViewPublisherStatus = useBrowserViewPublisher({
+    enabled: browserViewPublishWebSocketUrl !== undefined,
+    streamEnabled: isMobileDrawerOpen,
+    url: browserViewPublishWebSocketUrl,
+  })
   const toggleHistory = useCallback(
     () => setIsHistoryOpen((current) => !current),
+    [],
+  )
+  const toggleMobileDrawer = useCallback(
+    () => setIsMobileDrawerOpen((current) => !current),
     [],
   )
   const handleSelectThread = useCallback(
@@ -67,6 +87,12 @@ export function WorkspaceToolbar() {
         canGoForward={canGoForward}
       />
       <WorkspaceTabsStrip />
+      <ToolbarIconButton
+        icon={SmartPhone02Icon}
+        label="Mobile"
+        onClick={toggleMobileDrawer}
+        pressed={isMobileDrawerOpen}
+      />
       <ThemeToggle compact />
       <div className="relative">
         <ToolbarIconButton
@@ -97,6 +123,11 @@ export function WorkspaceToolbar() {
         label={sidebarLabel}
         onClick={toggleRightSidebar}
         pressed={isRightSidebarOpen}
+      />
+      <WorkspaceMobileDrawer
+        open={isMobileDrawerOpen}
+        onClose={closeMobileDrawer}
+        browserViewPublisherStatus={browserViewPublisherStatus}
       />
     </header>
   )

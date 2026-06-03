@@ -134,8 +134,19 @@ export function MachineWorkspacePage() {
     return <MachineStartingLoader label="Connecting" />
   }
 
+  const browserViewPublishWebSocketUrl = accessQuery.data.routes
+    .browserViewPublishWebSocketUrl
+    ? buildGatewayWebsocketUrl({
+        baseUrl: env.cloudServerUrl,
+        path: accessQuery.data.routes.browserViewPublishWebSocketUrl,
+        token: accessQuery.data.accessSession.token,
+      })
+    : undefined
+
   return (
-    <WorkspaceLayout>
+    <WorkspaceLayout
+      browserViewPublishWebSocketUrl={browserViewPublishWebSocketUrl}
+    >
       <WorkspaceContent
         computer={computer}
         accessSession={accessQuery.data}
