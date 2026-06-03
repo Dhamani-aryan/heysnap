@@ -7,8 +7,8 @@ import { MobileMachineWorkspaceProvider } from '@/components/mobile-machine-work
 import { Colors } from '@/constants/theme';
 
 const { Navigator } = createMaterialTopTabNavigator();
-// Expo Router wrapper so file-based routes (`index.tsx`, `agent.tsx`) become
-// the two pages of a horizontal swipe pager. The tab bar itself is hidden;
+// Expo Router wrapper so file-based routes become pages of a horizontal swipe pager.
+// The tab bar itself is hidden;
 // users navigate by swiping the screen left/right.
 const SwipeTabs = withLayoutContext(Navigator);
 
@@ -27,12 +27,14 @@ export default function MachineLayout() {
     <DebugErrorBoundary label="machines/[computerId]">
       <MobileMachineWorkspaceProvider computerId={computerId}>
         <SwipeTabs
+          initialRouteName="index"
           tabBar={() => null}
           screenOptions={{
             swipeEnabled: true,
             lazy: false,
             sceneStyle: { backgroundColor: colors.background },
           }}>
+          <SwipeTabs.Screen name="overview" />
           <SwipeTabs.Screen name="index" />
           <SwipeTabs.Screen name="agent" />
         </SwipeTabs>

@@ -57,6 +57,7 @@ type MobileMachineWorkspaceSessionState = {
 type MobileMachineWorkspaceContextValue = {
   agentBaseUrl: string | null;
   agentIdentity: string | null;
+  browserViewSubscribeWebSocketUrl: string | null;
   canGoBack: boolean;
   canGoForward: boolean;
   computer: CloudComputer | null;
@@ -314,6 +315,18 @@ export function MobileMachineWorkspaceProvider({
     [agentBaseUrl],
   );
 
+  const browserViewSubscribeWebSocketUrl = useMemo(() => {
+    if (session.accessSession?.routes.browserViewSubscribeWebSocketUrl === undefined) {
+      return null;
+    }
+
+    return buildGatewayWebsocketUrl({
+      baseUrl: env.cloudServerUrl,
+      path: session.accessSession.routes.browserViewSubscribeWebSocketUrl,
+      token: session.accessSession.accessSession.token,
+    });
+  }, [session.accessSession]);
+
   useAgentConnection({ agentBaseUrl, agentIdentity });
 
   const filesystemConnectionIdentity = useMemo(
@@ -398,6 +411,7 @@ export function MobileMachineWorkspaceProvider({
   const value = useMemo<MobileMachineWorkspaceContextValue>(() => ({
     agentBaseUrl,
     agentIdentity,
+    browserViewSubscribeWebSocketUrl,
     canGoBack: historyIndex > 0,
     canGoForward: historyIndex >= 0 && historyIndex < history.length - 1,
     computer,
@@ -426,6 +440,7 @@ export function MobileMachineWorkspaceProvider({
   }), [
     agentBaseUrl,
     agentIdentity,
+    browserViewSubscribeWebSocketUrl,
     closeOpenFile,
     computer,
     connectionStatus,

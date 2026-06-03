@@ -79,6 +79,9 @@ export type AccessSessionRoutes = {
   filesystemPreviewBaseUrl?: string;
   filesystemPreviewWebSocketUrl?: string;
   browserControlWebSocketUrl?: string;
+  browserControlStatusUrl?: string;
+  browserViewPublishWebSocketUrl?: string;
+  browserViewSubscribeWebSocketUrl?: string;
   agentBaseUrl: string;
   capabilitiesBaseUrl?: string;
 };
