@@ -1,27 +1,28 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Button, ContextMenu, Divider, Host, RNHostView } from '@expo/ui/swift-ui';
-import { disabled as swiftDisabled } from '@expo/ui/swift-ui/modifiers';
 import { Image as ExpoImage } from 'expo-image';
 import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
-import type { FilesystemClient } from '@ank1015-app/ui/filesystem-client';
-import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
 import { ThemedText } from '@/components/themed-text';
+import type { FilesystemConnectionManager } from '@/lib/filesystem/filesystem-connection-manager';
+import type { FilesystemEntry } from '@/lib/filesystem/types';
 import type { FilePalette, FileStyles } from './file-screen-styles';
 import { formatBytes, formatTimestamp } from './file-utils';
 
-const fileIconSource = require('../../../../../packages/ui/src/filesystem/assets/macos/File.png');
-const folderIconSource = require('../../../../../packages/ui/src/filesystem/assets/macos/Folder.png');
-const DISABLED_MENU_ITEM_MODIFIERS = [swiftDisabled(true)];
+const fileIconSource = require('@/assets/images/filesystem/File.png');
+const folderIconSource = require('@/assets/images/filesystem/Folder.png');
 
 type FilesystemBodyProps = {
   columnCount: number;
   entries: readonly FilesystemEntry[];
   error: string | null;
-  filesystemClient: FilesystemClient | null;
+  filesystemClient: FilesystemConnectionManager | null;
   isLoading: boolean;
   palette: FilePalette;
   styles: FileStyles;
+  onCopyEntry: (entry: FilesystemEntry) => void;
+  onCutEntry: (entry: FilesystemEntry) => void;
+  onDownloadEntry: (entry: FilesystemEntry) => void;
   onOpenEntry: (entry: FilesystemEntry) => void;
   onRenameEntry: (entry: FilesystemEntry) => void;
 };
@@ -33,6 +34,9 @@ export function FilesystemBody({
   isLoading,
   palette,
   styles,
+  onCopyEntry,
+  onCutEntry,
+  onDownloadEntry,
   onOpenEntry,
   onRenameEntry,
 }: FilesystemBodyProps) {
@@ -109,6 +113,9 @@ export function FilesystemBody({
           palette={palette}
           styles={styles}
           onOpenEntry={onOpenEntry}
+          onCopyEntry={onCopyEntry}
+          onCutEntry={onCutEntry}
+          onDownloadEntry={onDownloadEntry}
           onRenameEntry={onRenameEntry}
           onShowInfo={handleShowInfo}
           onTrashEntry={handleTrashEntry}
@@ -150,6 +157,9 @@ type FinderItemProps = {
   entry: FilesystemEntry;
   palette: FilePalette;
   styles: FileStyles;
+  onCopyEntry: (entry: FilesystemEntry) => void;
+  onCutEntry: (entry: FilesystemEntry) => void;
+  onDownloadEntry: (entry: FilesystemEntry) => void;
   onOpenEntry: (entry: FilesystemEntry) => void;
   onRenameEntry: (entry: FilesystemEntry) => void;
   onShowInfo: (entry: FilesystemEntry) => void;
@@ -160,6 +170,9 @@ const FinderItem = memo(function FinderItem({
   entry,
   palette,
   styles,
+  onCopyEntry,
+  onCutEntry,
+  onDownloadEntry,
   onOpenEntry,
   onRenameEntry,
   onShowInfo,
@@ -169,6 +182,9 @@ const FinderItem = memo(function FinderItem({
 
   const handleOpen = useCallback(() => onOpenEntry(entry), [entry, onOpenEntry]);
 
+  const handleCopy = useCallback(() => onCopyEntry(entry), [entry, onCopyEntry]);
+  const handleCut = useCallback(() => onCutEntry(entry), [entry, onCutEntry]);
+  const handleDownload = useCallback(() => onDownloadEntry(entry), [entry, onDownloadEntry]);
   const handleRename = useCallback(() => onRenameEntry(entry), [entry, onRenameEntry]);
   const handleInfo = useCallback(() => onShowInfo(entry), [entry, onShowInfo]);
   const handleTrash = useCallback(() => {
@@ -213,6 +229,9 @@ const FinderItem = memo(function FinderItem({
           </ContextMenu.Trigger>
           <ContextMenu.Items>
             <Button label="Open" systemImage="eye" onPress={handleOpen} />
+            <Button label="Copy" systemImage="doc.on.doc" onPress={handleCopy} />
+            <Button label="Cut" systemImage="scissors" onPress={handleCut} />
+            <Divider />
             <Button label="Rename" systemImage="pencil" onPress={handleRename} />
             <Button label="Get Info" systemImage="info.circle" onPress={handleInfo} />
             <Divider />
@@ -225,7 +244,7 @@ const FinderItem = memo(function FinderItem({
             <Button
               label="Download"
               systemImage="arrow.down.circle"
-              modifiers={DISABLED_MENU_ITEM_MODIFIERS}
+              onPress={handleDownload}
             />
           </ContextMenu.Items>
         </ContextMenu>

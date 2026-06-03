@@ -9,41 +9,28 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { WebView } from 'react-native-webview';
-import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
 import { ThemedText } from '@/components/themed-text';
-import { WEB_PREVIEW_URL } from '@/constants/config';
+import type { FilesystemConnectionManager } from '@/lib/filesystem/filesystem-connection-manager';
+import type { FilesystemEntry } from '@/lib/filesystem/types';
 import type { FilePalette } from './file-screen-styles';
 
 type FilePreviewPaneProps = {
   entry: FilesystemEntry;
-  filesystemPreviewBaseUrl: string | null;
-  filesystemWebsocketUrl: string | null;
+  filesystemClient: FilesystemConnectionManager | null;
   palette: FilePalette;
   onBack: () => void;
 };
 
 export function FilePreviewPane({
   entry,
-  filesystemPreviewBaseUrl,
-  filesystemWebsocketUrl,
+  filesystemClient,
   palette,
   onBack,
 }: FilePreviewPaneProps) {
   const previewUri = useMemo(() => {
-    if (filesystemWebsocketUrl === null) {
-      return null;
-    }
-
-    const url = new URL('/preview', WEB_PREVIEW_URL);
-    url.searchParams.set('websocketUrl', filesystemWebsocketUrl);
-    if (filesystemPreviewBaseUrl !== null) {
-      url.searchParams.set('previewBaseUrl', filesystemPreviewBaseUrl);
-    }
-    url.searchParams.set('path', entry.path);
-    url.searchParams.set('name', entry.name);
-    return url.toString();
-  }, [entry.name, entry.path, filesystemPreviewBaseUrl, filesystemWebsocketUrl]);
+    return filesystemClient?.getPreviewUrl(entry.path) ?? null;
+  }, [entry.path, filesystemClient]);
 
   return (
     <View style={[styles.shell, { backgroundColor: palette.background }]}>
