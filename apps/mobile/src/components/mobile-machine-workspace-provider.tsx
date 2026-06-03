@@ -10,30 +10,53 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import { AgentRuntimeProvider } from '@ank1015-app/ui/agent-hooks';
-import { FilesystemClient, type FilesystemConnectionStatus } from '@ank1015-app/ui/filesystem-client';
+import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
+
+import { useAuth } from '@/hooks/auth/use-auth';
+import { useAgentConnection } from '@/hooks/agent/use-agent-connection';
+import { useFilesystemConnection } from '@/hooks/filesystem/use-filesystem-connection';
+import { env } from '@/lib/env';
 import type {
+  AccessSessionResponse,
+  CloudComputer,
+  CloudComputerStatus,
+} from '@/lib/machines/machines-api';
+import {
+  accessSessionQueryOptions,
+  machinesQueryOptions,
+} from '@/lib/machines/machines-query';
+import { useStartComputerMutation } from '@/lib/machines/machines-mutations';
+import type { FilesystemConnectionManager } from '@/lib/filesystem/filesystem-connection-manager';
+import type {
+  FilesystemConnectionStatus,
   FilesystemEntry,
   FilesystemListing,
   FilesystemViewState,
-} from '@ank1015-app/ui/filesystem-types';
+} from '@/lib/filesystem/types';
 import {
-  useCloudAuthStore,
-  useCloudMachinesStore,
-  useCloudRuntime,
-  useMachineWorkspaceSession,
-  useMachinesQuery,
-  type CloudComputer,
-  type MachineWorkspaceSessionState,
-} from '@ank1015-app/ui/cloud-hooks';
+  buildGatewayHttpUrl,
+  buildGatewayWebsocketUrl,
+  normalizeGatewayConnectionIdentity,
+} from '@/lib/gateway-url';
+import { useAgentChatStore } from '@/stores/agent/agent-chat-store';
+import { useFilesystemStore } from '@/stores/filesystem/filesystem-store';
 
 type MobileMachineWorkspaceProviderProps = {
   children: ReactNode;
   computerId: string;
 };
 
+type MobileMachineWorkspaceSessionState = {
+  readonly accessSession: AccessSessionResponse | null;
+  readonly error: string | null;
+  readonly isLoading: boolean;
+  readonly startupPhase: 'checking' | 'starting' | null;
+};
+
 type MobileMachineWorkspaceContextValue = {
   agentBaseUrl: string | null;
+  agentIdentity: string | null;
   canGoBack: boolean;
   canGoForward: boolean;
   computer: CloudComputer | null;
@@ -41,7 +64,7 @@ type MobileMachineWorkspaceContextValue = {
   currentDirectoryName: string;
   currentPath: string;
   error: string | null;
-  filesystemClient: FilesystemClient | null;
+  filesystemClient: FilesystemConnectionManager | null;
   filesystemPreviewBaseUrl: string | null;
   filesystemWebsocketUrl: string | null;
   goBack: () => void;
@@ -54,66 +77,214 @@ type MobileMachineWorkspaceContextValue = {
   openFilePath: string | null;
   refresh: () => Promise<void>;
   selectedAgentThreadId: string | null;
-  session: MachineWorkspaceSessionState;
+  session: MobileMachineWorkspaceSessionState;
   closeOpenFile: () => void;
   setSelectedAgentThreadId: Dispatch<SetStateAction<string | null>>;
   setOpenFilePath: (path: string | null) => void;
   viewState: FilesystemViewState | null;
 };
 
-const MobileMachineWorkspaceContext = createContext<MobileMachineWorkspaceContextValue | null>(null);
-const HISTORY_LIMIT = 64;
-const isFilesystemConnectionErrorMessage = (message: string): boolean =>
-  message === 'Filesystem connection failed.' ||
-  message === 'Filesystem connection closed.' ||
-  message === 'Filesystem connection is not open.';
+const MobileMachineWorkspaceContext =
+  createContext<MobileMachineWorkspaceContextValue | null>(null);
 
-const toFilesystemErrorMessage = (message: string | null): string | null => {
-  if (message === null || isFilesystemConnectionErrorMessage(message)) {
-    return null;
-  }
+const isConnectable = (status: CloudComputerStatus): boolean =>
+  status === 'online' || status === 'idle';
 
-  return message;
+const isPendingStartup = (status: CloudComputerStatus): boolean =>
+  status === 'creating' || status === 'starting';
+
+const isTerminal = (status: CloudComputerStatus): boolean =>
+  status === 'failed' || status === 'offline' || status === 'deleted';
+
+const getMachineUnavailableMessage = (status: CloudComputerStatus): string => {
+  if (status === 'failed') return 'Machine failed to start.';
+  if (status === 'offline') return 'Machine is offline.';
+  if (status === 'deleted') return 'Machine not found.';
+  if (status === 'sleeping') return 'Machine is sleeping.';
+  return `Machine is ${formatStatusLabel(status).toLowerCase()}.`;
 };
+
+const formatStatusLabel = (status: string): string =>
+  status
+    .split('-')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
 
 export function MobileMachineWorkspaceProvider({
   children,
   computerId,
 }: MobileMachineWorkspaceProviderProps) {
-  const { client } = useCloudRuntime();
-  const authStatus = useCloudAuthStore((state) => state.status);
-  const computer = useCloudMachinesStore((state) => state.computersById[computerId] ?? null);
-  const machinesQuery = useMachinesQuery();
-  const machinesIsFetching = machinesQuery.isFetching;
-  const machinesRefetch = machinesQuery.refetch;
-  const session = useMachineWorkspaceSession(computerId);
-  const [filesystemClient, setFilesystemClient] = useState<FilesystemClient | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<FilesystemConnectionStatus>('connecting');
-  const [listing, setListing] = useState<FilesystemListing | null>(null);
-  const [viewState, setViewState] = useState<FilesystemViewState | null>(null);
-  const [isFilesystemLoading, setIsFilesystemLoading] = useState(false);
-  const [filesystemError, setFilesystemError] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [openFileEntry, setOpenFileEntry] = useState<FilesystemEntry | null>(null);
-  const [selectedAgentThreadId, setSelectedAgentThreadId] = useState<string | null>(null);
-  const openFileRequestRef = useRef(0);
+  const auth = useAuth();
+  const router = useRouter();
+  const machinesQuery = useQuery({
+    ...machinesQueryOptions,
+    enabled: auth.status === 'authenticated',
+  });
+  const computer =
+    machinesQuery.data?.find((machine) => machine.id === computerId) ?? null;
+  const startMutation = useStartComputerMutation();
+  const didAutoStartComputerIdRef = useRef<string | null>(null);
+  const [selectedAgentThreadId, setSelectedAgentThreadIdState] = useState<string | null>(null);
+  const setSelectedAgentThreadId = useCallback<Dispatch<SetStateAction<string | null>>>(
+    (nextThreadId) => {
+      setSelectedAgentThreadIdState((currentThreadId) => {
+        const resolvedThreadId =
+          typeof nextThreadId === 'function'
+            ? nextThreadId(currentThreadId)
+            : nextThreadId;
+        useAgentChatStore.getState().setSelectedThreadId(resolvedThreadId);
+        return resolvedThreadId;
+      });
+    },
+    [],
+  );
 
-  const currentPath = listing?.path ?? '';
-  const currentDirectoryName = listing?.name ?? 'workspace';
-  const openFilePath = openFileEntry?.path ?? null;
+  const canFetchAccessSession =
+    auth.status === 'authenticated' && computer !== null && isConnectable(computer.status);
+  const accessQuery = useQuery({
+    ...accessSessionQueryOptions(computerId),
+    enabled: canFetchAccessSession,
+  });
 
-  const filesystemWebsocketUrl = useMemo(() => {
-    if (session.accessSession === null) {
-      return null;
+  useEffect(() => {
+    didAutoStartComputerIdRef.current = null;
+    setSelectedAgentThreadId(null);
+  }, [computerId, setSelectedAgentThreadId]);
+
+  useEffect(() => {
+    if (auth.status !== 'authenticated') return;
+    if (computer === null) return;
+    if (computer.kind === 'local') return;
+    if (computer.status !== 'sleeping') return;
+    if (didAutoStartComputerIdRef.current === computerId) return;
+    if (startMutation.isPending || startMutation.isError) return;
+    didAutoStartComputerIdRef.current = computerId;
+    startMutation.mutate(computerId);
+  }, [auth.status, computer, computerId, startMutation]);
+
+  const shouldRedirectToMachines =
+    auth.status === 'authenticated' &&
+    ((machinesQuery.data !== undefined && computer === null) ||
+      (computer !== null && isTerminal(computer.status)) ||
+      (startMutation.isError && startMutation.variables === computerId) ||
+      accessQuery.isError);
+
+  useEffect(() => {
+    if (shouldRedirectToMachines) {
+      router.replace('/machines');
+    }
+  }, [router, shouldRedirectToMachines]);
+
+  const accessSession = useMemo(() => {
+    if (!canFetchAccessSession) return null;
+    return isAccessSessionUsable(accessQuery.data, computerId)
+      ? accessQuery.data
+      : null;
+  }, [accessQuery.data, canFetchAccessSession, computerId]);
+
+  const session = useMemo<MobileMachineWorkspaceSessionState>(() => {
+    if (auth.status !== 'authenticated') {
+      return {
+        accessSession: null,
+        error: null,
+        isLoading: false,
+        startupPhase: null,
+      };
     }
 
+    if (machinesQuery.data === undefined) {
+      return {
+        accessSession: null,
+        error: getErrorMessage(machinesQuery.error),
+        isLoading: machinesQuery.isFetching,
+        startupPhase: 'checking',
+      };
+    }
+
+    if (computer === null) {
+      return {
+        accessSession: null,
+        error: 'Machine not found.',
+        isLoading: false,
+        startupPhase: null,
+      };
+    }
+
+    if (
+      computer.kind !== 'local' &&
+      (computer.status === 'sleeping' || isPendingStartup(computer.status))
+    ) {
+      const startError =
+        startMutation.isError && startMutation.variables === computerId
+          ? getErrorMessage(startMutation.error) ?? 'Failed to start machine.'
+          : null;
+
+      if (startError !== null) {
+        return {
+          accessSession: null,
+          error: startError,
+          isLoading: false,
+          startupPhase: null,
+        };
+      }
+
+      return {
+        accessSession: null,
+        error: null,
+        isLoading: true,
+        startupPhase: 'starting',
+      };
+    }
+
+    if (isTerminal(computer.status)) {
+      return {
+        accessSession: null,
+        error: getMachineUnavailableMessage(computer.status),
+        isLoading: false,
+        startupPhase: null,
+      };
+    }
+
+    if (!isConnectable(computer.status)) {
+      return {
+        accessSession: null,
+        error: getMachineUnavailableMessage(computer.status),
+        isLoading: false,
+        startupPhase: null,
+      };
+    }
+
+    return {
+      accessSession,
+      error: getErrorMessage(accessQuery.error),
+      isLoading: accessQuery.isFetching && accessSession === null,
+      startupPhase: null,
+    };
+  }, [
+    accessQuery.error,
+    accessQuery.isFetching,
+    accessSession,
+    auth.status,
+    computer,
+    computerId,
+    machinesQuery.data,
+    machinesQuery.error,
+    machinesQuery.isFetching,
+    startMutation.error,
+    startMutation.isError,
+    startMutation.variables,
+  ]);
+
+  const filesystemWebsocketUrl = useMemo(() => {
+    if (session.accessSession === null) return null;
+
     return buildGatewayWebsocketUrl({
-      baseUrl: client.baseUrl,
+      baseUrl: env.cloudServerUrl,
       path: session.accessSession.routes.filesystemWebSocketUrl,
       token: session.accessSession.accessSession.token,
     });
-  }, [client.baseUrl, session.accessSession]);
+  }, [session.accessSession]);
 
   const filesystemPreviewBaseUrl = useMemo(() => {
     if (session.accessSession?.routes.filesystemPreviewBaseUrl === undefined) {
@@ -121,235 +292,112 @@ export function MobileMachineWorkspaceProvider({
     }
 
     return buildGatewayHttpUrl({
-      baseUrl: client.baseUrl,
+      baseUrl: env.cloudServerUrl,
       path: session.accessSession.routes.filesystemPreviewBaseUrl,
       token: session.accessSession.accessSession.token,
     });
-  }, [client.baseUrl, session.accessSession]);
+  }, [session.accessSession]);
 
   const agentBaseUrl = useMemo(() => {
-    if (session.accessSession === null) {
-      return null;
-    }
+    if (session.accessSession === null) return null;
 
     return buildGatewayHttpUrl({
-      baseUrl: client.baseUrl,
+      baseUrl: env.cloudServerUrl,
       path: session.accessSession.routes.agentBaseUrl,
       token: session.accessSession.accessSession.token,
     });
-  }, [client.baseUrl, session.accessSession]);
+  }, [session.accessSession]);
 
-  useEffect(() => {
-    setSelectedAgentThreadId(null);
-  }, [computerId]);
+  const agentIdentity = useMemo(
+    () =>
+      agentBaseUrl === null ? null : normalizeGatewayConnectionIdentity(agentBaseUrl),
+    [agentBaseUrl],
+  );
 
-  useEffect(() => {
-    if (authStatus !== 'authenticated' || filesystemWebsocketUrl === null) {
-      setFilesystemClient(null);
-      setConnectionStatus('closed');
-      setListing(null);
-      setViewState(null);
-      setIsFilesystemLoading(false);
-      setHistory([]);
-      setHistoryIndex(-1);
-      setOpenFileEntry(null);
-      return;
-    }
+  useAgentConnection({ agentBaseUrl, agentIdentity });
 
-    setConnectionStatus('connecting');
-    setListing(null);
-    setViewState(null);
-    setFilesystemError(null);
-    setHistory([]);
-    setHistoryIndex(-1);
-    setOpenFileEntry(null);
+  const filesystemConnectionIdentity = useMemo(
+    () =>
+      filesystemWebsocketUrl === null
+        ? null
+        : normalizeGatewayConnectionIdentity(filesystemWebsocketUrl),
+    [filesystemWebsocketUrl],
+  );
 
-    let hasReceivedListing = false;
-    const nextClient = new FilesystemClient(filesystemWebsocketUrl, {
-      initialPath: '',
-      onConnectionStatus: setConnectionStatus,
-      onError: (message) => {
-        setFilesystemError(toFilesystemErrorMessage(message));
-      },
-      onListing: (nextListing) => {
-        const isInitialListing = !hasReceivedListing;
-        hasReceivedListing = true;
-        setListing(nextListing);
+  const filesystemClient = useFilesystemConnection({
+    wsUrl: filesystemWebsocketUrl,
+    previewBaseUrl: filesystemPreviewBaseUrl ?? undefined,
+    connectionIdentity: filesystemConnectionIdentity,
+    workspaceIdentity: computerId,
+  });
 
-        if (isInitialListing) {
-          const initialHistory = createInitialNavigationHistory(nextListing.path);
-          setHistory(initialHistory);
-          setHistoryIndex(initialHistory.length - 1);
-        }
-      },
-      onLoading: setIsFilesystemLoading,
-      onOpen: () => {
-        setConnectionStatus('alive');
-      },
-      onViewState: setViewState,
-    });
+  const connectionStatus = useFilesystemStore((state) => state.connectionStatus);
+  const currentPath = useFilesystemStore((state) => state.currentPath);
+  const listing = useFilesystemStore((state) => state.listing);
+  const isFilesystemFetching = useFilesystemStore((state) => state.isFetching);
+  const filesystemError = useFilesystemStore((state) => state.listingError);
+  const history = useFilesystemStore((state) => state.history);
+  const historyIndex = useFilesystemStore((state) => state.historyIndex);
+  const openFileEntry = useFilesystemStore((state) => state.openFileEntry);
+  const navigate = useFilesystemStore((state) => state.navigate);
+  const goBackAction = useFilesystemStore((state) => state.goBack);
+  const goForwardAction = useFilesystemStore((state) => state.goForward);
+  const refreshFilesystem = useFilesystemStore((state) => state.refresh);
+  const openWorkspacePath = useFilesystemStore((state) => state.openWorkspacePath);
+  const closeOpenFile = useFilesystemStore((state) => state.closeOpenFile);
 
-    setFilesystemClient(nextClient);
-    nextClient.connect();
-
-    return () => {
-      nextClient.close();
-      setFilesystemClient((currentClient) => (
-        currentClient === nextClient ? null : currentClient
-      ));
+  const currentDirectoryName = listing?.name ?? getDirectoryName(currentPath);
+  const openFilePath = openFileEntry?.path ?? null;
+  const viewState = useMemo<FilesystemViewState | null>(() => {
+    if (!listing && openFileEntry === null) return null;
+    return {
+      currentPath,
+      openFiles: openFileEntry === null ? [] : [openFileEntry],
     };
-  }, [authStatus, filesystemWebsocketUrl]);
+  }, [currentPath, listing, openFileEntry]);
 
-  useEffect(() => {
-    const paths = openFilePath === null ? [] : [openFilePath];
+  const navigateTo = useCallback(
+    (path: string): void => {
+      void navigate(path);
+    },
+    [navigate],
+  );
 
-    void filesystemClient?.setOpenFiles(paths).catch((error) => {
-      setFilesystemError(toFilesystemErrorMessage(
-        error instanceof Error ? error.message : 'Failed to remember open file.',
-      ));
-    });
-  }, [filesystemClient, openFilePath]);
-
-  const subscribeTo = useCallback(async (
-    path: string,
-    shouldPushHistory: boolean,
-  ): Promise<FilesystemListing | undefined> => {
-    setFilesystemError(null);
-    const nextListing = await filesystemClient?.subscribe(path);
-
-    if (!shouldPushHistory) {
-      return nextListing;
-    }
-
-    setHistory((previous) => {
-      const trimmed =
-        historyIndex >= 0
-          ? previous.slice(0, historyIndex + 1)
-          : listing === null
-            ? []
-            : [currentPath];
-
-      if (trimmed[trimmed.length - 1] === path) {
-        setHistoryIndex(trimmed.length - 1);
-        return trimmed;
-      }
-
-      const next = [...trimmed, path];
-      const overflow = Math.max(0, next.length - HISTORY_LIMIT);
-      const bounded = next.slice(overflow);
-      setHistoryIndex(bounded.length - 1);
-
-      return bounded;
-    });
-
-    return nextListing;
-  }, [currentPath, filesystemClient, historyIndex, listing]);
-
-  const navigateTo = useCallback((path: string): void => {
-    void subscribeTo(path, true).catch((error) => {
-      setFilesystemError(error instanceof Error ? error.message : 'Failed to load folder.');
-    });
-  }, [subscribeTo]);
-
-  const closeOpenFile = useCallback((): void => {
-    openFileRequestRef.current += 1;
-    setOpenFileEntry(null);
-  }, []);
-
-  const openFile = useCallback((path: string): void => {
-    const normalizedPath = normalizeOpenFilePath(path);
-    const requestId = openFileRequestRef.current + 1;
-    openFileRequestRef.current = requestId;
-    setOpenFileEntry(null);
-
-    if (normalizedPath === null) {
-      return;
-    }
-
-    const commitOpenFileEntry = (entry: FilesystemEntry): void => {
-      setTimeout(() => {
-        if (openFileRequestRef.current === requestId) {
-          setOpenFileEntry(entry);
-        }
-      }, 0);
-    };
-
-    const openResolvedEntry = (entry: FilesystemEntry): void => {
-      if (entry.type === 'directory') {
-        navigateTo(entry.path);
-        return;
-      }
-
-      commitOpenFileEntry(entry);
-    };
-
-    if (normalizedPath.length === 0) {
-      navigateTo('');
-      return;
-    }
-
-    const visibleEntry = listing?.entries.find((entry) => entry.path === normalizedPath);
-    if (visibleEntry !== undefined) {
-      openResolvedEntry(visibleEntry);
-      return;
-    }
-
-    const parentPath = getParentPath(normalizedPath);
-    void (async () => {
-      const parentListing =
-        listing?.path === parentPath
-          ? listing
-          : await subscribeTo(parentPath, true);
-      const targetEntry = parentListing?.entries.find((entry) => entry.path === normalizedPath);
-
-      if (targetEntry !== undefined) {
-        openResolvedEntry(targetEntry);
-        return;
-      }
-
-      commitOpenFileEntry(createUnknownFileEntry(normalizedPath));
-    })().catch((error) => {
-      if (openFileRequestRef.current === requestId) {
-        setFilesystemError(error instanceof Error ? error.message : 'Failed to open file.');
-      }
-    });
-  }, [listing, navigateTo, subscribeTo]);
-
-  const setOpenFilePath = useCallback((path: string | null): void => {
-    if (path === null) {
-      closeOpenFile();
-      return;
-    }
-
-    openFile(path);
-  }, [closeOpenFile, openFile]);
+  const openFile = useCallback(
+    (path: string): void => {
+      void openWorkspacePath(path);
+    },
+    [openWorkspacePath],
+  );
 
   const goBack = useCallback((): void => {
-    if (historyIndex <= 0) {
-      return;
-    }
-
-    const nextIndex = historyIndex - 1;
-    setHistoryIndex(nextIndex);
-    void subscribeTo(history[nextIndex] ?? '', false).catch((error) => {
-      setFilesystemError(error instanceof Error ? error.message : 'Failed to load folder.');
-    });
-  }, [history, historyIndex, subscribeTo]);
+    void goBackAction();
+  }, [goBackAction]);
 
   const goForward = useCallback((): void => {
-    if (historyIndex >= history.length - 1) {
-      return;
-    }
+    void goForwardAction();
+  }, [goForwardAction]);
 
-    const nextIndex = historyIndex + 1;
-    setHistoryIndex(nextIndex);
-    void subscribeTo(history[nextIndex] ?? '', false).catch((error) => {
-      setFilesystemError(error instanceof Error ? error.message : 'Failed to load folder.');
-    });
-  }, [history, historyIndex, subscribeTo]);
+  const setOpenFilePath = useCallback(
+    (path: string | null): void => {
+      if (path === null) {
+        closeOpenFile();
+        return;
+      }
+
+      void openWorkspacePath(path);
+    },
+    [closeOpenFile, openWorkspacePath],
+  );
+
+  const refresh = useCallback(async (): Promise<void> => {
+    await machinesQuery.refetch();
+    await refreshFilesystem();
+  }, [machinesQuery, refreshFilesystem]);
 
   const value = useMemo<MobileMachineWorkspaceContextValue>(() => ({
     agentBaseUrl,
+    agentIdentity,
     canGoBack: historyIndex > 0,
     canGoForward: historyIndex >= 0 && historyIndex < history.length - 1,
     computer,
@@ -362,16 +410,13 @@ export function MobileMachineWorkspaceProvider({
     filesystemWebsocketUrl,
     goBack,
     goForward,
-    isLoading: machinesIsFetching || session.isLoading || isFilesystemLoading,
+    isLoading: session.isLoading || isFilesystemFetching,
     listing,
     navigateTo,
     openFile,
     openFileEntry,
     openFilePath,
-    refresh: async () => {
-      await machinesRefetch();
-      await filesystemClient?.subscribe('');
-    },
+    refresh,
     selectedAgentThreadId,
     session,
     closeOpenFile,
@@ -380,6 +425,8 @@ export function MobileMachineWorkspaceProvider({
     viewState,
   }), [
     agentBaseUrl,
+    agentIdentity,
+    closeOpenFile,
     computer,
     connectionStatus,
     currentDirectoryName,
@@ -392,35 +439,24 @@ export function MobileMachineWorkspaceProvider({
     goForward,
     history.length,
     historyIndex,
-    isFilesystemLoading,
+    isFilesystemFetching,
     listing,
-    machinesIsFetching,
-    machinesRefetch,
     navigateTo,
     openFile,
     openFileEntry,
     openFilePath,
+    refresh,
     selectedAgentThreadId,
     session,
-    closeOpenFile,
+    setSelectedAgentThreadId,
     setOpenFilePath,
     viewState,
   ]);
 
-  const contextContent = (
+  return (
     <MobileMachineWorkspaceContext.Provider value={value}>
       {children}
     </MobileMachineWorkspaceContext.Provider>
-  );
-
-  if (agentBaseUrl === null) {
-    return contextContent;
-  }
-
-  return (
-    <AgentRuntimeProvider key={computerId} agentBaseUrl={agentBaseUrl}>
-      {contextContent}
-    </AgentRuntimeProvider>
   );
 }
 
@@ -434,77 +470,23 @@ export function useMobileMachineWorkspace() {
   return value;
 }
 
-const buildGatewayWebsocketUrl = (input: {
-  readonly baseUrl: string;
-  readonly path: string;
-  readonly token: string;
-}): string => {
-  const url = new URL(input.path, input.baseUrl);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.searchParams.set('accessToken', input.token);
-
-  return url.toString();
-};
-
-const buildGatewayHttpUrl = (input: {
-  readonly baseUrl: string;
-  readonly path: string;
-  readonly token: string;
-}): string => {
-  const url = new URL(input.path, input.baseUrl);
-  url.searchParams.set('accessToken', input.token);
-
-  return url.toString();
-};
-
-const createInitialNavigationHistory = (path: string): string[] => {
-  const segments = path.trim().split('/').filter((segment) => segment.length > 0);
-
-  if (segments.length === 0) {
-    return [];
+function isAccessSessionUsable(
+  response: AccessSessionResponse | undefined,
+  computerId: string,
+): response is AccessSessionResponse {
+  if (response === undefined || response.accessSession.computerId !== computerId) {
+    return false;
   }
 
-  return [
-    '',
-    ...segments.map((_, index) => segments.slice(0, index + 1).join('/')),
-  ];
-};
+  const expiresAt = Date.parse(response.accessSession.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt - Date.now() > 60_000;
+}
 
-const normalizeOpenFilePath = (path: string): string | null => {
-  const parts: string[] = [];
+function getDirectoryName(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? 'workspace';
+}
 
-  for (const part of path.trim().replaceAll('\\', '/').split('/')) {
-    if (part.length === 0 || part === '.') {
-      continue;
-    }
-
-    if (part === '..') {
-      if (parts.length === 0) {
-        return null;
-      }
-
-      parts.pop();
-      continue;
-    }
-
-    parts.push(part);
-  }
-
-  return parts.join('/');
-};
-
-const getParentPath = (path: string): string => {
-  const segments = path.split('/').filter((segment) => segment.length > 0);
-  segments.pop();
-  return segments.join('/');
-};
-
-const createUnknownFileEntry = (path: string): FilesystemEntry => ({
-  name: path.split('/').filter(Boolean).at(-1) ?? path,
-  path,
-  type: 'file',
-  size: null,
-  updatedAt: new Date().toISOString(),
-  isHidden: false,
-  isSymlink: false,
-});
+function getErrorMessage(error: unknown): string | null {
+  if (error === null || error === undefined) return null;
+  return error instanceof Error ? error.message : 'Something went wrong.';
+}

@@ -1,14 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, useColorScheme, useWindowDimensions } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
+import { Alert, Linking, useColorScheme, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useStore } from 'zustand';
-import {
-  useAgentRunMutation,
-  useAgentRuntime,
-  type AgentContent,
-  type AgentUiContext,
-} from '@ank1015-app/ui/agent-hooks';
-import type { FilesystemEntry } from '@ank1015-app/ui/filesystem-types';
 
 import { FilesToolbar } from '@/components/machine-files/files-toolbar';
 import { createFileStyles, filePalettes } from '@/components/machine-files/file-screen-styles';
@@ -19,6 +13,14 @@ import { NameSheet, type NameDialogState } from '@/components/machine-files/name
 import { FilePreviewPane } from '@/components/machine-files/file-preview-pane';
 import { ThemedView } from '@/components/themed-view';
 import { useMobileMachineWorkspace } from '@/components/mobile-machine-workspace-provider';
+import { useAgentRun } from '@/hooks/agent/use-agent-run';
+import { useAuth } from '@/hooks/auth/use-auth';
+import { getNewThreadModelSelection } from '@/lib/agent/model-selection';
+import type { AgentContent, AgentUiContext } from '@/lib/agent/types';
+import type { FilesystemEntry, FilesystemUploadFile } from '@/lib/filesystem/types';
+import { useAgentChatStore } from '@/stores/agent/agent-chat-store';
+import { useAgentModelSelectionStore } from '@/stores/agent/agent-model-selection-store';
+import { useFilesystemStore } from '@/stores/filesystem/filesystem-store';
 
 const DEFAULT_NEW_FOLDER_NAME = 'untitled folder';
 const EMPTY_ENTRIES: readonly FilesystemEntry[] = [];
@@ -40,8 +42,6 @@ export default function MachineScreen() {
     currentPath,
     error,
     filesystemClient,
-    filesystemPreviewBaseUrl,
-    filesystemWebsocketUrl,
     goBack,
     goForward,
     isLoading,
@@ -51,12 +51,20 @@ export default function MachineScreen() {
     openFileEntry,
     closeOpenFile,
   } = useMobileMachineWorkspace();
+  const filesystemClipboard = useFilesystemStore((state) => state.filesystemClipboard);
+  const setFilesystemClipboard = useFilesystemStore((state) => state.setFilesystemClipboard);
+  const clearFilesystemClipboard = useFilesystemStore((state) => state.clearFilesystemClipboard);
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [isNameSubmitting, setIsNameSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const entries = listing?.entries ?? EMPTY_ENTRIES;
   const isInitialLoading = isLoading && listing === null;
   const previewEntry = openFileEntry;
+  const canPaste =
+    filesystemClient !== null &&
+    filesystemClipboard !== null &&
+    filesystemClipboard.entries.length > 0;
 
   const openCreateFolderDialog = useCallback(() => {
     setNameDialog({ mode: 'create-folder', initialName: DEFAULT_NEW_FOLDER_NAME });
@@ -81,6 +89,91 @@ export default function MachineScreen() {
   const closePreview = useCallback(() => {
     closeOpenFile();
   }, [closeOpenFile]);
+
+  const copyEntry = useCallback((entry: FilesystemEntry) => {
+    setFilesystemClipboard('copy', [entry]);
+  }, [setFilesystemClipboard]);
+
+  const cutEntry = useCallback((entry: FilesystemEntry) => {
+    setFilesystemClipboard('cut', [entry]);
+  }, [setFilesystemClipboard]);
+
+  const pasteClipboard = useCallback(() => {
+    void (async () => {
+      if (filesystemClient === null || filesystemClipboard === null) {
+        return;
+      }
+
+      try {
+        await filesystemClient.paste(
+          filesystemClipboard.mode === 'cut' ? 'move' : 'copy',
+          filesystemClipboard.entries.map((entry) => entry.path),
+          currentPath,
+        );
+        if (filesystemClipboard.mode === 'cut') {
+          clearFilesystemClipboard();
+        }
+      } catch (pasteError) {
+        Alert.alert(
+          'Paste',
+          pasteError instanceof Error ? pasteError.message : 'Failed to paste items.',
+        );
+      }
+    })();
+  }, [clearFilesystemClipboard, currentPath, filesystemClient, filesystemClipboard]);
+
+  const downloadEntry = useCallback((entry: FilesystemEntry) => {
+    void (async () => {
+      if (filesystemClient === null) {
+        Alert.alert('Download', 'Filesystem is not connected.');
+        return;
+      }
+
+      try {
+        await Linking.openURL(filesystemClient.getDownloadUrl([entry.path]));
+      } catch (downloadError) {
+        Alert.alert(
+          'Download',
+          downloadError instanceof Error
+            ? downloadError.message
+            : 'Failed to open download.',
+        );
+      }
+    })();
+  }, [filesystemClient]);
+
+  const uploadFiles = useCallback(() => {
+    void (async () => {
+      if (isUploading) return;
+      if (filesystemClient === null) {
+        Alert.alert('Upload Files', 'Filesystem is not connected.');
+        return;
+      }
+
+      setIsUploading(true);
+      try {
+        const result = await DocumentPicker.getDocumentAsync({
+          multiple: true,
+          copyToCacheDirectory: true,
+          base64: false,
+        });
+        if (result.canceled || result.assets.length === 0) {
+          return;
+        }
+
+        const files = await Promise.all(result.assets.map(toFilesystemUploadFile));
+        await filesystemClient.upload(currentPath, files);
+        await filesystemClient.refresh();
+      } catch (uploadError) {
+        Alert.alert(
+          'Upload Files',
+          uploadError instanceof Error ? uploadError.message : 'Failed to upload files.',
+        );
+      } finally {
+        setIsUploading(false);
+      }
+    })();
+  }, [currentPath, filesystemClient, isUploading]);
 
   const submitNameDialog = useCallback(
     async (rawName: string) => {
@@ -137,6 +230,7 @@ export default function MachineScreen() {
             <FilesToolbar
               canGoBack={canGoBack}
               canGoForward={canGoForward}
+              canPaste={canPaste}
               currentPath={currentPath}
               directoryName={currentDirectoryName}
               palette={palette}
@@ -144,6 +238,8 @@ export default function MachineScreen() {
               onCreateFolder={openCreateFolderDialog}
               onGoBack={goBack}
               onGoForward={goForward}
+              onPaste={pasteClipboard}
+              onUploadFiles={uploadFiles}
             />
           </SafeAreaView>
 
@@ -155,6 +251,9 @@ export default function MachineScreen() {
             isLoading={isInitialLoading}
             palette={palette}
             styles={styles}
+            onCopyEntry={copyEntry}
+            onCutEntry={cutEntry}
+            onDownloadEntry={downloadEntry}
             onOpenEntry={openPreview}
             onRenameEntry={openRenameDialog}
           />
@@ -163,8 +262,7 @@ export default function MachineScreen() {
         <FilePreviewPane
           key={previewEntry.path}
           entry={previewEntry}
-          filesystemPreviewBaseUrl={filesystemPreviewBaseUrl}
-          filesystemWebsocketUrl={filesystemWebsocketUrl}
+          filesystemClient={filesystemClient}
           palette={palette}
           onBack={closePreview}
         />
@@ -189,19 +287,47 @@ export default function MachineScreen() {
   );
 }
 
+async function toFilesystemUploadFile(
+  asset: DocumentPicker.DocumentPickerAsset,
+): Promise<FilesystemUploadFile> {
+  const base64 =
+    asset.base64 ??
+    (await readAsStringAsync(asset.uri, { encoding: EncodingType.Base64 }));
+  const contentBase64 = stripDataUrlPrefix(base64);
+
+  return {
+    relativePath: asset.name,
+    type: 'file',
+    contentBase64,
+    updatedAt: Number.isFinite(asset.lastModified)
+      ? new Date(asset.lastModified).toISOString()
+      : undefined,
+  };
+}
+
+function stripDataUrlPrefix(value: string): string {
+  const commaIndex = value.indexOf(',');
+  return value.startsWith('data:') && commaIndex >= 0
+    ? value.slice(commaIndex + 1)
+    : value;
+}
+
 function FilesAgentVoiceButton({
   palette,
 }: {
   palette: (typeof filePalettes)['light'] | (typeof filePalettes)['dark'];
 }) {
   const {
+    agentBaseUrl,
+    agentIdentity,
     currentPath,
     openFilePath,
     selectedAgentThreadId,
     setSelectedAgentThreadId,
   } = useMobileMachineWorkspace();
-  const runtime = useAgentRuntime();
-  const isRunning = useStore(runtime.chatStore, (state) => state.activeRun !== null);
+  const auth = useAuth();
+  const isRunning = useAgentChatStore((state) => state.activeRun !== null);
+  const promptModelChoice = useAgentModelSelectionStore((state) => state.promptModelChoice);
 
   const uiContext = useMemo<AgentUiContext>(
     () => ({
@@ -211,7 +337,9 @@ function FilesAgentVoiceButton({
     [openFilePath],
   );
 
-  const { submit, steer } = useAgentRunMutation({
+  const { submit, steer } = useAgentRun({
+    agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
     currentPath,
     selectedThreadId: selectedAgentThreadId,
     uiContext,
@@ -223,9 +351,20 @@ function FilesAgentVoiceButton({
   const sendTranscript = useCallback(
     (transcript: string) => {
       const content: AgentContent = [{ type: 'text', content: transcript }];
-      return isRunning ? steer({ content }) : submit({ content });
+      if (isRunning) {
+        return steer({ content });
+      }
+
+      return submit({
+        content,
+        ...getNewThreadModelSelection({
+          allowModelSelection: auth.user?.allowPiModels === true,
+          selectedThreadId: selectedAgentThreadId,
+          promptModelChoice,
+        }),
+      });
     },
-    [isRunning, steer, submit],
+    [auth.user?.allowPiModels, isRunning, promptModelChoice, selectedAgentThreadId, steer, submit],
   );
 
   return (
