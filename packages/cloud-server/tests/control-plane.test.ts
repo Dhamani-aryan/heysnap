@@ -554,6 +554,9 @@ describe("cloud server computer access sessions", () => {
       filesystemPreviewBaseUrl: `/gateway/computers/${computer.id}/preview`,
       filesystemPreviewWebSocketUrl: `/gateway/computers/${computer.id}/preview/ws`,
       browserControlWebSocketUrl: `/gateway/computers/${computer.id}/browser-control`,
+      browserControlStatusUrl: `/gateway/computers/${computer.id}/browser-control/status`,
+      browserViewPublishWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/publish`,
+      browserViewSubscribeWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/subscribe`,
       agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
       capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
     });
@@ -919,6 +922,62 @@ describe("cloud server computer access sessions", () => {
       method: "POST",
       body: JSON.stringify({}),
       contentType: "application/json",
+    }]);
+  });
+
+  it("proxies browser-control status through authenticated gateway access sessions", async () => {
+    const requested: Array<{
+      readonly path: string;
+      readonly method?: string;
+      readonly trafficClass?: string;
+    }> = [];
+    const tunnelRegistry: TunnelStatusRegistry = {
+      isConnected: () => true,
+      proxyHttpRequest: async (_computerId, input) => {
+        requested.push({
+          path: input.path,
+          method: input.method,
+          trafficClass: input.trafficClass,
+        });
+        return {
+          statusCode: 200,
+          headers: { "content-type": "application/json" },
+          body: Buffer.from(JSON.stringify({
+            status: {
+              connected: true,
+              clientId: "browser-client-1",
+              capabilities: ["chrome.runtime"],
+              lastSeenAt: "2026-05-11T00:00:00.000Z",
+            },
+          }), "utf8"),
+        };
+      },
+    };
+    const { app } = createTestApp({ tunnelRegistry });
+    const auth = await registerUser(app, "browser-status-user@example.com");
+    const computer = await createComputer(app, auth.token, "Browser Status VM");
+    const accessResponse = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+    const accessBody = await accessResponse.json() as AccessSessionResponse;
+
+    const response = await app.request(
+      `/gateway/computers/${computer.id}/browser-control/status?accessToken=${accessBody.accessSession.token}&userId=other-user`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    await expect(response.json()).resolves.toMatchObject({
+      status: {
+        connected: true,
+        clientId: "browser-client-1",
+      },
+    });
+    expect(requested).toEqual([{
+      path: `/browser-control/status?userId=${encodeURIComponent(auth.userId)}`,
+      method: "GET",
+      trafficClass: "browser-control:http",
     }]);
   });
 
@@ -1500,6 +1559,9 @@ interface AccessSessionResponse {
     readonly filesystemPreviewBaseUrl: string;
     readonly filesystemPreviewWebSocketUrl: string;
     readonly browserControlWebSocketUrl: string;
+    readonly browserControlStatusUrl: string;
+    readonly browserViewPublishWebSocketUrl: string;
+    readonly browserViewSubscribeWebSocketUrl: string;
     readonly agentBaseUrl: string;
     readonly capabilitiesBaseUrl: string;
   };
