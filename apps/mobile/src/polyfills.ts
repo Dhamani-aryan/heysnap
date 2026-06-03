@@ -9,22 +9,30 @@ import { polyfill as polyfillBase64 } from 'react-native-polyfill-globals/src/ba
 import { polyfill as polyfillEncoding } from 'react-native-polyfill-globals/src/encoding';
 import { polyfill as polyfillReadableStream } from 'react-native-polyfill-globals/src/readable-stream';
 import { polyfill as polyfillUrl } from 'react-native-polyfill-globals/src/url';
-import { polyfill as polyfillFetch } from 'react-native-polyfill-globals/src/fetch';
+import { Platform } from 'react-native';
 
 polyfillBase64();
 polyfillEncoding();
 polyfillReadableStream();
 polyfillUrl();
-polyfillFetch();
 
-const baseFetch = globalThis.fetch;
+if (Platform.OS !== 'web') {
+  // Native-only polyfill cannot be imported during web/static rendering.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fetchPolyfillModule = require('react-native-polyfill-globals/src/fetch') as typeof import('react-native-polyfill-globals/src/fetch');
+  const { polyfill: polyfillFetch } = fetchPolyfillModule;
 
-const wrappedFetch: typeof fetch = (input, init) => {
-  const reactNative = {
-    textStreaming: true,
-    ...((init as { reactNative?: Record<string, unknown> } | undefined)?.reactNative ?? {}),
+  polyfillFetch();
+
+  const baseFetch = globalThis.fetch;
+
+  const wrappedFetch: typeof fetch = (input, init) => {
+    const reactNative = {
+      textStreaming: true,
+      ...((init as { reactNative?: Record<string, unknown> } | undefined)?.reactNative ?? {}),
+    };
+    return baseFetch(input as RequestInfo, { ...init, reactNative } as RequestInit);
   };
-  return baseFetch(input as RequestInfo, { ...init, reactNative } as RequestInit);
-};
 
-(globalThis as { fetch: typeof fetch }).fetch = wrappedFetch;
+  (globalThis as { fetch: typeof fetch }).fetch = wrappedFetch;
+}
