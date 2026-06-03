@@ -19,9 +19,15 @@ import { HugeiconsIcon } from '@hugeicons/react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import type { AgentContent } from '@ank1015-app/ui/agent-hooks';
 
 import { ThemedText } from '@/components/themed-text';
+import type { PromptModelChoice } from '@/lib/agent/model-selection';
+import type { AgentContent } from '@/lib/agent/types';
+import {
+  selectPromptDraft,
+  useAgentPromptDraftStore,
+  type PromptAttachment,
+} from '@/stores/agent/agent-prompt-draft-store';
 
 type Palette = {
   background: string;
@@ -35,19 +41,16 @@ type Palette = {
   errorText: string;
 };
 
-type ComposerAttachment = {
-  id: string;
-  kind: 'image' | 'file';
-  fileName: string;
-  mimeType: string;
-  size: number;
-  base64: string;
-};
-
 type MobileAgentComposerProps = {
   palette: Palette;
   activeFolderName?: string;
   isRunning: boolean;
+  modelPicker?: {
+    value: PromptModelChoice;
+    disabled: boolean;
+    onChange: (choice: PromptModelChoice) => void;
+  };
+  threadId: string | null;
   onSubmit: (input: { content: AgentContent }) => boolean | void | Promise<boolean | void>;
   onCancel: () => void;
 };
@@ -71,22 +74,22 @@ const newAttachmentId = (): string =>
 
 const buildAgentContent = (
   text: string,
-  attachments: readonly ComposerAttachment[],
+  attachments: readonly PromptAttachment[],
 ): AgentContent => {
   const trimmed = text.trim();
   const content: AgentContent = [
     ...(trimmed.length > 0 ? [{ type: 'text' as const, content: trimmed }] : []),
     ...attachments.map((attachment) =>
-      attachment.kind === 'image'
+      attachment.type === 'image'
         ? {
             type: 'image' as const,
-            data: attachment.base64,
+            data: attachment.content,
             mimeType: attachment.mimeType,
             metadata: { filename: attachment.fileName, size: attachment.size },
           }
         : {
             type: 'file' as const,
-            data: attachment.base64,
+            data: attachment.content,
             mimeType: attachment.mimeType,
             filename: attachment.fileName,
             metadata: { size: attachment.size },
@@ -100,16 +103,20 @@ export function MobileAgentComposer({
   palette,
   activeFolderName,
   isRunning,
+  modelPicker,
+  threadId,
   onSubmit,
   onCancel,
 }: MobileAgentComposerProps) {
-  const [draft, setDraft] = useState('');
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const draft = useAgentPromptDraftStore(selectPromptDraft(threadId));
+  const setText = useAgentPromptDraftStore((state) => state.setText);
+  const setAttachments = useAgentPromptDraftStore((state) => state.setAttachments);
+  const clearDraft = useAgentPromptDraftStore((state) => state.clearDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [resetKey, setResetKey] = useState(0);
   const inputRef = useRef<TextInput>(null);
+  const attachments = draft.attachments;
 
-  const canSubmit = draft.trim().length > 0 || attachments.length > 0;
+  const canSubmit = draft.text.trim().length > 0 || attachments.length > 0;
 
   const handleAddImage = useCallback(async () => {
     try {
@@ -129,25 +136,25 @@ export function MobileAgentComposer({
         return;
       }
 
-      const nextAttachments: ComposerAttachment[] = [];
+      const nextAttachments: PromptAttachment[] = [];
       for (const asset of result.assets) {
         if (asset.base64 === null || asset.base64 === undefined) {
           continue;
         }
         nextAttachments.push({
           id: newAttachmentId(),
-          kind: 'image',
+          type: 'image',
           fileName: asset.fileName ?? 'image',
           mimeType: asset.mimeType ?? guessMime(asset.uri, 'image/jpeg'),
           size: asset.fileSize ?? 0,
-          base64: asset.base64,
+          content: asset.base64,
         });
       }
-      setAttachments((current) => [...current, ...nextAttachments]);
+      setAttachments(threadId, [...attachments, ...nextAttachments]);
     } catch (error) {
       Alert.alert('Attach image', error instanceof Error ? error.message : 'Failed to attach.');
     }
-  }, []);
+  }, [attachments, setAttachments, threadId]);
 
   const handleAddFile = useCallback(async () => {
     try {
@@ -159,29 +166,32 @@ export function MobileAgentComposer({
         return;
       }
 
-      const nextAttachments: ComposerAttachment[] = [];
+      const nextAttachments: PromptAttachment[] = [];
       for (const asset of result.assets) {
         const base64 = await FileSystem.readAsStringAsync(asset.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
         nextAttachments.push({
           id: newAttachmentId(),
-          kind: 'file',
+          type: 'file',
           fileName: asset.name,
           mimeType: asset.mimeType ?? guessMime(asset.uri, 'application/octet-stream'),
           size: asset.size ?? 0,
-          base64,
+          content: base64,
         });
       }
-      setAttachments((current) => [...current, ...nextAttachments]);
+      setAttachments(threadId, [...attachments, ...nextAttachments]);
     } catch (error) {
       Alert.alert('Attach file', error instanceof Error ? error.message : 'Failed to attach.');
     }
-  }, []);
+  }, [attachments, setAttachments, threadId]);
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
-  }, []);
+    setAttachments(
+      threadId,
+      attachments.filter((attachment) => attachment.id !== id),
+    );
+  }, [attachments, setAttachments, threadId]);
 
   const handleSend = useCallback(async () => {
     if (!canSubmit || isSubmitting) {
@@ -190,19 +200,17 @@ export function MobileAgentComposer({
 
     setIsSubmitting(true);
     try {
-      const didSubmit = await onSubmit({ content: buildAgentContent(draft, attachments) });
+      const didSubmit = await onSubmit({ content: buildAgentContent(draft.text, attachments) });
 
       if (didSubmit === false) {
         return;
       }
 
-      setDraft('');
-      setAttachments([]);
-      setResetKey((current) => current + 1);
+      clearDraft(threadId);
     } finally {
       setIsSubmitting(false);
     }
-  }, [attachments, canSubmit, draft, isSubmitting, onSubmit]);
+  }, [attachments, canSubmit, clearDraft, draft.text, isSubmitting, onSubmit, threadId]);
 
   const isStopAction = isRunning && !canSubmit;
 
@@ -235,15 +243,14 @@ export function MobileAgentComposer({
 
       <Pressable onPress={() => inputRef.current?.focus()} style={styles.inputArea}>
         <TextInput
-          key={resetKey}
           ref={inputRef}
           editable={!isSubmitting}
           multiline
-          onChangeText={setDraft}
+          onChangeText={(text) => setText(threadId, text)}
           placeholder="What's next…"
           placeholderTextColor={palette.textMuted}
           style={[styles.input, { color: palette.textPrimary }]}
-          value={draft}
+          value={draft.text}
         />
       </Pressable>
 
@@ -270,6 +277,9 @@ export function MobileAgentComposer({
                 {activeFolderName}
               </ThemedText>
             </View>
+          )}
+          {modelPicker === undefined ? null : (
+            <ModelSegmentedControl modelPicker={modelPicker} palette={palette} />
           )}
         </View>
 
@@ -307,6 +317,50 @@ export function MobileAgentComposer({
   );
 }
 
+function ModelSegmentedControl({
+  modelPicker,
+  palette,
+}: {
+  modelPicker: NonNullable<MobileAgentComposerProps['modelPicker']>;
+  palette: Palette;
+}) {
+  return (
+    <View
+      accessibilityLabel="Model"
+      style={[
+        styles.modelControl,
+        { backgroundColor: palette.surfaceMuted, borderColor: palette.border },
+        modelPicker.disabled && styles.modelControlDisabled,
+      ]}>
+      {MODEL_OPTIONS.map((option) => {
+        const isSelected = modelPicker.value === option.value;
+        return (
+          <Pressable
+            key={option.value}
+            accessibilityLabel={option.label}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: modelPicker.disabled, selected: isSelected }}
+            disabled={modelPicker.disabled}
+            onPress={() => modelPicker.onChange(option.value)}
+            style={({ pressed }) => [
+              styles.modelOption,
+              isSelected && { backgroundColor: palette.background },
+              pressed && !modelPicker.disabled && { opacity: 0.7 },
+            ]}>
+            <ThemedText
+              style={[
+                styles.modelOptionText,
+                { color: isSelected ? palette.textPrimary : palette.textSecondary },
+              ]}>
+              {option.label}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function ComposerIconButton({
   accessibilityLabel,
   disabled,
@@ -337,20 +391,25 @@ function ComposerIconButton({
   );
 }
 
+const MODEL_OPTIONS: readonly { value: PromptModelChoice; label: string }[] = [
+  { value: 'gpt', label: 'GPT' },
+  { value: 'claude', label: 'Claude' },
+];
+
 function AttachmentChip({
   attachment,
   palette,
   onRemove,
 }: {
-  attachment: ComposerAttachment;
+  attachment: PromptAttachment;
   palette: Palette;
   onRemove: () => void;
 }) {
-  if (attachment.kind === 'image') {
+  if (attachment.type === 'image') {
     return (
       <View style={[styles.imageChip, { borderColor: palette.border }]}>
         <Image
-          source={{ uri: `data:${attachment.mimeType};base64,${attachment.base64}` }}
+          source={{ uri: `data:${attachment.mimeType};base64,${attachment.content}` }}
           style={styles.imageChipImage}
         />
         <Pressable
@@ -438,9 +497,34 @@ const styles = StyleSheet.create({
   leftActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
     flexShrink: 1,
     minWidth: 0,
+  },
+  modelControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 9,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 2,
+    gap: 2,
+  },
+  modelControlDisabled: {
+    opacity: 0.52,
+  },
+  modelOption: {
+    minWidth: 44,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    paddingHorizontal: 8,
+  },
+  modelOptionText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
   },
   iconButton: {
     width: 32,
