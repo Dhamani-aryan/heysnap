@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type ClientRequest, type IncomingMessage, type Server } from "node:http";
 import { EventEmitter } from "node:events";
 import type { ReadableStream } from "node:stream/web";
 
@@ -340,6 +340,198 @@ describe("gateway tunnel", () => {
     await closeServer(server);
   });
 
+  it("relays browser-view publisher frames to subscribers without a machine tunnel", async () => {
+    const { server, baseUrl, store } = await startTunnelServer();
+    const user = await store.createUser({ email: "view-user@example.com", username: "view-user", passwordHash: "hash" });
+    const computer = await store.createComputer({
+      ownerUserId: user.id,
+      name: "VM",
+      kind: "cloud",
+      status: "idle",
+      providerMetadata: {},
+      capabilities: ["filesystem", "agent"],
+    });
+    const access = await new GatewayAccessService(store, config).createAccessSession({
+      userId: user.id,
+      computerId: computer.id,
+    });
+
+    const publisherOpen = await openWebSocketWithJsonMessage<{
+      readonly type: string;
+      readonly subscriberCount: number;
+    }>(
+      `${baseUrl}/gateway/computers/${computer.id}/browser-view/publish?accessToken=${access.token}`,
+    );
+    const publisher = publisherOpen.webSocket;
+    expect(publisherOpen.message).toMatchObject({
+      type: "publisher.ready",
+      subscriberCount: 0,
+    });
+
+    const subscriberOpen = await openWebSocketWithJsonMessage<{
+      readonly type: string;
+      readonly connected: boolean;
+    }>(
+      `${baseUrl}/gateway/computers/${computer.id}/browser-view/subscribe?accessToken=${access.token}`,
+    );
+    const subscriber = subscriberOpen.webSocket;
+    expect(subscriberOpen.message).toMatchObject({
+      type: "publisher.status",
+      connected: true,
+    });
+
+    const commandMessage = {
+      type: "browser.command",
+      requestId: "command-1",
+      command: "navigate",
+      url: "example.com",
+    };
+    const commandForwardPromise = waitForJsonMessage(publisher);
+    subscriber.send(JSON.stringify(commandMessage));
+    await expect(commandForwardPromise).resolves.toEqual(commandMessage);
+
+    const activeTabMessage = {
+      type: "activeTab",
+      windowId: 12,
+      tabId: 34,
+      title: "Example",
+      url: "https://example.com",
+      timestamp: "2026-06-03T00:00:00.000Z",
+    };
+    const browserStatusMessage = {
+      type: "browser.status",
+      connected: true,
+      extensionStatus: "available",
+      connectionStatus: "connected",
+      windowId: 12,
+      windowReady: true,
+      timestamp: "2026-06-03T00:00:01.000Z",
+    };
+    const streamStatusMessage = {
+      type: "stream.status",
+      streaming: true,
+      timestamp: "2026-06-03T00:00:02.000Z",
+    };
+    const stoppedStreamStatusMessage = {
+      type: "stream.status",
+      streaming: false,
+      timestamp: "2026-06-03T00:00:03.000Z",
+    };
+    const frameMessage = {
+      type: "frame",
+      sequence: 1,
+      tabId: 34,
+      aspectRatio: 390 / 844,
+      mimeType: "image/jpeg",
+      byteLength: 4,
+      receivedAt: 123,
+      sentAt: 456,
+    };
+    const frameBytes = Buffer.from([1, 2, 3, 4]);
+    const activeTabPromise = waitForJsonMessage(subscriber);
+    publisher.send(JSON.stringify(activeTabMessage));
+    await expect(activeTabPromise).resolves.toEqual(activeTabMessage);
+
+    const browserStatusPromise = waitForJsonMessage(subscriber);
+    publisher.send(JSON.stringify(browserStatusMessage));
+    await expect(browserStatusPromise).resolves.toEqual(browserStatusMessage);
+
+    const streamStatusPromise = waitForJsonMessage(subscriber);
+    publisher.send(JSON.stringify(streamStatusMessage));
+    await expect(streamStatusPromise).resolves.toEqual(streamStatusMessage);
+
+    const frameMetadataPromise = waitForJsonMessage(subscriber);
+    const frameBinaryPromise = waitForRawBinaryMessage(subscriber);
+    publisher.send(JSON.stringify(frameMessage));
+    publisher.send(frameBytes);
+
+    await expect(frameMetadataPromise).resolves.toEqual(frameMessage);
+    await expect(frameBinaryPromise).resolves.toEqual(frameBytes);
+
+    const lateSubscriberOpen = await openWebSocketWithInitialMessages(
+      `${baseUrl}/gateway/computers/${computer.id}/browser-view/subscribe?accessToken=${access.token}`,
+      6,
+    );
+    const lateSubscriber = lateSubscriberOpen.webSocket;
+    expect(lateSubscriberOpen.messages[0]).toMatchObject({
+      kind: "json",
+      message: {
+        type: "publisher.status",
+        connected: true,
+      },
+    });
+    expect(lateSubscriberOpen.messages[1]).toEqual({
+      kind: "json",
+      message: activeTabMessage,
+    });
+    expect(lateSubscriberOpen.messages[2]).toEqual({
+      kind: "json",
+      message: browserStatusMessage,
+    });
+    expect(lateSubscriberOpen.messages[3]).toEqual({
+      kind: "json",
+      message: streamStatusMessage,
+    });
+    expect(lateSubscriberOpen.messages[4]).toEqual({
+      kind: "json",
+      message: frameMessage,
+    });
+    expect(lateSubscriberOpen.messages[5]).toMatchObject({
+      kind: "binary",
+    });
+    expect(
+      lateSubscriberOpen.messages[5]?.kind === "binary" ? lateSubscriberOpen.messages[5].data : null,
+    ).toEqual(frameBytes);
+
+    const stoppedStreamPromise = waitForJsonMessage(subscriber);
+    const lateStoppedStreamPromise = waitForJsonMessage(lateSubscriber);
+    publisher.send(JSON.stringify(stoppedStreamStatusMessage));
+    await expect(stoppedStreamPromise).resolves.toEqual(stoppedStreamStatusMessage);
+    await expect(lateStoppedStreamPromise).resolves.toEqual(stoppedStreamStatusMessage);
+
+    const stoppedLateSubscriberOpen = await openWebSocketWithInitialMessages(
+      `${baseUrl}/gateway/computers/${computer.id}/browser-view/subscribe?accessToken=${access.token}`,
+      4,
+    );
+    const stoppedLateSubscriber = stoppedLateSubscriberOpen.webSocket;
+    expect(stoppedLateSubscriberOpen.messages).toEqual([
+      {
+        kind: "json",
+        message: {
+          type: "publisher.status",
+          connected: true,
+        },
+      },
+      {
+        kind: "json",
+        message: activeTabMessage,
+      },
+      {
+        kind: "json",
+        message: browserStatusMessage,
+      },
+      {
+        kind: "json",
+        message: stoppedStreamStatusMessage,
+      },
+    ]);
+
+    publisher.close();
+    await expect(waitForJsonMessage(subscriber)).resolves.toMatchObject({
+      type: "publisher.status",
+      connected: false,
+    });
+    await expect(waitForJsonMessage(lateSubscriber)).resolves.toMatchObject({
+      type: "publisher.status",
+      connected: false,
+    });
+
+    subscriber.close();
+    lateSubscriber.close();
+    stoppedLateSubscriber.close();
+    await closeServer(server);
+  });
+
   it("routes preview websocket subpaths through a connected machine tunnel", async () => {
     const { server, baseUrl, user, computer, access, machine } = await startConnectedTunnel();
     const machineOpen = waitForJsonMessage<CloudOpenMessage>(machine);
@@ -519,6 +711,128 @@ const openWebSocket = (
     });
   });
 
+const openWebSocketWithJsonMessage = <TMessage>(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<{ readonly webSocket: WebSocket; readonly message: TMessage }> =>
+  new Promise((resolve, reject) => {
+    const webSocket = new WebSocket(url, { headers });
+    let opened = false;
+    let message: TMessage | null = null;
+
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      webSocket.off("open", onOpen);
+      webSocket.off("message", onMessage);
+      webSocket.off("error", onError);
+      webSocket.off("unexpected-response", onUnexpectedResponse);
+    };
+    const maybeResolve = (): void => {
+      if (!opened || message === null) return;
+      cleanup();
+      resolve({ webSocket, message });
+    };
+    const onOpen = (): void => {
+      opened = true;
+      maybeResolve();
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const onUnexpectedResponse = (_request: ClientRequest, response: IncomingMessage): void => {
+      cleanup();
+      reject(new Error(`Unexpected response ${String(response.statusCode)}`));
+    };
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+      if (isBinary || message !== null) {
+        return;
+      }
+
+      try {
+        message = JSON.parse(data.toString("utf8")) as TMessage;
+        maybeResolve();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      webSocket.close();
+      reject(new Error("Timed out waiting for websocket open message"));
+    }, 3000);
+
+    webSocket.on("open", onOpen);
+    webSocket.on("message", onMessage);
+    webSocket.once("error", onError);
+    webSocket.once("unexpected-response", onUnexpectedResponse);
+  });
+
+type CapturedWebSocketMessage =
+  | { readonly kind: "json"; readonly message: unknown }
+  | { readonly kind: "binary"; readonly data: Buffer };
+
+const openWebSocketWithInitialMessages = (
+  url: string,
+  messageCount: number,
+  headers?: Record<string, string>,
+): Promise<{ readonly webSocket: WebSocket; readonly messages: readonly CapturedWebSocketMessage[] }> =>
+  new Promise((resolve, reject) => {
+    const webSocket = new WebSocket(url, { headers });
+    const messages: CapturedWebSocketMessage[] = [];
+    let opened = false;
+    let resolved = false;
+
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      webSocket.off("open", onOpen);
+      webSocket.off("message", onMessage);
+      webSocket.off("error", onError);
+      webSocket.off("unexpected-response", onUnexpectedResponse);
+    };
+    const maybeResolve = (): void => {
+      if (!opened || resolved || messages.length < messageCount) return;
+      resolved = true;
+      cleanup();
+      resolve({ webSocket, messages });
+    };
+    const onOpen = (): void => {
+      opened = true;
+      maybeResolve();
+    };
+    const onError = (error: Error): void => {
+      if (resolved) return;
+      cleanup();
+      reject(error);
+    };
+    const onUnexpectedResponse = (_request: ClientRequest, response: IncomingMessage): void => {
+      cleanup();
+      reject(new Error(`Unexpected response ${String(response.statusCode)}`));
+    };
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+      try {
+        messages.push(isBinary
+          ? { kind: "binary", data: rawWebSocketDataToBuffer(data) }
+          : { kind: "json", message: JSON.parse(data.toString("utf8")) });
+        maybeResolve();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      webSocket.close();
+      reject(new Error("Timed out waiting for websocket initial messages"));
+    }, 3000);
+
+    webSocket.on("open", onOpen);
+    webSocket.on("message", onMessage);
+    webSocket.once("error", onError);
+    webSocket.once("unexpected-response", onUnexpectedResponse);
+  });
+
 const waitForJsonMessage = <TMessage>(webSocket: WebSocket): Promise<TMessage> =>
   new Promise((resolve, reject) => {
     const cleanup = (): void => {
@@ -582,6 +896,41 @@ const waitForBinaryFrame = (webSocket: WebSocket): Promise<TunnelBinaryFrame> =>
     webSocket.on("message", onMessage);
     webSocket.once("error", onError);
   });
+
+const waitForRawBinaryMessage = (webSocket: WebSocket): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      webSocket.off("message", onMessage);
+      webSocket.off("error", onError);
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean): void => {
+      if (!isBinary) {
+        return;
+      }
+
+      cleanup();
+      resolve(rawWebSocketDataToBuffer(data));
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for websocket binary message"));
+    }, 3000);
+    webSocket.on("message", onMessage);
+    webSocket.once("error", onError);
+  });
+
+const rawWebSocketDataToBuffer = (data: WebSocket.RawData): Buffer => {
+  if (Buffer.isBuffer(data)) {
+    return data;
+  }
+
+  return data instanceof ArrayBuffer ? Buffer.from(data) : Buffer.concat(data);
+};
 
 const waitForHttpRequestMessage = (webSocket: WebSocket): Promise<CloudHttpRequestMessage> =>
   new Promise((resolve, reject) => {

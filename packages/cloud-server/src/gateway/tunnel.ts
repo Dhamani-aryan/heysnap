@@ -33,6 +33,8 @@ export { normalizeWebSocketCloseCode };
 const PREVIEW_ACCESS_COOKIE_NAME = "heysnap_preview_access";
 const DEFAULT_TUNNEL_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_TUNNEL_HEARTBEAT_TIMEOUT_MS = 10_000;
+const BROWSER_VIEW_MAX_FRAME_BYTES = 2 * 1024 * 1024;
+const BROWSER_VIEW_MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 export interface GatewayRouteMetadata {
   readonly userId: string;
@@ -144,13 +146,338 @@ export class MachineTunnelRegistry {
   }
 }
 
+type BrowserViewRole = "publish" | "subscribe";
+
+interface BrowserViewRouteMatch {
+  readonly computerId: string;
+  readonly role: BrowserViewRole;
+}
+
+interface BrowserViewSessionKey {
+  readonly computerId: string;
+  readonly userId: string;
+}
+
+interface BrowserViewSession {
+  publisher: WebSocket | null;
+  readonly subscribers: Set<WebSocket>;
+  latestActiveTabMetadata: string | null;
+  latestBrowserStatusMetadata: string | null;
+  latestFrameMetadata: string | null;
+  latestFrame: Buffer | null;
+  latestStreamStatusMetadata: string | null;
+  latestTabsMetadata: string | null;
+}
+
+class BrowserViewRelayRegistry {
+  private readonly sessions = new Map<string, BrowserViewSession>();
+
+  attachPublisher(
+    webSocket: WebSocket,
+    key: BrowserViewSessionKey,
+    accessSessionId: string,
+  ): void {
+    const session = this.getOrCreateSession(key);
+    const previousPublisher = session.publisher;
+
+    if (previousPublisher !== null && previousPublisher !== webSocket) {
+      previousPublisher.close(1012, "Browser-view publisher replaced");
+    }
+
+    session.publisher = webSocket;
+    session.latestActiveTabMetadata = null;
+    session.latestBrowserStatusMetadata = null;
+    session.latestFrameMetadata = null;
+    session.latestFrame = null;
+    session.latestStreamStatusMetadata = null;
+    session.latestTabsMetadata = null;
+
+    logger.info({
+      event: "browser_view.publisher.open",
+      computerId: key.computerId,
+      userId: key.userId,
+      accessSessionId,
+      subscriberCount: session.subscribers.size,
+    }, "Browser-view publisher opened");
+
+    sendBrowserViewJson(webSocket, {
+      type: "publisher.ready",
+      subscriberCount: session.subscribers.size,
+    });
+    this.broadcastStatus(session, true);
+
+    webSocket.on("message", (data, isBinary) => {
+      if (isBinary) {
+        this.handlePublisherFrame(webSocket, session, data);
+        return;
+      }
+
+      this.handlePublisherText(webSocket, session, rawDataToText(data));
+    });
+
+    webSocket.on("close", (code, reason) => {
+      if (session.publisher !== webSocket) return;
+      session.publisher = null;
+      session.latestActiveTabMetadata = null;
+      session.latestBrowserStatusMetadata = null;
+      session.latestFrameMetadata = null;
+      session.latestFrame = null;
+      session.latestStreamStatusMetadata = null;
+      session.latestTabsMetadata = null;
+      logger.info({
+        event: "browser_view.publisher.close",
+        computerId: key.computerId,
+        userId: key.userId,
+        accessSessionId,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        subscriberCount: session.subscribers.size,
+      }, "Browser-view publisher closed");
+      this.broadcastStatus(session, false);
+      this.deleteIfUnused(key, session);
+    });
+
+    webSocket.on("error", (error) => {
+      logger.warn({
+        event: "browser_view.publisher.error",
+        computerId: key.computerId,
+        userId: key.userId,
+        accessSessionId,
+        err: errorToLog(error),
+      }, "Browser-view publisher errored");
+    });
+  }
+
+  attachSubscriber(
+    webSocket: WebSocket,
+    key: BrowserViewSessionKey,
+    accessSessionId: string,
+  ): void {
+    const session = this.getOrCreateSession(key);
+    session.subscribers.add(webSocket);
+
+    logger.info({
+      event: "browser_view.subscriber.open",
+      computerId: key.computerId,
+      userId: key.userId,
+      accessSessionId,
+      publisherConnected: session.publisher !== null,
+      subscriberCount: session.subscribers.size,
+    }, "Browser-view subscriber opened");
+
+    sendBrowserViewJson(webSocket, {
+      type: "publisher.status",
+      connected: session.publisher !== null,
+    });
+    if (session.latestActiveTabMetadata !== null) {
+      sendBrowserViewText(webSocket, session.latestActiveTabMetadata);
+    }
+    if (session.latestBrowserStatusMetadata !== null) {
+      sendBrowserViewText(webSocket, session.latestBrowserStatusMetadata);
+    }
+    if (session.latestStreamStatusMetadata !== null) {
+      sendBrowserViewText(webSocket, session.latestStreamStatusMetadata);
+    }
+    if (session.latestTabsMetadata !== null) {
+      sendBrowserViewText(webSocket, session.latestTabsMetadata);
+    }
+    if (session.latestFrameMetadata !== null) {
+      sendBrowserViewText(webSocket, session.latestFrameMetadata);
+    }
+    if (session.latestFrame !== null) {
+      sendBrowserViewBinary(webSocket, session.latestFrame);
+    }
+
+    webSocket.on("message", (data, isBinary) => {
+      if (isBinary) return;
+      const text = rawDataToText(data);
+      const message = parseBrowserViewJson(text);
+      if (message?.type === "hello") {
+        sendBrowserViewJson(webSocket, {
+          type: "subscriber.ready",
+          publisherConnected: session.publisher !== null,
+        });
+        return;
+      }
+
+      if (message?.type === "browser.command") {
+        logBrowserViewCommand("browser_view.command.forward", message, {
+          computerId: key.computerId,
+          userId: key.userId,
+        });
+
+        if (session.publisher === null || session.publisher.readyState !== WebSocket.OPEN) {
+          sendBrowserViewJson(webSocket, {
+            type: "browser.command.result",
+            requestId: typeof message.requestId === "string" ? message.requestId : undefined,
+            ok: false,
+            error: "Browser publisher is not connected",
+          });
+          return;
+        }
+
+        sendBrowserViewText(session.publisher, text);
+      }
+    });
+
+    webSocket.on("close", (code, reason) => {
+      session.subscribers.delete(webSocket);
+      logger.info({
+        event: "browser_view.subscriber.close",
+        computerId: key.computerId,
+        userId: key.userId,
+        accessSessionId,
+        closeCode: code,
+        closeReason: reason.toString("utf8"),
+        subscriberCount: session.subscribers.size,
+      }, "Browser-view subscriber closed");
+      this.deleteIfUnused(key, session);
+    });
+
+    webSocket.on("error", (error) => {
+      logger.warn({
+        event: "browser_view.subscriber.error",
+        computerId: key.computerId,
+        userId: key.userId,
+        accessSessionId,
+        err: errorToLog(error),
+      }, "Browser-view subscriber errored");
+    });
+  }
+
+  private handlePublisherText(
+    webSocket: WebSocket,
+    session: BrowserViewSession,
+    text: string,
+  ): void {
+    const message = parseBrowserViewJson(text);
+    if (message === null) {
+      webSocket.close(1003, "Invalid browser-view message");
+      return;
+    }
+
+    if (message.type === "hello") {
+      sendBrowserViewJson(webSocket, {
+        type: "publisher.ready",
+        subscriberCount: session.subscribers.size,
+      });
+      return;
+    }
+
+    if (message.type === "activeTab") {
+      session.latestActiveTabMetadata = text;
+      this.broadcastText(session, text);
+      return;
+    }
+
+    if (message.type === "browser.status") {
+      session.latestBrowserStatusMetadata = text;
+      this.broadcastText(session, text);
+      return;
+    }
+
+    if (message.type === "stream.status") {
+      session.latestStreamStatusMetadata = text;
+      if (message.streaming === false) {
+        session.latestFrameMetadata = null;
+        session.latestFrame = null;
+      }
+      this.broadcastText(session, text);
+      return;
+    }
+
+    if (message.type === "tabs") {
+      session.latestTabsMetadata = text;
+      this.broadcastText(session, text);
+      return;
+    }
+
+    if (message.type === "frame") {
+      session.latestFrameMetadata = text;
+      this.broadcastText(session, text);
+      return;
+    }
+
+    if (message.type === "browser.command.result") {
+      logger.info({
+        event: "browser_view.command.result",
+        requestId: typeof message.requestId === "string" ? message.requestId : undefined,
+        ok: message.ok === true,
+        error: typeof message.error === "string" ? message.error : undefined,
+      }, "Browser-view command result");
+      this.broadcastText(session, text);
+    }
+  }
+
+  private handlePublisherFrame(
+    webSocket: WebSocket,
+    session: BrowserViewSession,
+    data: RawData,
+  ): void {
+    const frame = webSocketRawDataToBuffer(data);
+
+    if (frame.byteLength > BROWSER_VIEW_MAX_FRAME_BYTES) {
+      webSocket.close(1009, "Browser-view frame is too large");
+      return;
+    }
+
+    session.latestFrame = frame;
+    this.broadcastBinary(session, frame);
+  }
+
+  private broadcastStatus(session: BrowserViewSession, connected: boolean): void {
+    const message = JSON.stringify({ type: "publisher.status", connected });
+    this.broadcastText(session, message);
+  }
+
+  private broadcastText(session: BrowserViewSession, text: string): void {
+    for (const subscriber of session.subscribers) {
+      sendBrowserViewText(subscriber, text);
+    }
+  }
+
+  private broadcastBinary(session: BrowserViewSession, data: Buffer): void {
+    for (const subscriber of session.subscribers) {
+      sendBrowserViewBinary(subscriber, data);
+    }
+  }
+
+  private getOrCreateSession(key: BrowserViewSessionKey): BrowserViewSession {
+    const sessionKey = browserViewSessionKey(key);
+    let session = this.sessions.get(sessionKey);
+
+    if (session === undefined) {
+      session = {
+        publisher: null,
+        subscribers: new Set(),
+        latestActiveTabMetadata: null,
+        latestBrowserStatusMetadata: null,
+        latestFrameMetadata: null,
+        latestFrame: null,
+        latestStreamStatusMetadata: null,
+        latestTabsMetadata: null,
+      };
+      this.sessions.set(sessionKey, session);
+    }
+
+    return session;
+  }
+
+  private deleteIfUnused(key: BrowserViewSessionKey, session: BrowserViewSession): void {
+    if (session.publisher !== null || session.subscribers.size > 0) return;
+    this.sessions.delete(browserViewSessionKey(key));
+  }
+}
+
 export const attachGatewayTunnelServer = (
   server: UpgradeServer,
   options: GatewayTunnelServerOptions,
 ): MachineTunnelRegistry => {
   const registry = options.registry ?? new MachineTunnelRegistry();
+  const browserViewRelay = new BrowserViewRelayRegistry();
   const machineSocketServer = new WebSocketServer({ noServer: true });
   const gatewaySocketServer = new WebSocketServer({ noServer: true });
+  const browserViewSocketServer = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
@@ -178,6 +505,66 @@ export const attachGatewayTunnelServer = (
             path: sanitizeUrlPath(request.url),
           }, "Tunnel authentication failed");
           rejectUpgrade(socket, 500, "Tunnel authentication failed");
+        });
+      return;
+    }
+
+    const browserViewRouteMatch = matchBrowserViewRoute(requestUrl.pathname);
+
+    if (browserViewRouteMatch !== null) {
+      void authenticateBrowserViewRoute(
+        options,
+        requestUrl,
+        request.headers.authorization,
+        browserViewRouteMatch,
+      )
+        .then((accessSession) => {
+          if (accessSession === "forbidden") {
+            logger.warn({
+              event: "browser_view.upgrade_rejected",
+              reason: "forbidden_scope",
+              computerId: browserViewRouteMatch.computerId,
+              role: browserViewRouteMatch.role,
+              path: sanitizeUrlPath(request.url),
+            }, "Rejected browser-view websocket upgrade");
+            rejectUpgrade(socket, 403, "Gateway access token does not allow this route");
+            return;
+          }
+
+          if (accessSession === null) {
+            logger.warn({
+              event: "browser_view.upgrade_rejected",
+              reason: "invalid_access_token",
+              computerId: browserViewRouteMatch.computerId,
+              role: browserViewRouteMatch.role,
+              path: sanitizeUrlPath(request.url),
+            }, "Rejected browser-view websocket upgrade");
+            rejectUpgrade(socket, 401, "Invalid gateway access token");
+            return;
+          }
+
+          browserViewSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+            const key = {
+              computerId: browserViewRouteMatch.computerId,
+              userId: accessSession.userId,
+            };
+
+            if (browserViewRouteMatch.role === "publish") {
+              browserViewRelay.attachPublisher(webSocket, key, accessSession.id);
+            } else {
+              browserViewRelay.attachSubscriber(webSocket, key, accessSession.id);
+            }
+          });
+        })
+        .catch((error) => {
+          logger.error({
+            event: "browser_view.upgrade_error",
+            err: errorToLog(error),
+            computerId: browserViewRouteMatch.computerId,
+            role: browserViewRouteMatch.role,
+            path: sanitizeUrlPath(request.url),
+          }, "Browser-view websocket upgrade failed");
+          rejectUpgrade(socket, 500, "Browser-view upgrade failed");
         });
       return;
     }
@@ -1023,6 +1410,53 @@ const authenticateGatewayRoute = async (
     : "forbidden";
 };
 
+const authenticateBrowserViewRoute = async (
+  options: GatewayTunnelServerOptions,
+  requestUrl: URL,
+  authorization: string | undefined,
+  routeMatch: BrowserViewRouteMatch,
+): Promise<ComputerAccessSessionRecord | "forbidden" | null> => {
+  const token = readBearerToken(authorization)
+    ?? requestUrl.searchParams.get("accessToken")
+    ?? requestUrl.searchParams.get("token")
+    ?? undefined;
+
+  if (token === undefined || token.length === 0) {
+    return null;
+  }
+
+  const accessSession = await options.gatewayAccessService.authenticateAccessToken({
+    token,
+    computerId: routeMatch.computerId,
+  });
+
+  if (accessSession === null) {
+    return null;
+  }
+
+  return hasAccessScope(accessSession, "browser-view:ws")
+    ? accessSession
+    : "forbidden";
+};
+
+const matchBrowserViewRoute = (pathname: string): BrowserViewRouteMatch | null => {
+  const match = /^\/gateway\/computers\/([^/]+)\/browser-view\/([^/]+)$/.exec(pathname);
+
+  if (match === null) {
+    return null;
+  }
+
+  const role = match[2];
+  if (role !== "publish" && role !== "subscribe") {
+    return null;
+  }
+
+  return {
+    computerId: decodeURIComponent(match[1] ?? ""),
+    role,
+  };
+};
+
 const matchGatewayRoute = (
   pathname: string,
 ): { readonly computerId: string; readonly route: GatewayRoute; readonly suffix: string } | null => {
@@ -1109,6 +1543,79 @@ const readBearerToken = (authorization: string | undefined): string | undefined 
   return token.trim();
 };
 
+const browserViewSessionKey = (key: BrowserViewSessionKey): string =>
+  `${key.computerId}:${key.userId}`;
+
+const parseBrowserViewJson = (
+  text: string,
+): (Record<string, unknown> & { readonly type?: unknown }) | null => {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown> & { readonly type?: unknown }
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const logBrowserViewCommand = (
+  event: string,
+  message: Record<string, unknown>,
+  context: { readonly computerId: string; readonly userId: string },
+): void => {
+  const command = typeof message.command === "string" ? message.command : undefined;
+  if (command !== "viewport.insertText" && command !== "viewport.key") return;
+
+  logger.info({
+    event,
+    command,
+    computerId: context.computerId,
+    userId: context.userId,
+    requestId: typeof message.requestId === "string" ? message.requestId : undefined,
+    ...summarizeBrowserViewCommand(message),
+  }, "Browser-view command forwarded");
+};
+
+const summarizeBrowserViewCommand = (
+  message: Record<string, unknown>,
+): Record<string, unknown> => {
+  if (message.command === "viewport.insertText") {
+    return {
+      textLength: typeof message.text === "string" ? message.text.length : undefined,
+    };
+  }
+
+  if (message.command === "viewport.key") {
+    const key = typeof message.key === "object" && message.key !== null && !Array.isArray(message.key)
+      ? message.key as Record<string, unknown>
+      : null;
+    return {
+      keyType: typeof key?.type === "string" ? key.type : undefined,
+      keyName: typeof key?.key === "string" && key.key.length > 1 ? key.key : undefined,
+      printable: typeof key?.key === "string" && key.key.length === 1,
+    };
+  }
+
+  return {};
+};
+
+const sendBrowserViewJson = (webSocket: WebSocket, message: unknown): void => {
+  sendBrowserViewText(webSocket, JSON.stringify(message));
+};
+
+const sendBrowserViewText = (webSocket: WebSocket, text: string): void => {
+  if (webSocket.readyState !== WebSocket.OPEN) return;
+  if (webSocket.bufferedAmount > BROWSER_VIEW_MAX_BUFFERED_BYTES) return;
+  webSocket.send(text);
+};
+
+const sendBrowserViewBinary = (webSocket: WebSocket, data: Buffer): void => {
+  if (webSocket.readyState !== WebSocket.OPEN) return;
+  if (webSocket.bufferedAmount + data.byteLength > BROWSER_VIEW_MAX_BUFFERED_BYTES) return;
+  webSocket.send(data);
+};
+
 const rawDataToText = (data: RawData): string => {
   if (typeof data === "string") {
     return data;
@@ -1145,6 +1652,10 @@ const webSocketRawDataToBuffer = (data: RawData): Buffer => {
 };
 
 const inferHttpTrafficClass = (path: string): TunnelTrafficClass => {
+  if (path.startsWith("/browser-control")) {
+    return "browser-control:http";
+  }
+
   if (path.startsWith("/filesystem/download")) {
     return "filesystem:download";
   }
