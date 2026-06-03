@@ -300,6 +300,11 @@ class BrowserViewRelayRegistry {
         return;
       }
 
+      if (message?.type === "ping") {
+        sendBrowserViewPong(webSocket, message);
+        return;
+      }
+
       if (message?.type === "browser.command") {
         logBrowserViewCommand("browser_view.command.forward", message, {
           computerId: key.computerId,
@@ -361,6 +366,11 @@ class BrowserViewRelayRegistry {
         type: "publisher.ready",
         subscriberCount: session.subscribers.size,
       });
+      return;
+    }
+
+    if (message.type === "ping") {
+      sendBrowserViewPong(webSocket, message);
       return;
     }
 
@@ -1602,6 +1612,21 @@ const summarizeBrowserViewCommand = (
 
 const sendBrowserViewJson = (webSocket: WebSocket, message: unknown): void => {
   sendBrowserViewText(webSocket, JSON.stringify(message));
+};
+
+const sendBrowserViewPong = (
+  webSocket: WebSocket,
+  message: Record<string, unknown>,
+): void => {
+  if (typeof message.requestId !== "string" || message.requestId.length === 0) {
+    return;
+  }
+
+  sendBrowserViewJson(webSocket, {
+    type: "pong",
+    requestId: message.requestId,
+    serverTime: new Date().toISOString(),
+  });
 };
 
 const sendBrowserViewText = (webSocket: WebSocket, text: string): void => {

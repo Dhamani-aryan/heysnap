@@ -30,9 +30,13 @@ import type { BrowserWindowTab } from '../../lib/browser/types.ts'
 import { refreshBrowserTabs } from '../../lib/browser/browser-ui-actions.ts'
 
 const BROWSER_VIEW_PROTOCOL_VERSION = 1
+const HEARTBEAT_INTERVAL_MS = 15_000
+const HEARTBEAT_TIMEOUT_MS = 45_000
 const MAX_PUBLISHER_BUFFERED_BYTES = 4 * 1024 * 1024
 const MAX_PUBLISHER_FPS = 12
 const MIN_FRAME_INTERVAL_MS = Math.floor(1000 / MAX_PUBLISHER_FPS)
+const RECONNECT_DELAY_BASE_MS = 500
+const RECONNECT_DELAY_MAX_MS = 10_000
 const BROWSER_VIEW_DEBUG = true
 
 export type BrowserViewPublisherStatus =
@@ -195,34 +199,37 @@ export function useBrowserViewPublisher({
 
   useEffect(() => {
     if (!enabled || url === undefined) {
-      setStatus('idle')
       return
     }
 
-    let socket: WebSocket
-    try {
-      socket = new WebSocket(url)
-    } catch {
-      setStatus('error')
-      return
+    let isDisposed = false
+    let reconnectTimerId: number | null = null
+    let heartbeatTimerId: number | null = null
+    let reconnectAttempt = 0
+    let pendingHeartbeatRequestId: string | null = null
+    let pendingHeartbeatStartedAt = 0
+
+    const clearReconnectTimer = (): void => {
+      if (reconnectTimerId === null) return
+      window.clearTimeout(reconnectTimerId)
+      reconnectTimerId = null
     }
 
-    socketRef.current = socket
-    socket.binaryType = 'arraybuffer'
-    setStatus('connecting')
+    const stopHeartbeat = (): void => {
+      if (heartbeatTimerId !== null) {
+        window.clearInterval(heartbeatTimerId)
+        heartbeatTimerId = null
+      }
+      pendingHeartbeatRequestId = null
+      pendingHeartbeatStartedAt = 0
+    }
 
-    socket.addEventListener('open', () => {
-      if (socketRef.current !== socket) return
-      setStatus('connected')
-      sendPublisherJson(socket, {
-        type: 'hello',
-        role: 'publisher',
-        protocolVersion: BROWSER_VIEW_PROTOCOL_VERSION,
-      })
+    const publishCurrentState = (socket: WebSocket): void => {
       sendBrowserStatusSnapshot(socket, browserStatusRef.current)
       sendStreamStatusSnapshot(socket, streamStatusRef.current)
       sendActiveTabSnapshot(socket, activeTabRef.current)
       sendTabsSnapshot(socket, tabsRef.current)
+
       const tabId = activeTabRef.current.tabId
       const lastFrame = tabId === null ? null : getLastBrowserFrame(tabId)
       if (streamStatusRef.current.streaming && lastFrame !== null) {
@@ -230,32 +237,184 @@ export function useBrowserViewPublisher({
           force: true,
         })
       }
-    })
+    }
 
-    socket.addEventListener('message', (event) => {
-      if (typeof event.data !== 'string') return
-      void handleBrowserCommandMessage(socket, event.data)
-    })
+    const announcePublisher = (socket: WebSocket): void => {
+      sendPublisherJson(socket, {
+        type: 'hello',
+        role: 'publisher',
+        protocolVersion: BROWSER_VIEW_PROTOCOL_VERSION,
+      })
+      publishCurrentState(socket)
+    }
 
-    socket.addEventListener('close', () => {
-      if (socketRef.current === socket) {
-        socketRef.current = null
-        setStatus('disconnected')
+    const sendHeartbeat = (socket: WebSocket): void => {
+      if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+        return
       }
-    })
 
-    socket.addEventListener('error', () => {
-      if (socketRef.current === socket) {
+      if (
+        pendingHeartbeatRequestId !== null &&
+        Date.now() - pendingHeartbeatStartedAt >= HEARTBEAT_TIMEOUT_MS
+      ) {
+        try {
+          socket.close(4000, 'Browser view publisher heartbeat timed out.')
+        } catch {
+          // close handler drives reconnect
+        }
+        return
+      }
+
+      if (pendingHeartbeatRequestId !== null) return
+
+      const requestId = createPublisherRequestId()
+      pendingHeartbeatRequestId = requestId
+      pendingHeartbeatStartedAt = Date.now()
+      if (!sendPublisherJson(socket, { type: 'ping', requestId })) {
+        pendingHeartbeatRequestId = null
+        pendingHeartbeatStartedAt = 0
+      }
+    }
+
+    const startHeartbeat = (socket: WebSocket): void => {
+      stopHeartbeat()
+      sendHeartbeat(socket)
+      heartbeatTimerId = window.setInterval(() => {
+        sendHeartbeat(socket)
+      }, HEARTBEAT_INTERVAL_MS)
+    }
+
+    const scheduleReconnect = (): void => {
+      if (isDisposed || reconnectTimerId !== null) return
+      const delay = getBrowserViewPublisherReconnectDelay(reconnectAttempt)
+      reconnectAttempt += 1
+      reconnectTimerId = window.setTimeout(() => {
+        reconnectTimerId = null
+        openSocket()
+      }, delay)
+    }
+
+    const openSocket = (): void => {
+      if (isDisposed) return
+      clearReconnectTimer()
+      stopHeartbeat()
+      setStatus('connecting')
+
+      let socket: WebSocket
+      try {
+        socket = new WebSocket(url)
+      } catch {
         setStatus('error')
+        scheduleReconnect()
+        return
       }
-    })
+
+      socketRef.current = socket
+      socket.binaryType = 'arraybuffer'
+
+      socket.addEventListener('open', () => {
+        if (socketRef.current !== socket) return
+        reconnectAttempt = 0
+        lastFrameSentAtRef.current = 0
+        setStatus('connected')
+        announcePublisher(socket)
+        startHeartbeat(socket)
+      })
+
+      socket.addEventListener('message', (event) => {
+        if (typeof event.data !== 'string') return
+
+        const message = parseJsonRecord(event.data)
+        if (message?.type === 'pong') {
+          if (message.requestId === pendingHeartbeatRequestId) {
+            pendingHeartbeatRequestId = null
+            pendingHeartbeatStartedAt = 0
+          }
+          return
+        }
+
+        void handleBrowserCommandMessage(socket, event.data)
+      })
+
+      socket.addEventListener('close', (event) => {
+        if (socketRef.current !== socket) return
+        socketRef.current = null
+        stopHeartbeat()
+        if (isDisposed) return
+
+        setStatus('disconnected')
+        if (
+          shouldReconnectBrowserViewPublisherSocket({
+            closeCode: event.code,
+            closeReason: event.reason,
+            isCancelled: isDisposed,
+          })
+        ) {
+          scheduleReconnect()
+        }
+      })
+
+      socket.addEventListener('error', () => {
+        if (socketRef.current !== socket) return
+        setStatus('error')
+        try {
+          socket.close(4000, 'Browser view publisher socket errored.')
+        } catch {
+          // close handler drives reconnect
+        }
+      })
+    }
+
+    const reconnectOrResync = (): void => {
+      if (isDisposed) return
+      const socket = socketRef.current
+
+      if (
+        socket === null ||
+        socket.readyState === WebSocket.CLOSED ||
+        socket.readyState === WebSocket.CLOSING
+      ) {
+        if (socketRef.current === socket) {
+          socketRef.current = null
+        }
+        clearReconnectTimer()
+        openSocket()
+        return
+      }
+
+      if (socket.readyState === WebSocket.OPEN) {
+        publishCurrentState(socket)
+        sendHeartbeat(socket)
+      }
+    }
+
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        reconnectOrResync()
+      }
+    }
+
+    openSocket()
+    window.addEventListener('focus', reconnectOrResync)
+    window.addEventListener('online', reconnectOrResync)
+    window.addEventListener('pageshow', reconnectOrResync)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
-      if (socketRef.current === socket) {
-        socketRef.current = null
-      }
+      isDisposed = true
+      clearReconnectTimer()
+      stopHeartbeat()
+      window.removeEventListener('focus', reconnectOrResync)
+      window.removeEventListener('online', reconnectOrResync)
+      window.removeEventListener('pageshow', reconnectOrResync)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+
+      const socket = socketRef.current
+      socketRef.current = null
       setStatus('idle')
-      socket.close(1000, 'Browser view publisher stopped')
+      if (socket !== null) {
+        socket.close(1000, 'Browser view publisher stopped')
+      }
     }
   }, [enabled, url])
 
@@ -408,7 +567,11 @@ async function sendBrowserFrame(
   })
 
   if (socket.readyState === WebSocket.OPEN) {
-    socket.send(parsed.bytes)
+    try {
+      socket.send(parsed.bytes)
+    } catch {
+      // The close/error handlers will reconcile the socket state.
+    }
   }
 }
 
@@ -696,9 +859,14 @@ function readBrowserViewKeyboardInput(
   }
 }
 
-function sendPublisherJson(socket: WebSocket, payload: unknown): void {
-  if (socket.readyState !== WebSocket.OPEN) return
-  socket.send(JSON.stringify(payload))
+function sendPublisherJson(socket: WebSocket, payload: unknown): boolean {
+  if (socket.readyState !== WebSocket.OPEN) return false
+  try {
+    socket.send(JSON.stringify(payload))
+    return true
+  } catch {
+    return false
+  }
 }
 
 function parseJsonRecord(value: string): Record<string, unknown> | null {
@@ -712,13 +880,37 @@ function parseJsonRecord(value: string): Record<string, unknown> | null {
   }
 }
 
+function shouldReconnectBrowserViewPublisherSocket(input: {
+  readonly closeCode: number
+  readonly closeReason: string
+  readonly isCancelled: boolean
+}): boolean {
+  if (input.isCancelled) return false
+  if (input.closeCode === 1003 || input.closeCode === 1008) return false
+  return !(
+    input.closeCode === 1012 &&
+    input.closeReason.toLowerCase().includes('publisher replaced')
+  )
+}
+
+function getBrowserViewPublisherReconnectDelay(attempt: number): number {
+  const exponent = Math.min(attempt, 5)
+  return Math.min(
+    RECONNECT_DELAY_MAX_MS,
+    RECONNECT_DELAY_BASE_MS * 2 ** exponent,
+  )
+}
+
+function createPublisherRequestId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
 function logBrowserViewPublisherDebug(
   event: string,
   details: Record<string, unknown>,
 ): void {
   if (!BROWSER_VIEW_DEBUG) return
   if (!shouldLogBrowserCommandDetails(details)) return
-  // eslint-disable-next-line no-console
   console.info('[browser-view][web]', event, details)
 }
 

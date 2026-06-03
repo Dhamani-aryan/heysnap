@@ -380,6 +380,22 @@ describe("gateway tunnel", () => {
       connected: true,
     });
 
+    const publisherPongPromise = waitForJsonMessage(publisher);
+    publisher.send(JSON.stringify({ type: "ping", requestId: "publisher-ping-1" }));
+    await expect(publisherPongPromise).resolves.toEqual({
+      type: "pong",
+      requestId: "publisher-ping-1",
+      serverTime: expect.any(String),
+    });
+
+    const subscriberPongPromise = waitForJsonMessage(subscriber);
+    subscriber.send(JSON.stringify({ type: "ping", requestId: "subscriber-ping-1" }));
+    await expect(subscriberPongPromise).resolves.toEqual({
+      type: "pong",
+      requestId: "subscriber-ping-1",
+      serverTime: expect.any(String),
+    });
+
     const commandMessage = {
       type: "browser.command",
       requestId: "command-1",
