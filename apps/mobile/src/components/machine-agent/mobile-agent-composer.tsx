@@ -1,19 +1,25 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   StyleSheet,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {
+  ArrowDown01Icon,
   ArrowUp02Icon,
   AttachmentIcon,
   Cancel01Icon,
+  ChatGptIcon,
+  ClaudeIcon,
   Folder01Icon,
   ImageAdd02Icon,
+  Tick02Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -278,85 +284,207 @@ export function MobileAgentComposer({
               </ThemedText>
             </View>
           )}
-          {modelPicker === undefined ? null : (
-            <ModelSegmentedControl modelPicker={modelPicker} palette={palette} />
-          )}
         </View>
 
-        <Pressable
-          accessibilityLabel={isStopAction ? 'Stop response' : 'Send'}
-          accessibilityRole="button"
-          disabled={isSubmitting || (!isStopAction && !canSubmit)}
-          onPress={handlePrimaryAction}
-          style={({ pressed }) => [
-            styles.sendButton,
-            {
-              backgroundColor: isStopAction
-                ? palette.errorText
-                : canSubmit
-                  ? palette.accent
-                  : '#1A2B4A',
-            },
-            pressed && { opacity: 0.8 },
-          ]}>
-          {isSubmitting ? (
-            <ActivityIndicator color="#ffffff" size="small" />
-          ) : isStopAction ? (
-            <View style={styles.stopSquare} />
-          ) : (
-            <HugeiconsIcon
-              icon={ArrowUp02Icon}
-              size={18}
-              color={canSubmit ? '#ffffff' : palette.textMuted}
-              strokeWidth={2.4}
-            />
+        <View style={styles.rightActions}>
+          {modelPicker === undefined ? null : (
+            <ModelDropdown modelPicker={modelPicker} palette={palette} />
           )}
-        </Pressable>
+
+          <Pressable
+            accessibilityLabel={isStopAction ? 'Stop response' : 'Send'}
+            accessibilityRole="button"
+            disabled={isSubmitting || (!isStopAction && !canSubmit)}
+            onPress={handlePrimaryAction}
+            style={({ pressed }) => [
+              styles.sendButton,
+              {
+                backgroundColor: isStopAction
+                  ? palette.errorText
+                  : canSubmit
+                    ? palette.accent
+                    : '#1A2B4A',
+              },
+              pressed && { opacity: 0.8 },
+            ]}>
+            {isSubmitting ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : isStopAction ? (
+              <View style={styles.stopSquare} />
+            ) : (
+              <HugeiconsIcon
+                icon={ArrowUp02Icon}
+                size={18}
+                color={canSubmit ? '#ffffff' : palette.textMuted}
+                strokeWidth={2.4}
+              />
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
 }
 
-function ModelSegmentedControl({
+function ModelDropdown({
   modelPicker,
   palette,
 }: {
   modelPicker: NonNullable<MobileAgentComposerProps['modelPicker']>;
   palette: Palette;
 }) {
-  return (
-    <View
-      accessibilityLabel="Model"
-      style={[
-        styles.modelControl,
-        { backgroundColor: palette.surfaceMuted, borderColor: palette.border },
-        modelPicker.disabled && styles.modelControlDisabled,
-      ]}>
-      {MODEL_OPTIONS.map((option) => {
-        const isSelected = modelPicker.value === option.value;
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityLabel={option.label}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: modelPicker.disabled, selected: isSelected }}
-            disabled={modelPicker.disabled}
-            onPress={() => modelPicker.onChange(option.value)}
-            style={({ pressed }) => [
-              styles.modelOption,
-              isSelected && { backgroundColor: palette.background },
-              pressed && !modelPicker.disabled && { opacity: 0.7 },
-            ]}>
-            <ThemedText
-              style={[
-                styles.modelOptionText,
-                { color: isSelected ? palette.textPrimary : palette.textSecondary },
-              ]}>
-              {option.label}
-            </ThemedText>
-          </Pressable>
+  const dimensions = useWindowDimensions();
+  const triggerRef = useRef<View>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [triggerFrame, setTriggerFrame] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const selectedOption =
+    MODEL_OPTIONS.find((option) => option.value === modelPicker.value) ?? MODEL_OPTIONS[0];
+  const menuHeight =
+    MODEL_OPTIONS.length * MODEL_DROPDOWN_OPTION_HEIGHT + MODEL_DROPDOWN_PADDING * 2;
+  const maxMenuLeft = Math.max(
+    MODEL_DROPDOWN_MARGIN,
+    dimensions.width - MODEL_DROPDOWN_WIDTH - MODEL_DROPDOWN_MARGIN,
+  );
+  const maxMenuTop = Math.max(
+    MODEL_DROPDOWN_MARGIN,
+    dimensions.height - menuHeight - MODEL_DROPDOWN_MARGIN,
+  );
+  const menuLeft =
+    triggerFrame === null
+      ? MODEL_DROPDOWN_MARGIN
+      : Math.min(
+          Math.max(MODEL_DROPDOWN_MARGIN, triggerFrame.x + triggerFrame.width - MODEL_DROPDOWN_WIDTH),
+          maxMenuLeft,
         );
-      })}
+  const preferredTop =
+    triggerFrame === null
+      ? MODEL_DROPDOWN_MARGIN
+      : triggerFrame.y - menuHeight - MODEL_DROPDOWN_OFFSET;
+  const menuTop =
+    triggerFrame === null
+      ? MODEL_DROPDOWN_MARGIN
+      : preferredTop >= MODEL_DROPDOWN_MARGIN
+        ? preferredTop
+        : Math.min(
+            triggerFrame.y + triggerFrame.height + MODEL_DROPDOWN_OFFSET,
+            maxMenuTop,
+          );
+
+  useEffect(() => {
+    if (modelPicker.disabled) {
+      setIsOpen(false);
+    }
+  }, [modelPicker.disabled]);
+
+  const openMenu = useCallback(() => {
+    if (modelPicker.disabled) {
+      return;
+    }
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      setTriggerFrame({ x, y, width, height });
+      setIsOpen(true);
+    });
+  }, [modelPicker.disabled]);
+
+  return (
+    <View ref={triggerRef} collapsable={false}>
+      <Pressable
+        accessibilityLabel={`Model: ${selectedOption.label}`}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: modelPicker.disabled, expanded: isOpen }}
+        disabled={modelPicker.disabled}
+        hitSlop={8}
+        onPress={openMenu}
+        style={({ pressed }) => [
+          styles.modelTrigger,
+          { backgroundColor: palette.surfaceMuted, borderColor: palette.border },
+          pressed && !modelPicker.disabled && { opacity: 0.72 },
+          modelPicker.disabled && styles.modelControlDisabled,
+        ]}>
+        <ModelLogo option={selectedOption} />
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          size={12}
+          color={palette.textSecondary}
+          strokeWidth={2.1}
+          style={[styles.modelChevron, isOpen && styles.modelChevronOpen]}
+        />
+      </Pressable>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setIsOpen(false)}
+        transparent
+        visible={isOpen && triggerFrame !== null && !modelPicker.disabled}>
+        <View style={StyleSheet.absoluteFill}>
+          <Pressable
+            accessibilityLabel="Close model picker"
+            accessibilityRole="button"
+            onPress={() => setIsOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            style={[
+              styles.modelMenu,
+              {
+                top: menuTop,
+                left: menuLeft,
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+              },
+            ]}>
+            {MODEL_OPTIONS.map((option) => {
+              const isSelected = option.value === modelPicker.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityLabel={option.label}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                  onPress={() => {
+                    setIsOpen(false);
+                    if (!isSelected) {
+                      modelPicker.onChange(option.value);
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.modelMenuItem,
+                    isSelected && { backgroundColor: palette.surfaceMuted },
+                    pressed && { opacity: 0.72 },
+                  ]}>
+                  <ModelLogo option={option} />
+                  <ThemedText
+                    numberOfLines={1}
+                    style={[styles.modelMenuText, { color: palette.textPrimary }]}>
+                    {option.label}
+                  </ThemedText>
+                  {isSelected ? (
+                    <HugeiconsIcon
+                      icon={Tick02Icon}
+                      size={16}
+                      color={palette.textSecondary}
+                      strokeWidth={2.1}
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function ModelLogo({ option }: { option: ModelOption }) {
+  return (
+    <View style={styles.modelLogo}>
+      <HugeiconsIcon icon={option.icon} size={14} color={option.iconColor} strokeWidth={2} />
     </View>
   );
 }
@@ -391,10 +519,23 @@ function ComposerIconButton({
   );
 }
 
-const MODEL_OPTIONS: readonly { value: PromptModelChoice; label: string }[] = [
-  { value: 'gpt', label: 'GPT' },
-  { value: 'claude', label: 'Claude' },
+type ModelOption = {
+  value: PromptModelChoice;
+  label: string;
+  icon: typeof ArrowUp02Icon;
+  iconColor: string;
+};
+
+const MODEL_OPTIONS: readonly ModelOption[] = [
+  { value: 'gpt', label: 'GPT', icon: ChatGptIcon, iconColor: '#101113' },
+  { value: 'claude', label: 'Claude', icon: ClaudeIcon, iconColor: '#D97757' },
 ];
+
+const MODEL_DROPDOWN_WIDTH = 156;
+const MODEL_DROPDOWN_OPTION_HEIGHT = 38;
+const MODEL_DROPDOWN_PADDING = 4;
+const MODEL_DROPDOWN_OFFSET = 8;
+const MODEL_DROPDOWN_MARGIN = 8;
 
 function AttachmentChip({
   attachment,
@@ -502,28 +643,70 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
-  modelControl: {
+  rightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 9,
+    flexShrink: 0,
+    gap: 8,
+  },
+  modelTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 30,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 2,
-    gap: 2,
+    paddingLeft: 6,
+    paddingRight: 7,
+    gap: 4,
   },
   modelControlDisabled: {
     opacity: 0.52,
   },
-  modelOption: {
-    minWidth: 44,
-    height: 24,
+  modelLogo: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 7,
-    paddingHorizontal: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
   },
-  modelOptionText: {
-    fontSize: 11,
-    lineHeight: 14,
+  modelChevron: {
+    transform: [{ rotate: '0deg' }],
+  },
+  modelChevronOpen: {
+    transform: [{ rotate: '180deg' }],
+  },
+  modelMenu: {
+    position: 'absolute',
+    width: MODEL_DROPDOWN_WIDTH,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: MODEL_DROPDOWN_PADDING,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    elevation: 12,
+  },
+  modelMenuItem: {
+    height: MODEL_DROPDOWN_OPTION_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    gap: 9,
+  },
+  modelMenuText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '600',
   },
   iconButton: {

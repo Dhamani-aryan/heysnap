@@ -7,7 +7,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -74,6 +74,8 @@ export function MobileAgentThreadDrawer({
   onSelectThread,
 }: MobileAgentThreadDrawerProps) {
   const palette = scheme === 'dark' ? darkPalette : lightPalette;
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, initialWindowMetrics?.insets.top ?? 0);
   const agentBaseUrl = useAgentChatStore((state) => state.agentBaseUrl);
   const agentIdentity = useAgentChatStore((state) => state.agentIdentity);
 
@@ -124,12 +126,15 @@ export function MobileAgentThreadDrawer({
 
   return (
     <Modal
-      allowSwipeDismissal
       animationType="slide"
       onRequestClose={onClose}
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
       visible={isOpen}>
-      <SafeAreaView edges={['top']} style={[styles.shell, { backgroundColor: palette.background }]}>
+      <View
+        style={[
+          styles.shell,
+          { backgroundColor: palette.background, paddingTop: topInset },
+        ]}>
         <View style={styles.header}>
           <Pressable
             accessibilityLabel="Close history"
@@ -172,7 +177,7 @@ export function MobileAgentThreadDrawer({
             </View>
           )}
         </ScrollView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

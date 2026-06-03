@@ -128,7 +128,10 @@ function AgentScreenContent({
     },
   });
 
-  const openDrawer = useCallback(() => setIsDrawerOpen(true), []);
+  const openDrawer = useCallback(() => {
+    Keyboard.dismiss();
+    setIsDrawerOpen(true);
+  }, []);
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), []);
 
   const handleSelectThread = useCallback((thread: AgentThreadSummary) => {
