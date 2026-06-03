@@ -14,6 +14,7 @@ export interface AdminUser {
   readonly email: string;
   readonly username: string;
   readonly allowPiModels: boolean;
+  readonly allowBrowserStream: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

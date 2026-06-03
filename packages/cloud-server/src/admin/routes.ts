@@ -404,6 +404,21 @@ export const createAdminRoutes = (
     return context.json({ user: serializeUser(user) });
   });
 
+  app.patch("/users/:userId/browser-stream-access", async (context) => {
+    const body = await readJsonBody(context.req.raw);
+    const allowBrowserStream = booleanField(body, "allowBrowserStream", { required: true }) ?? false;
+    const user = await store.updateUserBrowserStreamAccess({
+      userId: context.req.param("userId"),
+      allowBrowserStream,
+    });
+
+    if (user === null) {
+      throw notFound("USER_NOT_FOUND", "User not found");
+    }
+
+    return context.json({ user: serializeUser(user) });
+  });
+
   app.post("/users/:userId/sessions/revoke-all", async (context) => {
     const userId = context.req.param("userId");
     const user = await store.getUserById(userId);

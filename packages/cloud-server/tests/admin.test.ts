@@ -162,6 +162,35 @@ describe("admin user management", () => {
     });
   });
 
+  it("lets admins update user browser stream access", async () => {
+    const { app } = createTestApp();
+    const owner = await registerUser(app, "browser-stream@example.com");
+
+    const initial = await app.request(`/admin/users/${owner.userId}`, {
+      headers: adminHeaders(),
+    });
+    expect(await initial.json()).toMatchObject({
+      user: { allowBrowserStream: false },
+    });
+
+    const update = await app.request(`/admin/users/${owner.userId}/browser-stream-access`, {
+      method: "PATCH",
+      body: JSON.stringify({ allowBrowserStream: true }),
+      headers: adminHeaders(),
+    });
+    expect(update.status).toBe(200);
+    expect(await update.json()).toMatchObject({
+      user: { id: owner.userId, allowBrowserStream: true },
+    });
+
+    const me = await app.request("/auth/me", {
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    expect(await me.json()).toMatchObject({
+      user: { id: owner.userId, allowBrowserStream: true },
+    });
+  });
+
   it("rejects weak passwords on reset", async () => {
     const { app } = createTestApp();
     const owner = await registerUser(app, "weakpw@example.com");
