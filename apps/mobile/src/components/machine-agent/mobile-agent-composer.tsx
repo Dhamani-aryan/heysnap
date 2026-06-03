@@ -48,6 +48,8 @@ type Palette = {
 };
 
 type MobileAgentComposerProps = {
+  autoFocus?: boolean;
+  autoFocusToken?: number;
   palette: Palette;
   activeFolderName?: string;
   isRunning: boolean;
@@ -106,6 +108,8 @@ const buildAgentContent = (
 };
 
 export function MobileAgentComposer({
+  autoFocus = false,
+  autoFocusToken,
   palette,
   activeFolderName,
   isRunning,
@@ -120,6 +124,7 @@ export function MobileAgentComposer({
   const clearDraft = useAgentPromptDraftStore((state) => state.clearDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const previousAutoFocusTokenRef = useRef(autoFocusToken);
   const attachments = draft.attachments;
 
   const canSubmit = draft.text.trim().length > 0 || attachments.length > 0;
@@ -219,6 +224,25 @@ export function MobileAgentComposer({
   }, [attachments, canSubmit, clearDraft, draft.text, isSubmitting, onSubmit, threadId]);
 
   const isStopAction = isRunning && !canSubmit;
+
+  useEffect(() => {
+    const shouldFocusForToken =
+      autoFocusToken !== undefined &&
+      previousAutoFocusTokenRef.current !== autoFocusToken;
+    previousAutoFocusTokenRef.current = autoFocusToken;
+
+    if (!autoFocus && !shouldFocusForToken) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [autoFocus, autoFocusToken]);
 
   const handlePrimaryAction = useCallback(() => {
     if (isStopAction) {

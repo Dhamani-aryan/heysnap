@@ -172,6 +172,18 @@ export const extractSarvamTranscript = (result: unknown): string | null => {
   return null;
 };
 
+export const appendPromptTranscript = (
+  draft: string,
+  transcript: string,
+): string => {
+  const trimmedTranscript = transcript.trim();
+  if (trimmedTranscript.length === 0) return draft;
+  const trimmedDraft = draft.trimEnd();
+  return trimmedDraft.length === 0
+    ? trimmedTranscript
+    : `${trimmedDraft}\n${trimmedTranscript}`;
+};
+
 export async function transliterateSpeech(
   uri: string,
   input: { durationSeconds?: number } = {},
