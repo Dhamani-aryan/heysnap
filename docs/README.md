@@ -25,6 +25,5 @@ Start here when you need to understand or operate the HeySnap repo.
 
 - `../apps/web/README.md`
 - `../apps/mobile/README.md`
-- `../packages/ui/README.md`
 - `../packages/server/README.md`
 - `../packages/cloud-server/README.md`

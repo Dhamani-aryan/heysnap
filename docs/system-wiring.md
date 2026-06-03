@@ -6,12 +6,10 @@ This document explains how the main pieces talk to each other.
 
 ```text
 apps/web
-  -> packages/ui
   -> packages/cloud-server at https://api.heysnap.xyz
   -> gateway WebSockets for remote machines
 
 apps/mobile
-  -> packages/ui
   -> packages/cloud-server at https://api.heysnap.xyz
   -> gateway WebSockets for remote machines
 
@@ -49,8 +47,8 @@ Users see machines through:
 GET /computers
 ```
 
-The shared UI does not branch heavily on local vs cloud. It asks for a selected
-machine and then gets filesystem/agent WebSocket URLs.
+The web and mobile apps each own their UI and client state. Both ask for a
+selected machine and then get filesystem/agent WebSocket URLs.
 
 ## Cloud Machine Flow
 

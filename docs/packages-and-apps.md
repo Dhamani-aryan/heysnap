@@ -1,7 +1,7 @@
 # Packages And Apps
 
 This repo is a pnpm monorepo. The apps are deployable/user-facing surfaces.
-The packages provide shared UI, machine runtime, and hosted backend services.
+The packages provide the machine runtime and hosted backend services.
 
 ## Apps
 
@@ -18,19 +18,9 @@ Vite app for the hosted browser product.
 Expo app for mobile users.
 
 - Uses the cloud API and gateway sessions for machine access.
-- Shares product concepts with the hosted browser product.
+- Owns its native UI, state, and protocol clients independently from the web app.
 
 ## Packages
-
-### `packages/ui`
-
-Shared React UI package.
-
-- Cloud auth shell, login, and `My Machines`.
-- Machine workspace layout.
-- Filesystem browser and agent UI.
-- Cloud API client.
-- Runtime-specific behavior is injected by apps.
 
 ### `packages/server`
 
