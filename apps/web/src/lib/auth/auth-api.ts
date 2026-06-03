@@ -5,6 +5,7 @@ export type CloudUser = {
   email: string
   username: string
   allowPiModels: boolean
+  allowBrowserStream: boolean
   createdAt: string
   updatedAt: string
 }

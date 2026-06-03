@@ -19,6 +19,7 @@ import { WorkspaceTabsStrip } from './workspace-tabs.tsx'
 import { ThreadHistoryPopover } from '../../agent/thread-history-popover.tsx'
 import { useAgentChatStore } from '../../../stores/agent/agent-chat-store.ts'
 import { useAgentThreadRoute } from '../../../hooks/agent/use-agent-thread-route.ts'
+import { useAuth } from '../../../hooks/auth/use-auth.ts'
 import type { AgentThreadSummary } from '../../../lib/agent/types.ts'
 import { WorkspaceMobileDrawer } from './workspace-mobile-drawer.tsx'
 import { useBrowserViewPublisher } from '../../../hooks/browser/use-browser-view-publisher.ts'
@@ -43,6 +44,8 @@ export function WorkspaceToolbar({
   const agentIdentity = useAgentChatStore((s) => s.agentIdentity)
   const selectedThreadId = useAgentChatStore((s) => s.selectedThreadId)
   const { navigateToThread, navigateToNewThread } = useAgentThreadRoute()
+  const auth = useAuth()
+  const allowBrowserStream = auth.user?.allowBrowserStream === true
 
   const historyButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
@@ -50,9 +53,9 @@ export function WorkspaceToolbar({
 
   const closeHistory = useCallback(() => setIsHistoryOpen(false), [])
   const closeMobileDrawer = useCallback(() => setIsMobileDrawerOpen(false), [])
-  const browserViewPublisherStatus = useBrowserViewPublisher({
-    enabled: browserViewPublishWebSocketUrl !== undefined,
-    streamEnabled: isMobileDrawerOpen,
+  useBrowserViewPublisher({
+    enabled: allowBrowserStream && browserViewPublishWebSocketUrl !== undefined,
+    streamEnabled: allowBrowserStream && isMobileDrawerOpen,
     url: browserViewPublishWebSocketUrl,
   })
   const toggleHistory = useCallback(
@@ -87,12 +90,14 @@ export function WorkspaceToolbar({
         canGoForward={canGoForward}
       />
       <WorkspaceTabsStrip />
-      <ToolbarIconButton
-        icon={SmartPhone02Icon}
-        label="Mobile"
-        onClick={toggleMobileDrawer}
-        pressed={isMobileDrawerOpen}
-      />
+      {allowBrowserStream ? (
+        <ToolbarIconButton
+          icon={SmartPhone02Icon}
+          label="Mobile"
+          onClick={toggleMobileDrawer}
+          pressed={isMobileDrawerOpen}
+        />
+      ) : null}
       <ThemeToggle compact />
       <div className="relative">
         <ToolbarIconButton
@@ -124,11 +129,12 @@ export function WorkspaceToolbar({
         onClick={toggleRightSidebar}
         pressed={isRightSidebarOpen}
       />
-      <WorkspaceMobileDrawer
-        open={isMobileDrawerOpen}
-        onClose={closeMobileDrawer}
-        browserViewPublisherStatus={browserViewPublisherStatus}
-      />
+      {allowBrowserStream ? (
+        <WorkspaceMobileDrawer
+          open={isMobileDrawerOpen}
+          onClose={closeMobileDrawer}
+        />
+      ) : null}
     </header>
   )
 }

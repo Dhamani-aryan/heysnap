@@ -4,7 +4,11 @@ import type { AuthService } from "../auth/service.js";
 import { createOpaqueToken, hashToken } from "../auth/tokens.js";
 import type { CloudServerConfig } from "../config.js";
 import type { CloudStore, ComputerRecord } from "../db/types.js";
-import type { GatewayAccessService } from "../gateway/access-sessions.js";
+import {
+  DEFAULT_GATEWAY_ACCESS_SCOPES,
+  type GatewayAccessScope,
+  type GatewayAccessService,
+} from "../gateway/access-sessions.js";
 import type { TunnelStatusRegistry } from "../gateway/tunnel.js";
 import { toStartComputerError } from "../provisioning/errors.js";
 import { getDev8gbPreset } from "../provisioning/presets.js";
@@ -188,6 +192,7 @@ export const createComputerRoutes = (
     const result = await gatewayAccessService.createAccessSession({
       userId: user.id,
       computerId: computer.id,
+      scopes: getAccessSessionScopes(user.allowBrowserStream),
     });
     logger.info({
       event: "cloud.access_session.created",
@@ -207,8 +212,12 @@ export const createComputerRoutes = (
         filesystemPreviewWebSocketUrl: `/gateway/computers/${computer.id}/preview/ws`,
         browserControlWebSocketUrl: `/gateway/computers/${computer.id}/browser-control`,
         browserControlStatusUrl: `/gateway/computers/${computer.id}/browser-control/status`,
-        browserViewPublishWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/publish`,
-        browserViewSubscribeWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/subscribe`,
+        ...(user.allowBrowserStream
+          ? {
+              browserViewPublishWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/publish`,
+              browserViewSubscribeWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/subscribe`,
+            }
+          : {}),
         agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
         capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
       },
@@ -217,6 +226,11 @@ export const createComputerRoutes = (
 
   return app;
 };
+
+const getAccessSessionScopes = (allowBrowserStream: boolean): readonly GatewayAccessScope[] =>
+  allowBrowserStream
+    ? DEFAULT_GATEWAY_ACCESS_SCOPES
+    : DEFAULT_GATEWAY_ACCESS_SCOPES.filter((scope) => scope !== "browser-view:ws");
 
 const createInitialProviderMetadata = (config: CloudServerConfig): Record<string, unknown> => {
   if (config.computerProvisioner === "docker") {

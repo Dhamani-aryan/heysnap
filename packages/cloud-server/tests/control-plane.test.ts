@@ -546,17 +546,16 @@ describe("cloud server computer access sessions", () => {
     expect(body.accessSession).toMatchObject({
       computerId: computer.id,
       token: expect.any(String),
-      scopes: DEFAULT_GATEWAY_ACCESS_SCOPES,
+      scopes: DEFAULT_GATEWAY_ACCESS_SCOPES.filter((scope) => scope !== "browser-view:ws"),
     });
     expect(body.accessSession.scopes).not.toContain("feedback:http");
+    expect(body.accessSession.scopes).not.toContain("browser-view:ws");
     expect(body.routes).toEqual({
       filesystemWebSocketUrl: `/gateway/computers/${computer.id}/filesystem`,
       filesystemPreviewBaseUrl: `/gateway/computers/${computer.id}/preview`,
       filesystemPreviewWebSocketUrl: `/gateway/computers/${computer.id}/preview/ws`,
       browserControlWebSocketUrl: `/gateway/computers/${computer.id}/browser-control`,
       browserControlStatusUrl: `/gateway/computers/${computer.id}/browser-control/status`,
-      browserViewPublishWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/publish`,
-      browserViewSubscribeWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/subscribe`,
       agentBaseUrl: `/gateway/computers/${computer.id}/agent`,
       capabilitiesBaseUrl: `/gateway/computers/${computer.id}/capabilities`,
     });
@@ -566,6 +565,29 @@ describe("cloud server computer access sessions", () => {
     expect(stored).not.toBeNull();
     expect(stored?.tokenHash).toBe(tokenHash);
     expect(JSON.stringify(stored)).not.toContain(body.accessSession.token);
+  });
+
+  it("includes browser view access only when browser streaming is enabled", async () => {
+    const { app, store } = createTestApp();
+    const auth = await registerUser(app, "browser-stream@example.com");
+    const computer = await createComputer(app, auth.token, "Stream VM");
+    await store.updateUserBrowserStreamAccess({
+      userId: auth.userId,
+      allowBrowserStream: true,
+    });
+
+    const response = await app.request(`/computers/${computer.id}/access-session`, {
+      method: "POST",
+      headers: authHeaders(auth.token),
+    });
+
+    expect(response.status).toBe(201);
+    const body = await response.json() as AccessSessionResponse;
+    expect(body.accessSession.scopes).toEqual(DEFAULT_GATEWAY_ACCESS_SCOPES);
+    expect(body.routes).toMatchObject({
+      browserViewPublishWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/publish`,
+      browserViewSubscribeWebSocketUrl: `/gateway/computers/${computer.id}/browser-view/subscribe`,
+    });
   });
 
   it("requires ownership before creating an access session", async () => {
@@ -1560,8 +1582,8 @@ interface AccessSessionResponse {
     readonly filesystemPreviewWebSocketUrl: string;
     readonly browserControlWebSocketUrl: string;
     readonly browserControlStatusUrl: string;
-    readonly browserViewPublishWebSocketUrl: string;
-    readonly browserViewSubscribeWebSocketUrl: string;
+    readonly browserViewPublishWebSocketUrl?: string;
+    readonly browserViewSubscribeWebSocketUrl?: string;
     readonly agentBaseUrl: string;
     readonly capabilitiesBaseUrl: string;
   };
