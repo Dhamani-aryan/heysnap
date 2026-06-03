@@ -26,6 +26,7 @@ export type TunnelBinaryFrameType = keyof typeof TUNNEL_BINARY_FRAME_TYPES;
 export type TunnelRoute = "filesystem" | "browser-control" | "preview";
 export type TunnelTrafficClass =
   | "browser-control:ws"
+  | "browser-control:http"
   | "filesystem:ws"
   | "preview:http"
   | "preview:ws"
@@ -103,6 +104,13 @@ export const TUNNEL_QUEUE_PROFILES: Record<TunnelTrafficClass, TunnelQueueProfil
     trafficClass: "browser-control:ws",
     priority: 100,
     weight: 8,
+    maxQueuedBytes: 8 * MIB,
+    bulk: false,
+  },
+  "browser-control:http": {
+    trafficClass: "browser-control:http",
+    priority: 80,
+    weight: 4,
     maxQueuedBytes: 8 * MIB,
     bulk: false,
   },

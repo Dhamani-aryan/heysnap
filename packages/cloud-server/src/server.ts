@@ -112,6 +112,9 @@ export const createApp = (options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.get("/gateway/computers/:computerId/preview/*", async (context) => {
     return await proxyGatewayPreviewHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
+  app.get("/gateway/computers/:computerId/browser-control/status", async (context) => {
+    return await proxyGatewayBrowserControlStatusHttpRequest(context, gatewayAccessService, tunnelRegistry);
+  });
   app.all("/gateway/computers/:computerId/capabilities", async (context) => {
     return await proxyGatewayCapabilitiesHttpRequest(context, gatewayAccessService, tunnelRegistry);
   });
@@ -320,6 +323,34 @@ const proxyGatewayAgentHttpRequest = async (
   return toGatewayAgentResponse(proxied);
 };
 
+const proxyGatewayBrowserControlStatusHttpRequest = async (
+  context: Context<{ Variables: AppVariables }>,
+  gatewayAccessService: GatewayAccessService,
+  tunnelRegistry: TunnelStatusRegistry,
+): Promise<Response> => {
+  const auth = await authenticateGatewayHttpRequest(context, gatewayAccessService, "browser-control:http");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const { computerId, requestUrl, userId } = auth;
+
+  if (tunnelRegistry.proxyHttpRequest === undefined) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  const proxied = await tunnelRegistry.proxyHttpRequest(computerId, {
+    path: buildBrowserControlStatusProxyTargetPath(requestUrl, userId),
+    method: context.req.method,
+    trafficClass: "browser-control:http",
+  });
+
+  if (proxied === null) {
+    return context.json({ error: { code: "TUNNEL_UNAVAILABLE", message: "Machine tunnel is not connected" } }, 503);
+  }
+
+  return toGatewayBrowserControlResponse(proxied);
+};
+
 const proxyGatewayCapabilitiesHttpRequest = async (
   context: Context<{ Variables: AppVariables }>,
   gatewayAccessService: GatewayAccessService,
@@ -360,6 +391,7 @@ const authenticateGatewayHttpRequest = async (
   readonly requestUrl: URL;
   readonly token: string;
   readonly queryToken?: string;
+  readonly userId: string;
 }> => {
   const computerId = context.req.param("computerId");
   const requestUrl = new URL(context.req.url);
@@ -390,7 +422,7 @@ const authenticateGatewayHttpRequest = async (
     return context.json({ error: { code: "FORBIDDEN", message: "Gateway access token does not allow this route" } }, 403);
   }
 
-  return { computerId, requestUrl, token, queryToken };
+  return { computerId, requestUrl, token, queryToken, userId: accessSession.userId };
 };
 
 const buildFilesystemProxyTargetPath = (
@@ -445,6 +477,17 @@ const buildAgentProxyTargetPath = (computerId: string, requestUrl: URL): string 
   const queryString = query.toString();
 
   return `/agent${suffix}${queryString.length > 0 ? `?${queryString}` : ""}`;
+};
+
+const buildBrowserControlStatusProxyTargetPath = (requestUrl: URL, userId: string): string => {
+  const query = new URLSearchParams(requestUrl.searchParams);
+  query.delete("accessToken");
+  query.delete("token");
+  query.delete("userId");
+  query.set("userId", userId);
+  const queryString = query.toString();
+
+  return `/browser-control/status${queryString.length > 0 ? `?${queryString}` : ""}`;
 };
 
 const buildCapabilitiesProxyTargetPath = (computerId: string, requestUrl: URL): string => {
@@ -588,6 +631,21 @@ const toGatewayCapabilitiesResponse = (proxied: GatewayHttpResponse): Response =
   });
 };
 
+const toGatewayBrowserControlResponse = (proxied: GatewayHttpResponse): Response => {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(proxied.headers)) {
+    if (isForwardedBrowserControlHeader(name)) {
+      headers.set(name, value);
+    }
+  }
+
+  return new Response(new Uint8Array(proxied.body), {
+    status: proxied.statusCode,
+    headers,
+  });
+};
+
 const toGatewayUploadResponse = (proxied: GatewayHttpResponse): Response => {
   const headers = new Headers();
 
@@ -625,6 +683,12 @@ const isForwardedAgentHeader = (name: string): boolean => {
     "content-type",
     "x-accel-buffering",
   ].includes(normalized);
+};
+
+const isForwardedBrowserControlHeader = (name: string): boolean => {
+  const normalized = name.toLowerCase();
+  return normalized === "content-type" ||
+    normalized === "cache-control";
 };
 
 const isForwardedCapabilitiesHeader = (name: string): boolean => {

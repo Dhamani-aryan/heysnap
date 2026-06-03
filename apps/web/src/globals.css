@@ -39,6 +39,21 @@
   animation: dot-bounce 1100ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+@keyframes workspace-bottom-sheet-in {
+  from {
+    transform: translateY(28px);
+    opacity: 0.86;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-workspace-bottom-sheet-in {
+  animation: workspace-bottom-sheet-in 210ms var(--ease-drawer);
+}
+
 .send-button-idle {
   background-color: color-mix(in srgb, var(--color-primary) 72%, transparent);
 }

@@ -12,6 +12,7 @@
     "dev:local:cloud": "node scripts/local-dev/cloud.mjs",
     "dev:local:release": "node scripts/local-dev/release-machine-server.mjs",
     "dev:local:web": "pnpm --filter @ank1015-app/web dev",
+    "dev:local:mobile": "node scripts/local-dev/mobile.mjs",
     "dev:web": "pnpm --filter @ank1015-app/web dev",
     "dev:local:admin": "pnpm --filter @ank1015-app/cloud-server-admin-ui dev",
     "dev:local:logs": "node scripts/local-dev/machine-logs.mjs",

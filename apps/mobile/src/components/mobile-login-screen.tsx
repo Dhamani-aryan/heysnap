@@ -9,13 +9,13 @@ import {
   StyleSheet,
   TextInput,
   TouchableWithoutFeedback,
-  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Fonts, Spacing } from '@/constants/theme';
+import { useResolvedTheme } from '@/hooks/use-resolved-theme';
 
 type SuccessPhase = 'idle' | 'welcome' | 'tagline' | 'exiting';
 
@@ -42,8 +42,8 @@ export function MobileLoginScreen({
   onSuccessComplete,
   onSubmit,
 }: MobileLoginScreenProps) {
-  const scheme = useColorScheme();
-  const palette = themePalettes[scheme === 'dark' ? 'dark' : 'light'];
+  const resolvedTheme = useResolvedTheme();
+  const palette = themePalettes[resolvedTheme];
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isInvalidFeedbackVisible, setIsInvalidFeedbackVisible] = useState(false);
@@ -62,7 +62,7 @@ export function MobileLoginScreen({
     successPhase === 'tagline' || successPhase === 'exiting'
       ? 'Get your work done in a snap!'
       : 'Welcome to Snap!';
-  const logoSource = scheme === 'dark' ? darkLogo : lightLogo;
+  const logoSource = resolvedTheme === 'dark' ? darkLogo : lightLogo;
 
   const invalidTranslateX = invalidShake.interpolate({
     inputRange: [0, 0.25, 0.5, 0.75, 1],
@@ -328,26 +328,26 @@ export function MobileLoginScreen({
 
 const themePalettes = {
   light: {
-    background: '#ffffff',
-    surface: '#ffffff',
+    background: '#fcfcfd',
+    surface: '#fcfcfd',
     border: '#e5e5e5',
-    text: '#1f1f1f',
-    inputText: 'rgba(0, 0, 0, 0.82)',
-    muted: 'rgba(0, 0, 0, 0.52)',
+    text: '#1b1b1b',
+    inputText: '#1b1b1b',
+    muted: '#5d5d5f',
     accent: '#111111',
     buttonText: '#ffffff',
-    invalidBorder: 'rgba(220, 38, 38, 0.42)',
+    invalidBorder: '#e5484d',
   },
   dark: {
-    background: '#0f0f11',
-    surface: '#0f0f11',
+    background: '#0f0f10',
+    surface: '#0f0f10',
     border: '#242428',
     text: '#ffffff',
-    inputText: 'rgba(255, 255, 255, 0.74)',
-    muted: 'rgba(255, 255, 255, 0.62)',
+    inputText: '#e4e4e7',
+    muted: '#949496',
     accent: '#f5f5f5',
     buttonText: '#0f0f11',
-    invalidBorder: 'rgba(255, 107, 107, 0.38)',
+    invalidBorder: '#e5484d',
   },
 } as const;
 

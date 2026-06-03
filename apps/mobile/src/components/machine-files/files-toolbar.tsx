@@ -13,6 +13,7 @@ const DISABLED_MENU_ITEM_MODIFIERS = [swiftDisabled(true)];
 type FilesToolbarProps = {
   canGoBack: boolean;
   canGoForward: boolean;
+  canPaste: boolean;
   currentPath: string;
   directoryName: string;
   palette: FilePalette;
@@ -20,11 +21,14 @@ type FilesToolbarProps = {
   onCreateFolder: () => void;
   onGoBack: () => void;
   onGoForward: () => void;
+  onPaste: () => void;
+  onUploadFiles: () => void;
 };
 
 export function FilesToolbar({
   canGoBack,
   canGoForward,
+  canPaste,
   currentPath,
   directoryName,
   palette,
@@ -32,6 +36,8 @@ export function FilesToolbar({
   onCreateFolder,
   onGoBack,
   onGoForward,
+  onPaste,
+  onUploadFiles,
 }: FilesToolbarProps) {
   return (
     <View style={styles.toolbar}>
@@ -74,18 +80,30 @@ export function FilesToolbar({
           </ThemedText>
         </Pressable>
 
-        <HeaderFilesystemMenu styles={styles} onCreateFolder={onCreateFolder} />
+        <HeaderFilesystemMenu
+          canPaste={canPaste}
+          styles={styles}
+          onCreateFolder={onCreateFolder}
+          onPaste={onPaste}
+          onUploadFiles={onUploadFiles}
+        />
       </View>
     </View>
   );
 }
 
 function HeaderFilesystemMenu({
+  canPaste,
   styles,
   onCreateFolder,
+  onPaste,
+  onUploadFiles,
 }: {
+  canPaste: boolean;
   styles: FileStyles;
   onCreateFolder: () => void;
+  onPaste: () => void;
+  onUploadFiles: () => void;
 }) {
   return (
     <Host style={styles.headerMenuHost}>
@@ -107,9 +125,16 @@ function HeaderFilesystemMenu({
         )}>
         <Button label="New Folder" systemImage="folder.badge.plus" onPress={onCreateFolder} />
         <Divider />
+        <Button
+          label="Paste"
+          systemImage="doc.on.clipboard"
+          modifiers={canPaste ? undefined : DISABLED_MENU_ITEM_MODIFIERS}
+          onPress={onPaste}
+        />
+        <Divider />
         <Button label="Get Info" systemImage="info.circle" modifiers={DISABLED_MENU_ITEM_MODIFIERS} />
         <Button label="Change Wallpaper" modifiers={DISABLED_MENU_ITEM_MODIFIERS} />
-        <Button label="Upload Files" systemImage="doc.badge.plus" modifiers={DISABLED_MENU_ITEM_MODIFIERS} />
+        <Button label="Upload Files" systemImage="doc.badge.plus" onPress={onUploadFiles} />
         <Button label="Upload Folder" systemImage="folder.badge.plus" modifiers={DISABLED_MENU_ITEM_MODIFIERS} />
       </Menu>
     </Host>

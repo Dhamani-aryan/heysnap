@@ -1,4 +1,4 @@
-import { Eye, KeyRound, MoreHorizontal, RefreshCw, Sparkles, Trash2, UserPlus } from "lucide-react";
+import { Eye, KeyRound, MoreHorizontal, RefreshCw, Smartphone, Sparkles, Trash2, UserPlus } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -96,6 +96,19 @@ export const UsersListPage = () => {
     }
   };
 
+  const handleToggleBrowserStream = async (user: AdminUserSummary) => {
+    setActionBusy(true);
+    try {
+      await adminApi.setUserBrowserStreamAccess(user.id, !user.allowBrowserStream);
+      toast.success(user.allowBrowserStream ? "Browser stream disabled" : "Browser stream enabled");
+      users.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Failed to update browser stream access");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -134,6 +147,7 @@ export const UsersListPage = () => {
                 <TableHead>Email</TableHead>
                 <TableHead className="w-40">User ID</TableHead>
                 <TableHead className="w-28">Pi models</TableHead>
+                <TableHead className="w-32">Browser stream</TableHead>
                 <TableHead className="w-24">Machines</TableHead>
                 <TableHead className="w-36">Created</TableHead>
                 <TableHead className="w-12" />
@@ -143,7 +157,7 @@ export const UsersListPage = () => {
               {users.loading ? (
                 Array.from({ length: 4 }).map((_, index) => (
                   <TableRow key={index}>
-                    {Array.from({ length: 7 }).map((__, cellIndex) => (
+                    {Array.from({ length: 8 }).map((__, cellIndex) => (
                       <TableCell key={cellIndex}>
                         <Skeleton className="h-4" />
                       </TableCell>
@@ -152,7 +166,7 @@ export const UsersListPage = () => {
                 ))
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
                     No users found
                   </TableCell>
                 </TableRow>
@@ -169,6 +183,11 @@ export const UsersListPage = () => {
                     <TableCell>
                       <Badge variant={user.allowPiModels ? "success" : "secondary"}>
                         {user.allowPiModels ? "Allowed" : "Off"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={user.allowBrowserStream ? "success" : "secondary"}>
+                        {user.allowBrowserStream ? "Allowed" : "Off"}
                       </Badge>
                     </TableCell>
                     <TableCell>{user.computerCount ?? user.computers?.length ?? 0}</TableCell>
@@ -196,6 +215,15 @@ export const UsersListPage = () => {
                           >
                             <Sparkles className="h-4 w-4" />
                             {user.allowPiModels ? "Disable Pi models" : "Enable Pi models"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={actionBusy}
+                            onClick={() => {
+                              void handleToggleBrowserStream(user);
+                            }}
+                          >
+                            <Smartphone className="h-4 w-4" />
+                            {user.allowBrowserStream ? "Disable browser stream" : "Enable browser stream"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={actionBusy}

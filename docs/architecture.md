@@ -38,8 +38,6 @@ The intended repo boundaries are:
 
 - `apps/web`: browser UI for cloud computers.
 - `apps/mobile`: mobile UI for cloud computers.
-- `packages/ui`: shared React UI and client-side filesystem/agent protocol
-  clients.
 - `packages/server`: machine server that runs on each computer.
 - `packages/cloud-server`: hosted control-plane and gateway server.
 

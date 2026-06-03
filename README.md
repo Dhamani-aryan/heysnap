@@ -7,7 +7,6 @@ machines, and open the same filesystem plus agent workspace against a cloud VM.
 
 - `apps/web`: Next.js browser app for cloud machines.
 - `apps/mobile`: Expo mobile app for cloud machines.
-- `packages/ui`: shared React UI, cloud client, filesystem UI, and agent UI.
 - `packages/server`: machine server that runs on provisioned machines.
 - `packages/cloud-server`: hosted Hono control plane, gateway, admin, and release API.
 

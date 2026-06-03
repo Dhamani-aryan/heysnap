@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +13,53 @@ export const localCloudUrl = process.env.LOCAL_CLOUD_SERVER_URL || "http://local
 export const localAdminToken = process.env.LOCAL_CLOUD_ADMIN_TOKEN ||
   process.env.CLOUD_SERVER_ADMIN_TOKEN ||
   "development-admin-token";
+
+export const getLanAddress = () => {
+  const interfaces = networkInterfaces();
+  const candidates = [];
+
+  for (const [name, entries] of Object.entries(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal) {
+        candidates.push({ name, address: entry.address });
+      }
+    }
+  }
+
+  const isVirtual = (name) => /^(awdl|bridge|docker|llw|lo|tailscale|utun|veth|zt)/i.test(name);
+  const preferred = candidates.find(({ name }) => !isVirtual(name) && /^(ap|en|eth|usb|wl)/i.test(name));
+  const fallback = candidates.find(({ name }) => !isVirtual(name)) ?? candidates[0];
+
+  return preferred?.address ?? fallback?.address ?? null;
+};
+
+export const getLocalMobileCloudUrl = (env = process.env) => {
+  const override = env.LOCAL_MOBILE_CLOUD_SERVER_URL;
+
+  if (override) {
+    return override;
+  }
+
+  const lanAddress = getLanAddress();
+  const baseUrl = env.LOCAL_CLOUD_SERVER_URL || localCloudUrl;
+
+  if (!lanAddress) {
+    return baseUrl;
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    url.hostname = lanAddress;
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return `http://${lanAddress}:4100`;
+  }
+};
+
+export const createLocalMobileEnv = (env = process.env) => ({
+  ...env,
+  EXPO_PUBLIC_CLOUD_SERVER_URL: getLocalMobileCloudUrl(env),
+});
 
 export const machineContainerName = (computerId) => `ank1015-machine-${computerId}`;
 export const machineWorkspaceVolume = (computerId) => `ank1015-workspace-${computerId}`;

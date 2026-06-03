@@ -1,5 +1,8 @@
 import { create } from 'zustand'
-import type { BrowserExtensionBridge } from '../../lib/browser/browser-extension-bridge.ts'
+import type {
+  BrowserExtensionBridge,
+  BrowserWindowBounds,
+} from '../../lib/browser/browser-extension-bridge.ts'
 import type { BrowserControlManager } from '../../lib/browser/browser-control-manager.ts'
 import { DEFAULT_BROWSER_WINDOW_URL } from '../../lib/browser/parsers.ts'
 import type {
@@ -81,7 +84,9 @@ type BrowserActions = {
   optimisticallyActivateTab: (tabId: number) => void
   optimisticallyCloseTab: (tabId: number) => void
   upsertCreatedTab: (tab: BrowserWindowTab) => void
-  ensureBrowserWindow: () => Promise<number | null>
+  ensureBrowserWindow: (options?: {
+    readonly bounds?: BrowserWindowBounds
+  }) => Promise<number | null>
   closeBrowserWindow: () => Promise<void>
   setCaptureViewport: (viewport: BrowserCaptureViewport | null) => void
   setScreencast: (state: BrowserScreencastState) => void
@@ -470,7 +475,7 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
       })
     },
 
-    ensureBrowserWindow: async () => {
+    ensureBrowserWindow: async (options) => {
       const existing = get().windowId
       if (existing !== null) return existing
 
@@ -482,7 +487,9 @@ export const useBrowserStore = create<BrowserState & BrowserActions>(
 
       set({ isOpeningWindow: true, windowError: null })
       try {
-        const snapshot = await bridge.createBrowserWindow()
+        const snapshot = await bridge.createBrowserWindow({
+          bounds: options?.bounds,
+        })
         const firstTab =
           snapshot.tabs.find((tab) => tab.active === true) ?? snapshot.tabs[0]
         if (firstTab === undefined) {

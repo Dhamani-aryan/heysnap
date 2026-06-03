@@ -38,6 +38,33 @@ export type RememberManagedWindowArgs = {
   url: string
 }
 
+export type BrowserWindowBounds = {
+  readonly width: number
+  readonly height: number
+}
+
+export type BrowserMobileViewport = {
+  readonly width: number
+  readonly height: number
+  readonly deviceScaleFactor: number
+}
+
+export const DEFAULT_BROWSER_WINDOW_BOUNDS: BrowserWindowBounds = {
+  width: 1440,
+  height: 900,
+}
+
+export const MOBILE_BROWSER_WINDOW_BOUNDS: BrowserWindowBounds = {
+  width: 430,
+  height: 932,
+}
+
+export const MOBILE_BROWSER_VIEWPORT: BrowserMobileViewport = {
+  width: 390,
+  height: 844,
+  deviceScaleFactor: 3,
+}
+
 export class BrowserExtensionBridge {
   private readonly extensionId: string
   private readonly callbacks: Callbacks
@@ -85,7 +112,11 @@ export class BrowserExtensionBridge {
     return this.extensionId
   }
 
-  async createBrowserWindow(signal?: AbortSignal): Promise<ChromeWindowSnapshot> {
+  async createBrowserWindow(
+    options: { readonly bounds?: BrowserWindowBounds } = {},
+    signal?: AbortSignal,
+  ): Promise<ChromeWindowSnapshot> {
+    const bounds = options.bounds ?? DEFAULT_BROWSER_WINDOW_BOUNDS
     const result = await this.runCommand(
       'chrome.call',
       {
@@ -95,14 +126,35 @@ export class BrowserExtensionBridge {
             url: DEFAULT_BROWSER_WINDOW_URL,
             focused: false,
             type: 'normal',
-            width: 1440,
-            height: 900,
+            width: bounds.width,
+            height: bounds.height,
           },
         ],
       },
       signal,
     )
     return parseChromeWindow(result)
+  }
+
+  async updateBrowserWindowBounds(
+    windowId: number,
+    bounds: BrowserWindowBounds,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.runCommand(
+      'chrome.call',
+      {
+        api: 'windows.update',
+        args: [
+          windowId,
+          {
+            width: bounds.width,
+            height: bounds.height,
+          },
+        ],
+      },
+      signal,
+    )
   }
 
   async getBrowserWindow(
@@ -125,6 +177,51 @@ export class BrowserExtensionBridge {
     signal?: AbortSignal,
   ): Promise<void> {
     await this.runCommand('managedWindow.remember', args, signal)
+  }
+
+  async applyMobileViewport(
+    tabId: number,
+    viewport: BrowserMobileViewport = MOBILE_BROWSER_VIEWPORT,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const effectiveSignal = signal ?? new AbortController().signal
+    await this.sendCdpCommand({
+      tabId,
+      method: 'Emulation.setDeviceMetricsOverride',
+      params: {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: viewport.deviceScaleFactor,
+        mobile: true,
+        screenWidth: viewport.width,
+        screenHeight: viewport.height,
+      },
+      signal: effectiveSignal,
+    })
+    await this.sendCdpCommand({
+      tabId,
+      method: 'Emulation.setTouchEmulationEnabled',
+      params: { enabled: true, maxTouchPoints: 5 },
+      signal: effectiveSignal,
+    })
+  }
+
+  async clearMobileViewport(
+    tabId: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const effectiveSignal = signal ?? new AbortController().signal
+    await this.sendCdpCommand({
+      tabId,
+      method: 'Emulation.clearDeviceMetricsOverride',
+      signal: effectiveSignal,
+    })
+    await this.sendCdpCommand({
+      tabId,
+      method: 'Emulation.setTouchEmulationEnabled',
+      params: { enabled: false },
+      signal: effectiveSignal,
+    }).catch(() => undefined)
   }
 
   executeCommand(

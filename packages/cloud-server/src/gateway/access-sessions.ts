@@ -8,6 +8,8 @@ export type GatewayAccessScope =
   | "filesystem:download"
   | "filesystem:upload"
   | "browser-control:ws"
+  | "browser-control:http"
+  | "browser-view:ws"
   | "preview:http"
   | "preview:ws"
   | "agent:http"
@@ -18,6 +20,8 @@ export const DEFAULT_GATEWAY_ACCESS_SCOPES: readonly GatewayAccessScope[] = [
   "filesystem:download",
   "filesystem:upload",
   "browser-control:ws",
+  "browser-control:http",
+  "browser-view:ws",
   "preview:http",
   "preview:ws",
   "agent:http",

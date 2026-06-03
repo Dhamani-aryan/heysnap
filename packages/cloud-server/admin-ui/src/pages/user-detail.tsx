@@ -1,4 +1,4 @@
-import { ArrowLeft, Download, KeyRound, RefreshCw, ShieldOff, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, KeyRound, RefreshCw, ShieldOff, Smartphone, Sparkles, Trash2 } from "lucide-react";
 import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -52,6 +52,7 @@ export const UserDetailPage = () => {
   const [revokeBusy, setRevokeBusy] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [modelAccessBusy, setModelAccessBusy] = React.useState(false);
+  const [browserStreamBusy, setBrowserStreamBusy] = React.useState(false);
   const [downloadBusyId, setDownloadBusyId] = React.useState<string | null>(null);
   const user = detail.data?.user;
 
@@ -95,6 +96,23 @@ export const UserDetailPage = () => {
       toast.error(cause instanceof Error ? cause.message : "Failed to update model access");
     } finally {
       setModelAccessBusy(false);
+    }
+  };
+
+  const handleToggleBrowserStream = async () => {
+    if (user === undefined) {
+      return;
+    }
+
+    setBrowserStreamBusy(true);
+    try {
+      await adminApi.setUserBrowserStreamAccess(userId, !user.allowBrowserStream);
+      toast.success(user.allowBrowserStream ? "Browser stream disabled" : "Browser stream enabled");
+      detail.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Failed to update browser stream access");
+    } finally {
+      setBrowserStreamBusy(false);
     }
   };
 
@@ -188,6 +206,16 @@ export const UserDetailPage = () => {
               <Sparkles className="h-3.5 w-3.5" />
               {user?.allowPiModels === true ? "Disable Pi models" : "Enable Pi models"}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleToggleBrowserStream}
+              disabled={user === undefined || browserStreamBusy}
+              className="gap-2"
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              {user?.allowBrowserStream === true ? "Disable browser stream" : "Enable browser stream"}
+            </Button>
             <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)} className="gap-2">
               <Trash2 className="h-3.5 w-3.5" /> Delete
             </Button>
@@ -195,7 +223,7 @@ export const UserDetailPage = () => {
         }
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Machines</CardDescription>
@@ -237,6 +265,26 @@ export const UserDetailPage = () => {
             >
               <Sparkles className="h-3.5 w-3.5" />
               {user?.allowPiModels === true ? "Disable" : "Enable"}
+            </Button>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Browser stream</CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-3">
+            <Badge variant={user?.allowBrowserStream === true ? "success" : "secondary"}>
+              {user?.allowBrowserStream === true ? "Allowed" : "Off"}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleToggleBrowserStream}
+              disabled={user === undefined || browserStreamBusy}
+              className="gap-2"
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              {user?.allowBrowserStream === true ? "Disable" : "Enable"}
             </Button>
           </CardContent>
         </Card>

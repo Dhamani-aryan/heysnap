@@ -25,6 +25,7 @@ export const createAuthRoutes = (
         email: result.user.email,
         username: result.user.username,
         allowPiModels: result.user.allowPiModels,
+        allowBrowserStream: result.user.allowBrowserStream,
         createdAt: result.user.createdAt,
         updatedAt: result.user.updatedAt,
       }),

@@ -155,6 +155,11 @@ export const adminApi = {
       method: "PATCH",
       body: { allowPiModels },
     }),
+  setUserBrowserStreamAccess: (userId: string, allowBrowserStream: boolean) =>
+    request<{ readonly user: AdminUser }>(`/admin/users/${encodeURIComponent(userId)}/browser-stream-access`, {
+      method: "PATCH",
+      body: { allowBrowserStream },
+    }),
   revokeAllUserSessions: (userId: string) =>
     request<{ readonly revokedCount: number }>(
       `/admin/users/${encodeURIComponent(userId)}/sessions/revoke-all`,

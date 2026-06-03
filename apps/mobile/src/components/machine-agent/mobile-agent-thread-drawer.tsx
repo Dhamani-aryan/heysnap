@@ -7,7 +7,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -15,15 +15,15 @@ import {
   Folder01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import {
-  selectHasThreads,
-  useAgentThreadGroupsQuery,
-  useAgentThreadListStore,
-  type AgentThreadGroup,
-  type AgentThreadSummary,
-} from '@ank1015-app/ui/agent-hooks';
 
 import { ThemedText } from '@/components/themed-text';
+import { useAgentThreadGroups } from '@/hooks/agent/use-agent-thread-groups';
+import type { AgentThreadGroup, AgentThreadSummary } from '@/lib/agent/types';
+import { useAgentChatStore } from '@/stores/agent/agent-chat-store';
+import {
+  selectHasThreads,
+  useAgentThreadListStore,
+} from '@/stores/agent/agent-thread-list-store';
 
 type Palette = {
   background: string;
@@ -74,12 +74,24 @@ export function MobileAgentThreadDrawer({
   onSelectThread,
 }: MobileAgentThreadDrawerProps) {
   const palette = scheme === 'dark' ? darkPalette : lightPalette;
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, initialWindowMetrics?.insets.top ?? 0);
+  const agentBaseUrl = useAgentChatStore((state) => state.agentBaseUrl);
+  const agentIdentity = useAgentChatStore((state) => state.agentIdentity);
 
-  useAgentThreadGroupsQuery({ enabled: isOpen });
+  useAgentThreadGroups({
+    agentBaseUrl: agentBaseUrl ?? '',
+    agentIdentity: agentIdentity ?? '',
+    enabled: isOpen,
+  });
   const groups = useAgentThreadListStore((state) => state.groups);
   const isLoading = useAgentThreadListStore((state) => state.isLoading);
   const error = useAgentThreadListStore((state) => state.error);
   const hasThreads = useAgentThreadListStore(selectHasThreads);
+  const activeRun = useAgentChatStore((state) => state.activeRun);
+  const activeThreadSummary = useAgentChatStore((state) => state.threadSummary);
+  const activeStreamingThreadId =
+    activeRun === null ? null : activeRun.threadId ?? activeThreadSummary?.id ?? null;
 
   const nonEmptyGroups = useMemo(
     () => groups.filter((group) => group.threads.length > 0),
@@ -114,12 +126,15 @@ export function MobileAgentThreadDrawer({
 
   return (
     <Modal
-      allowSwipeDismissal
       animationType="slide"
       onRequestClose={onClose}
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
       visible={isOpen}>
-      <SafeAreaView edges={['top']} style={[styles.shell, { backgroundColor: palette.background }]}>
+      <View
+        style={[
+          styles.shell,
+          { backgroundColor: palette.background, paddingTop: topInset },
+        ]}>
         <View style={styles.header}>
           <Pressable
             accessibilityLabel="Close history"
@@ -154,6 +169,7 @@ export function MobileAgentThreadDrawer({
                   palette={palette}
                   isExpanded={expandedGroups[group.path] ?? false}
                   selectedThreadId={selectedThreadId}
+                  activeStreamingThreadId={activeStreamingThreadId}
                   onToggle={toggleGroup}
                   onSelectThread={handleSelect}
                 />
@@ -161,7 +177,7 @@ export function MobileAgentThreadDrawer({
             </View>
           )}
         </ScrollView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -171,6 +187,7 @@ const ThreadGroupSection = memo(function ThreadGroupSection({
   palette,
   isExpanded,
   selectedThreadId,
+  activeStreamingThreadId,
   onToggle,
   onSelectThread,
 }: {
@@ -178,6 +195,7 @@ const ThreadGroupSection = memo(function ThreadGroupSection({
   palette: Palette;
   isExpanded: boolean;
   selectedThreadId: string | null;
+  activeStreamingThreadId: string | null;
   onToggle: (path: string) => void;
   onSelectThread: (thread: AgentThreadSummary) => void;
 }) {
@@ -226,6 +244,7 @@ const ThreadGroupSection = memo(function ThreadGroupSection({
               thread={thread}
               palette={palette}
               isSelected={thread.id === selectedThreadId}
+              isStreaming={thread.isStreaming === true || thread.id === activeStreamingThreadId}
               onSelectThread={onSelectThread}
             />
           ))}
@@ -253,11 +272,13 @@ const ThreadRow = memo(function ThreadRow({
   thread,
   palette,
   isSelected,
+  isStreaming,
   onSelectThread,
 }: {
   thread: AgentThreadSummary;
   palette: Palette;
   isSelected: boolean;
+  isStreaming: boolean;
   onSelectThread: (thread: AgentThreadSummary) => void;
 }) {
   const timeLabel = useMemo(() => formatRelative(thread.updatedAt), [thread.updatedAt]);
@@ -279,7 +300,7 @@ const ThreadRow = memo(function ThreadRow({
       <ThemedText numberOfLines={1} style={[styles.threadTime, { color: palette.textMuted }]}>
         {timeLabel}
       </ThemedText>
-      {thread.isStreaming === true ? (
+      {isStreaming ? (
         <View style={[styles.streamingDot, { backgroundColor: palette.accent }]} />
       ) : null}
     </Pressable>

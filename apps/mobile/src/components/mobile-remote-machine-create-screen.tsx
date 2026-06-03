@@ -9,18 +9,17 @@ import {
   Pressable,
   StyleSheet,
   TextStyle,
-  useColorScheme,
   useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { CloudUser } from '@ank1015-app/ui/cloud-hooks';
-
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Fonts } from '@/constants/theme';
+import { useResolvedTheme } from '@/hooks/use-resolved-theme';
+import type { CloudUser } from '@/lib/auth/auth-api';
 
 type MobileRemoteMachineCreateScreenProps = {
   error: string | null;
@@ -41,13 +40,13 @@ export function MobileRemoteMachineCreateScreen({
   onLogout,
   user,
 }: MobileRemoteMachineCreateScreenProps) {
-  const scheme = useColorScheme();
+  const resolvedTheme = useResolvedTheme();
   const { width } = useWindowDimensions();
-  const palette = cloudCreatePalettes[scheme === 'dark' ? 'dark' : 'light'];
+  const palette = cloudCreatePalettes[resolvedTheme];
   const machineName = createDefaultMachineName(user.username);
   const styles = useMemo(() => createStyles(palette), [palette]);
   const artSize = Math.min(width * 0.78, 280);
-  const imageSource = scheme === 'dark' ? macDarkImage : macLightImage;
+  const imageSource = resolvedTheme === 'dark' ? macDarkImage : macLightImage;
   const dots = useMemo(() => createDotGrid(DOT_COUNT), []);
 
   return (
@@ -126,9 +125,9 @@ export function MobileRemoteMachineCreateScreen({
               pressed && !isSubmitting ? styles.pressed : null,
             ]}>
             {isSubmitting ? (
-              <ButtonLoader color={palette.background} />
+              <ButtonLoader color={palette.accentText} />
             ) : (
-              <ThemedText style={[styles.createButtonText, { color: palette.background }]}>
+              <ThemedText style={[styles.createButtonText, { color: palette.accentText }]}>
                 Create
               </ThemedText>
             )}
@@ -197,7 +196,7 @@ const createDotGrid = (count: number) => {
 
     return {
       key: `${row}:${column}`,
-    opacity: 0.24 + falloff * 0.2,
+      opacity: 0.24 + falloff * 0.2,
       x: (column / (count - 1)) * 100,
       y: (row / (count - 1)) * 100,
     };
@@ -206,24 +205,26 @@ const createDotGrid = (count: number) => {
 
 const cloudCreatePalettes = {
   light: {
-    background: '#ffffff',
+    background: '#fcfcfd',
     heading: '#252629',
-    text: '#1f1f1f',
-    icon: 'rgba(0, 0, 0, 0.5)',
+    text: '#1b1b1b',
+    icon: '#5d5d5f',
     dot: 'rgba(74, 80, 92, 0.52)',
     danger: '#b42318',
-    dangerBackground: 'rgba(180, 35, 24, 0.08)',
+    dangerBackground: 'rgba(229, 72, 77, 0.08)',
     accent: '#111111',
+    accentText: '#ffffff',
   },
   dark: {
-    background: '#0f0f11',
+    background: '#0f0f10',
     heading: '#e3e4e6',
     text: '#ffffff',
-    icon: '#a3a3a3',
-    dot: 'rgba(148, 163, 184, 0.56)',
-    danger: '#ffb4ab',
-    dangerBackground: 'rgba(255, 180, 171, 0.1)',
+    icon: '#949496',
+    dot: 'rgba(74, 80, 92, 0.52)',
+    danger: '#f87171',
+    dangerBackground: 'rgba(229, 72, 77, 0.12)',
     accent: '#f5f5f5',
+    accentText: '#0f0f11',
   },
 } as const;
 
@@ -257,8 +258,10 @@ const createStyles = (palette: CloudCreatePalette) =>
     },
     topbar: {
       minHeight: 56,
-      alignItems: 'flex-end',
-      justifyContent: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 8,
       paddingHorizontal: 12,
       backgroundColor: palette.background,
     },

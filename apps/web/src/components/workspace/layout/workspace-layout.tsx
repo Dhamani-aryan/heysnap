@@ -8,15 +8,30 @@ import { WorkspaceBottomCenterStack } from './workspace-bottom-center-stack.tsx'
 
 const FRAME_INSET_PX = 10
 
-export function WorkspaceLayout({ children }: { children: ReactNode }) {
+type WorkspaceLayoutProps = {
+  children: ReactNode
+  browserViewPublishWebSocketUrl?: string
+}
+
+export function WorkspaceLayout({
+  children,
+  browserViewPublishWebSocketUrl,
+}: WorkspaceLayoutProps) {
   return (
     <WorkspaceLayoutProvider>
-      <WorkspaceLayoutShell>{children}</WorkspaceLayoutShell>
+      <WorkspaceLayoutShell
+        browserViewPublishWebSocketUrl={browserViewPublishWebSocketUrl}
+      >
+        {children}
+      </WorkspaceLayoutShell>
     </WorkspaceLayoutProvider>
   )
 }
 
-function WorkspaceLayoutShell({ children }: { children: ReactNode }) {
+function WorkspaceLayoutShell({
+  children,
+  browserViewPublishWebSocketUrl,
+}: WorkspaceLayoutProps) {
   const { isRightSidebarOpen, rightSidebarWidth } = useWorkspaceLayout()
   const [isResizing, setIsResizing] = useState(false)
 
@@ -29,7 +44,9 @@ function WorkspaceLayoutShell({ children }: { children: ReactNode }) {
       data-right-sidebar-open={isRightSidebarOpen ? 'true' : undefined}
       className="fixed inset-0 grid grid-rows-[auto_minmax(0,1fr)] overflow-clip bg-sidebar text-heading"
     >
-      <WorkspaceToolbar />
+      <WorkspaceToolbar
+        browserViewPublishWebSocketUrl={browserViewPublishWebSocketUrl}
+      />
       <div className="relative min-h-0 overflow-clip">
         <section
           data-resizing={isResizing ? 'true' : undefined}

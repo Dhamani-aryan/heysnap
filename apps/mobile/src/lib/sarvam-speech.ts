@@ -1,12 +1,16 @@
 import { SARVAM_API_SUBSCRIPTION_KEY } from '@/constants/config';
+import { env } from '@/lib/env';
+import { getAuthToken } from '@/stores/auth/auth-store';
 
-const SARVAM_SPEECH_TO_TEXT_URL = 'https://api.sarvam.ai/speech-to-text';
+const SARVAM_API_BASE_URL = 'https://api.sarvam.ai';
+const SARVAM_STT_MODEL = 'saaras:v3';
+const SARVAM_STT_MODE = 'translit';
+export const SARVAM_SHORT_AUDIO_MAX_SECONDS = 30;
 
-type SarvamSpeechToTextResponse = {
-  request_id: string;
-  transcript: string;
-  language_code?: string;
-  language_probability?: number;
+type MobileAudioFile = {
+  uri: string;
+  name: string;
+  type: string;
 };
 
 const getAudioType = (uri: string): string => {
@@ -31,58 +35,170 @@ const getAudioName = (uri: string): string => {
   return name && name.length > 0 ? name : `recording-${Date.now().toString()}.m4a`;
 };
 
-const parseSarvamError = async (response: Response): Promise<string> => {
-  const fallback = `Speech-to-text failed with status ${response.status.toString()}.`;
+const createAudioFile = (uri: string): MobileAudioFile => ({
+  uri,
+  name: getAudioName(uri),
+  type: getAudioType(uri),
+});
+
+const readResponseBody = async (response: Response): Promise<unknown> => {
+  const text = await response.text();
+
+  if (text.length === 0) {
+    return null;
+  }
 
   try {
-    const body = (await response.json()) as {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+};
+
+const parseSpeechError = (body: unknown, fallback: string): string => {
+  if (typeof body === 'string' && body.length > 0) {
+    return body;
+  }
+
+  if (typeof body === 'object' && body !== null) {
+    const record = body as {
       error?: { message?: unknown };
       message?: unknown;
     };
-    if (typeof body.message === 'string' && body.message.length > 0) {
-      return body.message;
+    if (typeof record.message === 'string' && record.message.length > 0) {
+      return record.message;
     }
-    if (typeof body.error?.message === 'string' && body.error.message.length > 0) {
-      return body.error.message;
+    if (typeof record.error?.message === 'string' && record.error.message.length > 0) {
+      return record.error.message;
     }
-  } catch {
-    return fallback;
   }
 
   return fallback;
 };
 
-export async function transliterateSpeech(uri: string): Promise<string> {
+const transcribeShortSarvamAudio = async (file: MobileAudioFile): Promise<unknown> => {
   if (SARVAM_API_SUBSCRIPTION_KEY.length === 0) {
     throw new Error('Missing EXPO_PUBLIC_SARVAM_API_SUBSCRIPTION_KEY.');
   }
 
   const formData = new FormData();
-  formData.append('file', {
-    uri,
-    name: getAudioName(uri),
-    type: getAudioType(uri),
-  } as unknown as Blob);
-  formData.append('model', 'saaras:v3');
-  formData.append('mode', 'translit');
+  formData.append('model', SARVAM_STT_MODEL);
+  formData.append('mode', SARVAM_STT_MODE);
+  formData.append('file', file as unknown as Blob);
 
-  const response = await fetch(SARVAM_SPEECH_TO_TEXT_URL, {
+  const response = await fetch(`${SARVAM_API_BASE_URL}/speech-to-text`, {
     method: 'POST',
     headers: {
       'api-subscription-key': SARVAM_API_SUBSCRIPTION_KEY,
     },
     body: formData,
   });
+  const body = await readResponseBody(response);
 
   if (!response.ok) {
-    throw new Error(await parseSarvamError(response));
+    throw new Error(parseSpeechError(
+      body,
+      `Sarvam API failed with ${response.status.toString()}.`,
+    ));
   }
 
-  const body = (await response.json()) as Partial<SarvamSpeechToTextResponse>;
+  return body;
+};
 
-  if (typeof body.transcript !== 'string') {
+const transcribeBatchSarvamAudioViaGateway = async (file: MobileAudioFile): Promise<unknown> => {
+  const authToken = getAuthToken();
+
+  if (authToken === null || authToken.length === 0) {
+    throw new Error('Sign in is required for long voice transcription.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file as unknown as Blob);
+
+  const response = await fetch(`${env.cloudServerUrl}/sarvam/speech-to-text/batch`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: formData,
+  });
+  const body = await readResponseBody(response);
+
+  if (!response.ok) {
+    throw new Error(parseSpeechError(
+      body,
+      `Sarvam batch gateway failed with ${response.status.toString()}.`,
+    ));
+  }
+
+  return body;
+};
+
+export const extractSarvamTranscript = (result: unknown): string | null => {
+  if (typeof result === 'string') {
+    const trimmed = result.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+
+  if (Array.isArray(result)) {
+    const joined = result
+      .map((item) => extractSarvamTranscript(item))
+      .filter((transcript): transcript is string => transcript !== null)
+      .join('\n')
+      .trim();
+
+    return joined.length === 0 ? null : joined;
+  }
+
+  if (typeof result !== 'object' || result === null) {
+    return null;
+  }
+
+  const record = result as Record<string, unknown>;
+
+  if (typeof record['transcript'] === 'string') {
+    const transcript = record['transcript'].trim();
+    return transcript.length === 0 ? null : transcript;
+  }
+
+  if ('output' in record) {
+    return extractSarvamTranscript(record['output']);
+  }
+
+  if (Array.isArray(record['transcripts'])) {
+    return extractSarvamTranscript(record['transcripts']);
+  }
+
+  return null;
+};
+
+export const appendPromptTranscript = (
+  draft: string,
+  transcript: string,
+): string => {
+  const trimmedTranscript = transcript.trim();
+  if (trimmedTranscript.length === 0) return draft;
+  const trimmedDraft = draft.trimEnd();
+  return trimmedDraft.length === 0
+    ? trimmedTranscript
+    : `${trimmedDraft}\n${trimmedTranscript}`;
+};
+
+export async function transliterateSpeech(
+  uri: string,
+  input: { durationSeconds?: number } = {},
+): Promise<string> {
+  const file = createAudioFile(uri);
+  const result =
+    input.durationSeconds !== undefined &&
+    input.durationSeconds >= SARVAM_SHORT_AUDIO_MAX_SECONDS
+      ? await transcribeBatchSarvamAudioViaGateway(file)
+      : await transcribeShortSarvamAudio(file);
+  const transcript = extractSarvamTranscript(result);
+
+  if (transcript === null) {
     throw new Error('Speech-to-text response did not include a transcript.');
   }
 
-  return body.transcript;
+  return transcript;
 }

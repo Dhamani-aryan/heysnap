@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { createLocalCloudEnv } from "./cloud.mjs";
 import {
   adminHeaders,
+  createLocalMobileEnv,
   inherit,
   localCloudUrl,
   repoRoot,
@@ -148,15 +149,20 @@ const main = async () => {
   console.log("Publishing local machine-server release...");
   await runLocalReleasePublisher();
 
-  console.log("Starting web and admin dev servers...");
+  const mobileEnv = createLocalMobileEnv();
+
+  console.log("Starting web, mobile, and admin dev servers...");
   startProcess("web", "pnpm", ["--filter", "@ank1015-app/web", "dev"]);
+  startProcess("mobile", "pnpm", ["--filter", "mobile", "exec", "expo", "start", "--host", "lan"], { env: mobileEnv });
   startProcess("admin-ui", "pnpm", ["--filter", "@ank1015-app/cloud-server-admin-ui", "dev"]);
 
   console.log("");
   console.log("Local dev is running.");
   console.log("Web:         http://127.0.0.1:5175");
+  console.log("Mobile:      Expo dev server (LAN)");
   console.log("Admin UI:    http://localhost:5174/admin-dashboard/");
   console.log(`Cloud API:   ${localCloudUrl}`);
+  console.log(`Mobile API:  ${mobileEnv.EXPO_PUBLIC_CLOUD_SERVER_URL}`);
   console.log("Artifacts:   http://localhost:4101");
   console.log(`Login:       ${DEV_EMAIL} / ${DEV_PASSWORD}`);
   console.log("");

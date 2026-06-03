@@ -1,28 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { Redirect, useRouter } from 'expo-router';
-import {
-  useCloudAuthStore,
-  useCloudMachinesStore,
-  useCreateMachineMutation,
-  useLogoutMutation,
-  useMachinesQuery,
-} from '@ank1015-app/ui/cloud-hooks';
 
 import { MobileRemoteMachineCreateScreen } from '@/components/mobile-remote-machine-create-screen';
 import { RouteStatusScreen } from '@/components/route-status-screen';
+import { useAuth } from '@/hooks/auth/use-auth';
+import { useLogoutMutation } from '@/hooks/auth/use-auth-mutations';
+import { useCreateComputerMutation } from '@/lib/machines/machines-mutations';
 
 export default function CreateMachineScreen() {
   const router = useRouter();
-  const authStatus = useCloudAuthStore((state) => state.status);
-  const user = useCloudAuthStore((state) => state.user);
-  const hasLoadedMachines = useCloudMachinesStore((state) => state.hasLoaded);
-  const machinesError = useCloudMachinesStore((state) => state.error);
-  const machinesQuery = useMachinesQuery();
-  const createMachineMutation = useCreateMachineMutation();
+  const auth = useAuth();
+  const createMachineMutation = useCreateComputerMutation();
   const hasResetCreateStateRef = useRef(false);
-  const logoutMutation = useLogoutMutation({
-    onLogout: () => router.replace('/login'),
-  });
+  const logoutMutation = useLogoutMutation();
 
   useEffect(() => {
     if (hasResetCreateStateRef.current) {
@@ -33,26 +23,17 @@ export default function CreateMachineScreen() {
     createMachineMutation.reset();
   }, [createMachineMutation]);
 
-  if (authStatus === 'checking') {
+  if (auth.status === 'checking') {
     return <RouteStatusScreen route="/machines/create" title="Checking Session" />;
   }
 
-  if (authStatus === 'unauthenticated' || user === null) {
-    return <Redirect href="/login" />;
-  }
-
-  if (!hasLoadedMachines) {
-    return (
-      <RouteStatusScreen
-        route="/machines/create"
-        title={machinesQuery.isFetching ? 'Loading Machines' : 'Preparing Machines'}
-      />
-    );
+  if (auth.status === 'unauthenticated' || auth.user === null) {
+    return <Redirect href="/login?redirect=%2Fmachines%2Fcreate" />;
   }
 
   const createMachineError = createMachineMutation.error instanceof Error
     ? createMachineMutation.error.message
-    : machinesError;
+    : null;
 
   return (
     <MobileRemoteMachineCreateScreen
@@ -61,7 +42,6 @@ export default function CreateMachineScreen() {
       onCreateMachine={async (input) => {
         try {
           await createMachineMutation.mutateAsync(input);
-          await machinesQuery.refetch();
           router.replace('/machines');
         } catch {
           // The mutation stores the error for the form.
@@ -69,8 +49,9 @@ export default function CreateMachineScreen() {
       }}
       onLogout={async () => {
         await logoutMutation.mutateAsync();
+        router.replace('/login');
       }}
-      user={user}
+      user={auth.user}
     />
   );
 }

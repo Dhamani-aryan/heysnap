@@ -1,15 +1,12 @@
 import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  useCloudAuthStore,
-  useCloudComputers,
-  useCloudMachinesStore,
-  useMachinesQuery,
-} from '@ank1015-app/ui/cloud-hooks';
+import { useQuery } from '@tanstack/react-query';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useAuth } from '@/hooks/auth/use-auth';
+import { machinesQueryOptions } from '@/lib/machines/machines-query';
 
 type PlaceholderScreenProps = {
   route: string;
@@ -17,12 +14,15 @@ type PlaceholderScreenProps = {
 };
 
 export function PlaceholderScreen({ route, title }: PlaceholderScreenProps) {
-  const authStatus = useCloudAuthStore((state) => state.status);
-  const user = useCloudAuthStore((state) => state.user);
-  const computers = useCloudComputers();
-  const hasLoadedMachines = useCloudMachinesStore((state) => state.hasLoaded);
-  const machinesError = useCloudMachinesStore((state) => state.error);
-  const machinesQuery = useMachinesQuery();
+  const auth = useAuth();
+  const machinesQuery = useQuery({
+    ...machinesQueryOptions,
+    enabled: auth.status === 'authenticated',
+  });
+  const computers = machinesQuery.data ?? [];
+  const machinesError = machinesQuery.error instanceof Error
+    ? machinesQuery.error.message
+    : null;
 
   return (
     <ThemedView style={styles.container}>
@@ -38,12 +38,12 @@ export function PlaceholderScreen({ route, title }: PlaceholderScreenProps) {
             {route}
           </ThemedText>
           <ThemedView type="backgroundSelected" style={styles.statePanel}>
-            <ThemedText type="small">Auth: {authStatus}</ThemedText>
+            <ThemedText type="small">Auth: {auth.status}</ThemedText>
             <ThemedText type="small">
-              User: {user?.email ?? 'none'}
+              User: {auth.user?.email ?? 'none'}
             </ThemedText>
             <ThemedText type="small">
-              Machines: {hasLoadedMachines ? computers.length : 'not loaded'}
+              Machines: {machinesQuery.data !== undefined ? computers.length : 'not loaded'}
             </ThemedText>
             <ThemedText type="small">
               Query: {machinesQuery.isFetching ? 'fetching' : machinesQuery.status}

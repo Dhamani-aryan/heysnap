@@ -5,6 +5,7 @@ export interface AuthenticatedUser {
   readonly email: string;
   readonly username: string;
   readonly allowPiModels: boolean;
+  readonly allowBrowserStream: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -19,6 +20,7 @@ export const toAuthenticatedUser = (user: UserRecord): AuthenticatedUser => ({
   email: user.email,
   username: user.username,
   allowPiModels: user.allowPiModels,
+  allowBrowserStream: user.allowBrowserStream,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });

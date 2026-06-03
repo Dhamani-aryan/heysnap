@@ -1,27 +1,39 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   StyleSheet,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {
+  ArrowDown01Icon,
   ArrowUp02Icon,
   AttachmentIcon,
   Cancel01Icon,
+  ChatGptIcon,
+  ClaudeIcon,
   Folder01Icon,
   ImageAdd02Icon,
+  Tick02Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import type { AgentContent } from '@ank1015-app/ui/agent-hooks';
 
 import { ThemedText } from '@/components/themed-text';
+import type { PromptModelChoice } from '@/lib/agent/model-selection';
+import type { AgentContent } from '@/lib/agent/types';
+import {
+  selectPromptDraft,
+  useAgentPromptDraftStore,
+  type PromptAttachment,
+} from '@/stores/agent/agent-prompt-draft-store';
 
 type Palette = {
   background: string;
@@ -35,19 +47,18 @@ type Palette = {
   errorText: string;
 };
 
-type ComposerAttachment = {
-  id: string;
-  kind: 'image' | 'file';
-  fileName: string;
-  mimeType: string;
-  size: number;
-  base64: string;
-};
-
 type MobileAgentComposerProps = {
+  autoFocus?: boolean;
+  autoFocusToken?: number;
   palette: Palette;
   activeFolderName?: string;
   isRunning: boolean;
+  modelPicker?: {
+    value: PromptModelChoice;
+    disabled: boolean;
+    onChange: (choice: PromptModelChoice) => void;
+  };
+  threadId: string | null;
   onSubmit: (input: { content: AgentContent }) => boolean | void | Promise<boolean | void>;
   onCancel: () => void;
 };
@@ -71,22 +82,22 @@ const newAttachmentId = (): string =>
 
 const buildAgentContent = (
   text: string,
-  attachments: readonly ComposerAttachment[],
+  attachments: readonly PromptAttachment[],
 ): AgentContent => {
   const trimmed = text.trim();
   const content: AgentContent = [
     ...(trimmed.length > 0 ? [{ type: 'text' as const, content: trimmed }] : []),
     ...attachments.map((attachment) =>
-      attachment.kind === 'image'
+      attachment.type === 'image'
         ? {
             type: 'image' as const,
-            data: attachment.base64,
+            data: attachment.content,
             mimeType: attachment.mimeType,
             metadata: { filename: attachment.fileName, size: attachment.size },
           }
         : {
             type: 'file' as const,
-            data: attachment.base64,
+            data: attachment.content,
             mimeType: attachment.mimeType,
             filename: attachment.fileName,
             metadata: { size: attachment.size },
@@ -97,19 +108,26 @@ const buildAgentContent = (
 };
 
 export function MobileAgentComposer({
+  autoFocus = false,
+  autoFocusToken,
   palette,
   activeFolderName,
   isRunning,
+  modelPicker,
+  threadId,
   onSubmit,
   onCancel,
 }: MobileAgentComposerProps) {
-  const [draft, setDraft] = useState('');
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const draft = useAgentPromptDraftStore(selectPromptDraft(threadId));
+  const setText = useAgentPromptDraftStore((state) => state.setText);
+  const setAttachments = useAgentPromptDraftStore((state) => state.setAttachments);
+  const clearDraft = useAgentPromptDraftStore((state) => state.clearDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [resetKey, setResetKey] = useState(0);
   const inputRef = useRef<TextInput>(null);
+  const previousAutoFocusTokenRef = useRef(autoFocusToken);
+  const attachments = draft.attachments;
 
-  const canSubmit = draft.trim().length > 0 || attachments.length > 0;
+  const canSubmit = draft.text.trim().length > 0 || attachments.length > 0;
 
   const handleAddImage = useCallback(async () => {
     try {
@@ -129,25 +147,25 @@ export function MobileAgentComposer({
         return;
       }
 
-      const nextAttachments: ComposerAttachment[] = [];
+      const nextAttachments: PromptAttachment[] = [];
       for (const asset of result.assets) {
         if (asset.base64 === null || asset.base64 === undefined) {
           continue;
         }
         nextAttachments.push({
           id: newAttachmentId(),
-          kind: 'image',
+          type: 'image',
           fileName: asset.fileName ?? 'image',
           mimeType: asset.mimeType ?? guessMime(asset.uri, 'image/jpeg'),
           size: asset.fileSize ?? 0,
-          base64: asset.base64,
+          content: asset.base64,
         });
       }
-      setAttachments((current) => [...current, ...nextAttachments]);
+      setAttachments(threadId, [...attachments, ...nextAttachments]);
     } catch (error) {
       Alert.alert('Attach image', error instanceof Error ? error.message : 'Failed to attach.');
     }
-  }, []);
+  }, [attachments, setAttachments, threadId]);
 
   const handleAddFile = useCallback(async () => {
     try {
@@ -159,29 +177,32 @@ export function MobileAgentComposer({
         return;
       }
 
-      const nextAttachments: ComposerAttachment[] = [];
+      const nextAttachments: PromptAttachment[] = [];
       for (const asset of result.assets) {
         const base64 = await FileSystem.readAsStringAsync(asset.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
         nextAttachments.push({
           id: newAttachmentId(),
-          kind: 'file',
+          type: 'file',
           fileName: asset.name,
           mimeType: asset.mimeType ?? guessMime(asset.uri, 'application/octet-stream'),
           size: asset.size ?? 0,
-          base64,
+          content: base64,
         });
       }
-      setAttachments((current) => [...current, ...nextAttachments]);
+      setAttachments(threadId, [...attachments, ...nextAttachments]);
     } catch (error) {
       Alert.alert('Attach file', error instanceof Error ? error.message : 'Failed to attach.');
     }
-  }, []);
+  }, [attachments, setAttachments, threadId]);
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
-  }, []);
+    setAttachments(
+      threadId,
+      attachments.filter((attachment) => attachment.id !== id),
+    );
+  }, [attachments, setAttachments, threadId]);
 
   const handleSend = useCallback(async () => {
     if (!canSubmit || isSubmitting) {
@@ -190,21 +211,38 @@ export function MobileAgentComposer({
 
     setIsSubmitting(true);
     try {
-      const didSubmit = await onSubmit({ content: buildAgentContent(draft, attachments) });
+      const didSubmit = await onSubmit({ content: buildAgentContent(draft.text, attachments) });
 
       if (didSubmit === false) {
         return;
       }
 
-      setDraft('');
-      setAttachments([]);
-      setResetKey((current) => current + 1);
+      clearDraft(threadId);
     } finally {
       setIsSubmitting(false);
     }
-  }, [attachments, canSubmit, draft, isSubmitting, onSubmit]);
+  }, [attachments, canSubmit, clearDraft, draft.text, isSubmitting, onSubmit, threadId]);
 
   const isStopAction = isRunning && !canSubmit;
+
+  useEffect(() => {
+    const shouldFocusForToken =
+      autoFocusToken !== undefined &&
+      previousAutoFocusTokenRef.current !== autoFocusToken;
+    previousAutoFocusTokenRef.current = autoFocusToken;
+
+    if (!autoFocus && !shouldFocusForToken) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [autoFocus, autoFocusToken]);
 
   const handlePrimaryAction = useCallback(() => {
     if (isStopAction) {
@@ -235,15 +273,14 @@ export function MobileAgentComposer({
 
       <Pressable onPress={() => inputRef.current?.focus()} style={styles.inputArea}>
         <TextInput
-          key={resetKey}
           ref={inputRef}
           editable={!isSubmitting}
           multiline
-          onChangeText={setDraft}
+          onChangeText={(text) => setText(threadId, text)}
           placeholder="What's next…"
           placeholderTextColor={palette.textMuted}
           style={[styles.input, { color: palette.textPrimary }]}
-          value={draft}
+          value={draft.text}
         />
       </Pressable>
 
@@ -273,36 +310,205 @@ export function MobileAgentComposer({
           )}
         </View>
 
-        <Pressable
-          accessibilityLabel={isStopAction ? 'Stop response' : 'Send'}
-          accessibilityRole="button"
-          disabled={isSubmitting || (!isStopAction && !canSubmit)}
-          onPress={handlePrimaryAction}
-          style={({ pressed }) => [
-            styles.sendButton,
-            {
-              backgroundColor: isStopAction
-                ? palette.errorText
-                : canSubmit
-                  ? palette.accent
-                  : '#1A2B4A',
-            },
-            pressed && { opacity: 0.8 },
-          ]}>
-          {isSubmitting ? (
-            <ActivityIndicator color="#ffffff" size="small" />
-          ) : isStopAction ? (
-            <View style={styles.stopSquare} />
-          ) : (
-            <HugeiconsIcon
-              icon={ArrowUp02Icon}
-              size={18}
-              color={canSubmit ? '#ffffff' : palette.textMuted}
-              strokeWidth={2.4}
-            />
+        <View style={styles.rightActions}>
+          {modelPicker === undefined ? null : (
+            <ModelDropdown modelPicker={modelPicker} palette={palette} />
           )}
-        </Pressable>
+
+          <Pressable
+            accessibilityLabel={isStopAction ? 'Stop response' : 'Send'}
+            accessibilityRole="button"
+            disabled={isSubmitting || (!isStopAction && !canSubmit)}
+            onPress={handlePrimaryAction}
+            style={({ pressed }) => [
+              styles.sendButton,
+              {
+                backgroundColor: isStopAction
+                  ? palette.errorText
+                  : canSubmit
+                    ? palette.accent
+                    : '#1A2B4A',
+              },
+              pressed && { opacity: 0.8 },
+            ]}>
+            {isSubmitting ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : isStopAction ? (
+              <View style={styles.stopSquare} />
+            ) : (
+              <HugeiconsIcon
+                icon={ArrowUp02Icon}
+                size={18}
+                color={canSubmit ? '#ffffff' : palette.textMuted}
+                strokeWidth={2.4}
+              />
+            )}
+          </Pressable>
+        </View>
       </View>
+    </View>
+  );
+}
+
+function ModelDropdown({
+  modelPicker,
+  palette,
+}: {
+  modelPicker: NonNullable<MobileAgentComposerProps['modelPicker']>;
+  palette: Palette;
+}) {
+  const dimensions = useWindowDimensions();
+  const triggerRef = useRef<View>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [triggerFrame, setTriggerFrame] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const selectedOption =
+    MODEL_OPTIONS.find((option) => option.value === modelPicker.value) ?? MODEL_OPTIONS[0];
+  const menuHeight =
+    MODEL_OPTIONS.length * MODEL_DROPDOWN_OPTION_HEIGHT + MODEL_DROPDOWN_PADDING * 2;
+  const maxMenuLeft = Math.max(
+    MODEL_DROPDOWN_MARGIN,
+    dimensions.width - MODEL_DROPDOWN_WIDTH - MODEL_DROPDOWN_MARGIN,
+  );
+  const maxMenuTop = Math.max(
+    MODEL_DROPDOWN_MARGIN,
+    dimensions.height - menuHeight - MODEL_DROPDOWN_MARGIN,
+  );
+  const menuLeft =
+    triggerFrame === null
+      ? MODEL_DROPDOWN_MARGIN
+      : Math.min(
+          Math.max(MODEL_DROPDOWN_MARGIN, triggerFrame.x + triggerFrame.width - MODEL_DROPDOWN_WIDTH),
+          maxMenuLeft,
+        );
+  const preferredTop =
+    triggerFrame === null
+      ? MODEL_DROPDOWN_MARGIN
+      : triggerFrame.y - menuHeight - MODEL_DROPDOWN_OFFSET;
+  const menuTop =
+    triggerFrame === null
+      ? MODEL_DROPDOWN_MARGIN
+      : preferredTop >= MODEL_DROPDOWN_MARGIN
+        ? preferredTop
+        : Math.min(
+            triggerFrame.y + triggerFrame.height + MODEL_DROPDOWN_OFFSET,
+            maxMenuTop,
+          );
+
+  useEffect(() => {
+    if (modelPicker.disabled) {
+      setIsOpen(false);
+    }
+  }, [modelPicker.disabled]);
+
+  const openMenu = useCallback(() => {
+    if (modelPicker.disabled) {
+      return;
+    }
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      setTriggerFrame({ x, y, width, height });
+      setIsOpen(true);
+    });
+  }, [modelPicker.disabled]);
+
+  return (
+    <View ref={triggerRef} collapsable={false}>
+      <Pressable
+        accessibilityLabel={`Model: ${selectedOption.label}`}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: modelPicker.disabled, expanded: isOpen }}
+        disabled={modelPicker.disabled}
+        hitSlop={8}
+        onPress={openMenu}
+        style={({ pressed }) => [
+          styles.modelTrigger,
+          { backgroundColor: palette.surfaceMuted, borderColor: palette.border },
+          pressed && !modelPicker.disabled && { opacity: 0.72 },
+          modelPicker.disabled && styles.modelControlDisabled,
+        ]}>
+        <ModelLogo option={selectedOption} />
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          size={12}
+          color={palette.textSecondary}
+          strokeWidth={2.1}
+          style={[styles.modelChevron, isOpen && styles.modelChevronOpen]}
+        />
+      </Pressable>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setIsOpen(false)}
+        transparent
+        visible={isOpen && triggerFrame !== null && !modelPicker.disabled}>
+        <View style={StyleSheet.absoluteFill}>
+          <Pressable
+            accessibilityLabel="Close model picker"
+            accessibilityRole="button"
+            onPress={() => setIsOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            style={[
+              styles.modelMenu,
+              {
+                top: menuTop,
+                left: menuLeft,
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+              },
+            ]}>
+            {MODEL_OPTIONS.map((option) => {
+              const isSelected = option.value === modelPicker.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityLabel={option.label}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                  onPress={() => {
+                    setIsOpen(false);
+                    if (!isSelected) {
+                      modelPicker.onChange(option.value);
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.modelMenuItem,
+                    isSelected && { backgroundColor: palette.surfaceMuted },
+                    pressed && { opacity: 0.72 },
+                  ]}>
+                  <ModelLogo option={option} />
+                  <ThemedText
+                    numberOfLines={1}
+                    style={[styles.modelMenuText, { color: palette.textPrimary }]}>
+                    {option.label}
+                  </ThemedText>
+                  {isSelected ? (
+                    <HugeiconsIcon
+                      icon={Tick02Icon}
+                      size={16}
+                      color={palette.textSecondary}
+                      strokeWidth={2.1}
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function ModelLogo({ option }: { option: ModelOption }) {
+  return (
+    <View style={styles.modelLogo}>
+      <HugeiconsIcon icon={option.icon} size={14} color={option.iconColor} strokeWidth={2} />
     </View>
   );
 }
@@ -337,20 +543,38 @@ function ComposerIconButton({
   );
 }
 
+type ModelOption = {
+  value: PromptModelChoice;
+  label: string;
+  icon: typeof ArrowUp02Icon;
+  iconColor: string;
+};
+
+const MODEL_OPTIONS: readonly ModelOption[] = [
+  { value: 'gpt', label: 'GPT', icon: ChatGptIcon, iconColor: '#101113' },
+  { value: 'claude', label: 'Claude', icon: ClaudeIcon, iconColor: '#D97757' },
+];
+
+const MODEL_DROPDOWN_WIDTH = 156;
+const MODEL_DROPDOWN_OPTION_HEIGHT = 38;
+const MODEL_DROPDOWN_PADDING = 4;
+const MODEL_DROPDOWN_OFFSET = 8;
+const MODEL_DROPDOWN_MARGIN = 8;
+
 function AttachmentChip({
   attachment,
   palette,
   onRemove,
 }: {
-  attachment: ComposerAttachment;
+  attachment: PromptAttachment;
   palette: Palette;
   onRemove: () => void;
 }) {
-  if (attachment.kind === 'image') {
+  if (attachment.type === 'image') {
     return (
       <View style={[styles.imageChip, { borderColor: palette.border }]}>
         <Image
-          source={{ uri: `data:${attachment.mimeType};base64,${attachment.base64}` }}
+          source={{ uri: `data:${attachment.mimeType};base64,${attachment.content}` }}
           style={styles.imageChipImage}
         />
         <Pressable
@@ -438,9 +662,76 @@ const styles = StyleSheet.create({
   leftActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
     flexShrink: 1,
     minWidth: 0,
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: 8,
+  },
+  modelTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 30,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 6,
+    paddingRight: 7,
+    gap: 4,
+  },
+  modelControlDisabled: {
+    opacity: 0.52,
+  },
+  modelLogo: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  modelChevron: {
+    transform: [{ rotate: '0deg' }],
+  },
+  modelChevronOpen: {
+    transform: [{ rotate: '180deg' }],
+  },
+  modelMenu: {
+    position: 'absolute',
+    width: MODEL_DROPDOWN_WIDTH,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: MODEL_DROPDOWN_PADDING,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    elevation: 12,
+  },
+  modelMenuItem: {
+    height: MODEL_DROPDOWN_OPTION_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    gap: 9,
+  },
+  modelMenuText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   iconButton: {
     width: 32,
