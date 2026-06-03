@@ -5,25 +5,24 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
+  TextInput,
   View,
   type ListRenderItemInfo,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
-import { CopyIcon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { ArrowUp02Icon, Cancel01Icon, CopyIcon, Edit03Icon, Tick02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { useStore } from 'zustand';
+
+import { ThemedText } from '@/components/themed-text';
 import {
   getAssistantMarkdown,
   getTextContent,
-  resolveMarkdownFileLinkMeta,
-  useAgentRuntime,
   type AgentTimelineRow,
-  type FileContent,
-  type ImageContent,
-} from '@ank1015-app/ui/agent-hooks';
-
-import { ThemedText } from '@/components/themed-text';
+} from '@/lib/agent/agent-events';
+import { resolveMarkdownFileLinkMeta } from '@/lib/agent/markdown-links';
+import type { AgentContent, FileContent, ImageContent } from '@/lib/agent/types';
+import { useAgentChatStore } from '@/stores/agent/agent-chat-store';
 
 type Palette = {
   background: string;
@@ -39,17 +38,21 @@ type Palette = {
 
 type MobileAgentTimelineProps = {
   currentPath: string;
+  onSubmitUserMessageEdit?: (input: {
+    messageId: string;
+    content: AgentContent;
+  }) => boolean | void;
   onOpenFilePath?: (path: string) => void;
   palette: Palette;
 };
 
 export function MobileAgentTimeline({
   currentPath,
+  onSubmitUserMessageEdit,
   onOpenFilePath,
   palette,
 }: MobileAgentTimelineProps) {
-  const runtime = useAgentRuntime();
-  const rows = useStore(runtime.chatStore, (state) => state.timelineRows);
+  const rows = useAgentChatStore((state) => state.timelineRows);
   const listRef = useRef<FlatList<AgentTimelineRow>>(null);
   const hasInitialScrollRef = useRef(false);
   const prevRowCountRef = useRef(0);
@@ -97,6 +100,7 @@ export function MobileAgentTimeline({
       row={info.item}
       palette={palette}
       onOpenFilePath={onOpenFilePath}
+      onSubmitUserMessageEdit={onSubmitUserMessageEdit}
     />
   );
 
@@ -121,11 +125,16 @@ const keyExtractor = (row: AgentTimelineRow): string => row.id;
 const TimelineRow = memo(function TimelineRow({
   currentPath,
   onOpenFilePath,
+  onSubmitUserMessageEdit,
   row,
   palette,
 }: {
   currentPath: string;
   onOpenFilePath?: (path: string) => void;
+  onSubmitUserMessageEdit?: (input: {
+    messageId: string;
+    content: AgentContent;
+  }) => boolean | void;
   row: AgentTimelineRow;
   palette: Palette;
 }) {
@@ -134,7 +143,13 @@ const TimelineRow = memo(function TimelineRow({
   }
 
   if (row.role === 'user') {
-    return <UserBubble messageId={row.messageId} palette={palette} />;
+    return (
+      <UserBubble
+        messageId={row.messageId}
+        palette={palette}
+        onSubmitUserMessageEdit={onSubmitUserMessageEdit}
+      />
+    );
   }
 
   return (
@@ -154,8 +169,7 @@ const StatusRow = memo(function StatusRow({
   messageId: string;
   palette: Palette;
 }) {
-  const runtime = useAgentRuntime();
-  const statusLabel = useStore(runtime.chatStore, (state) => {
+  const statusLabel = useAgentChatStore((state) => {
     if (state.activeRun === null) {
       return 'Worked';
     }
@@ -177,15 +191,31 @@ const StatusRow = memo(function StatusRow({
 
 const UserBubble = memo(function UserBubble({
   messageId,
+  onSubmitUserMessageEdit,
   palette,
 }: {
   messageId: string;
+  onSubmitUserMessageEdit?: (input: {
+    messageId: string;
+    content: AgentContent;
+  }) => boolean | void;
   palette: Palette;
 }) {
-  const runtime = useAgentRuntime();
-  const message = useStore(runtime.chatStore, (state) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const message = useAgentChatStore((state) => {
     const current = state.messagesById[messageId];
     return current?.role === 'user' ? current : null;
+  });
+  const isLatestUserMessage = useAgentChatStore(
+    (state) => findLastUserMessageKey(state.messageOrder, state.messagesById) === messageId,
+  );
+  const isStreaming = useAgentChatStore((state) => state.activeRun !== null);
+  const isTurnCompleted = useAgentChatStore((state) => {
+    if (state.activeRun === null) {
+      return true;
+    }
+    const lastUserId = findLastUserMessageKey(state.messageOrder, state.messagesById);
+    return lastUserId !== messageId;
   });
 
   if (message === null) {
@@ -196,24 +226,206 @@ const UserBubble = memo(function UserBubble({
   const attachments = message.content.filter(
     (block): block is ImageContent | FileContent => block.type === 'image' || block.type === 'file',
   );
+  const canEdit =
+    isLatestUserMessage &&
+    !isStreaming &&
+    onSubmitUserMessageEdit !== undefined &&
+    text.trim().length > 0;
+
+  const handleSubmitEdit = (nextText: string): boolean => {
+    const didSubmit = onSubmitUserMessageEdit?.({
+      messageId,
+      content: [{ type: 'text', content: nextText }],
+    });
+
+    if (didSubmit === false) {
+      return false;
+    }
+
+    setIsEditing(false);
+    return true;
+  };
 
   return (
     <View style={styles.userRow}>
-      {attachments.length > 0 ? (
-        <View style={styles.userAttachments}>
-          {attachments.map((attachment, index) => (
-            <UserAttachmentChip key={`${messageId}-${index.toString()}`} attachment={attachment} palette={palette} />
-          ))}
-        </View>
-      ) : null}
-      {text.length > 0 ? (
-        <View style={[styles.userBubble, { backgroundColor: '#19191B' }]}>
-          <ThemedText style={[styles.userBubbleText, { color: palette.textPrimary }]}>{text}</ThemedText>
-        </View>
+      {isEditing ? (
+        <UserMessageEditBox
+          initialText={text}
+          palette={palette}
+          onCancel={() => setIsEditing(false)}
+          onSubmit={handleSubmitEdit}
+        />
+      ) : (
+        <>
+          {attachments.length > 0 ? (
+            <View style={styles.userAttachments}>
+              {attachments.map((attachment, index) => (
+                <UserAttachmentChip key={`${messageId}-${index.toString()}`} attachment={attachment} palette={palette} />
+              ))}
+            </View>
+          ) : null}
+          {text.length > 0 ? (
+            <View style={[styles.userBubble, { backgroundColor: '#19191B' }]}>
+              <ThemedText style={[styles.userBubbleText, { color: palette.textPrimary }]}>{text}</ThemedText>
+            </View>
+          ) : null}
+        </>
+      )}
+      {!isEditing && (isTurnCompleted || isLatestUserMessage) && text.length > 0 ? (
+        <UserMessageActions
+          canEdit={canEdit}
+          palette={palette}
+          text={text}
+          onEdit={() => setIsEditing(true)}
+        />
       ) : null}
     </View>
   );
 });
+
+function UserMessageEditBox({
+  initialText,
+  onCancel,
+  onSubmit,
+  palette,
+}: {
+  initialText: string;
+  onCancel: () => void;
+  onSubmit: (text: string) => boolean;
+  palette: Palette;
+}) {
+  const [draft, setDraft] = useState(initialText);
+  const inputRef = useRef<TextInput>(null);
+  const canSubmit = draft.trim().length > 0 && draft.trim() !== initialText.trim();
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const submit = useCallback(() => {
+    if (!canSubmit) {
+      return;
+    }
+    onSubmit(draft.trim());
+  }, [canSubmit, draft, onSubmit]);
+
+  return (
+    <View
+      style={[
+        styles.editBox,
+        { backgroundColor: palette.surface, borderColor: palette.border },
+      ]}>
+      <TextInput
+        ref={inputRef}
+        multiline
+        onChangeText={setDraft}
+        onSubmitEditing={submit}
+        style={[styles.editInput, { color: palette.textPrimary }]}
+        textAlignVertical="top"
+        value={draft}
+      />
+      <View style={styles.editActions}>
+        <Pressable
+          accessibilityLabel="Cancel edit"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={onCancel}
+          style={({ pressed }) => [
+            styles.editIconButton,
+            { backgroundColor: palette.surfaceMuted },
+            pressed && { opacity: 0.7 },
+          ]}>
+          <HugeiconsIcon icon={Cancel01Icon} size={16} color={palette.textSecondary} strokeWidth={2.2} />
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Send edit"
+          accessibilityRole="button"
+          disabled={!canSubmit}
+          hitSlop={8}
+          onPress={submit}
+          style={({ pressed }) => [
+            styles.editIconButton,
+            { backgroundColor: canSubmit ? palette.accent : palette.surfaceMuted },
+            !canSubmit && { opacity: 0.5 },
+            pressed && canSubmit && { opacity: 0.8 },
+          ]}>
+          <HugeiconsIcon
+            icon={ArrowUp02Icon}
+            size={16}
+            color={canSubmit ? '#ffffff' : palette.textMuted}
+            strokeWidth={2.3}
+          />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function UserMessageActions({
+  canEdit,
+  onEdit,
+  palette,
+  text,
+}: {
+  canEdit: boolean;
+  onEdit: () => void;
+  palette: Palette;
+  text: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const copy = useCallback(() => {
+    void Clipboard.setStringAsync(text);
+    setCopied(true);
+    if (copyTimerRef.current !== null) {
+      clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
+  }, [text]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <View style={styles.userActions}>
+      <Pressable
+        accessibilityLabel={copied ? 'Copied' : 'Copy message'}
+        accessibilityRole="button"
+        hitSlop={8}
+        onPress={copy}
+        style={({ pressed }) => [styles.userActionButton, pressed && { opacity: 0.55 }]}>
+        <HugeiconsIcon
+          icon={copied ? Tick02Icon : CopyIcon}
+          size={15}
+          color={palette.textMuted}
+          strokeWidth={2}
+        />
+      </Pressable>
+      <Pressable
+        accessibilityLabel="Edit message"
+        accessibilityRole="button"
+        disabled={!canEdit}
+        hitSlop={8}
+        onPress={onEdit}
+        style={({ pressed }) => [
+          styles.userActionButton,
+          !canEdit && { opacity: 0.35 },
+          pressed && canEdit && { opacity: 0.55 },
+        ]}>
+        <HugeiconsIcon icon={Edit03Icon} size={15} color={palette.textMuted} strokeWidth={2} />
+      </Pressable>
+    </View>
+  );
+}
 
 function UserAttachmentChip({
   attachment,
@@ -262,15 +474,14 @@ const AssistantBlock = memo(function AssistantBlock({
   onOpenFilePath?: (path: string) => void;
   palette: Palette;
 }) {
-  const runtime = useAgentRuntime();
-  const markdown = useStore(runtime.chatStore, (state) => {
+  const markdown = useAgentChatStore((state) => {
     const message = state.messagesById[messageId];
     return message?.role === 'assistant' ? getAssistantMarkdown(message) : '';
   });
-  const isStreaming = useStore(runtime.chatStore, (state) =>
+  const isStreaming = useAgentChatStore((state) =>
     state.streamingMessageIds.includes(messageId),
   );
-  const showCompactionStatus = useStore(runtime.chatStore, (state) =>
+  const showCompactionStatus = useAgentChatStore((state) =>
     state.activeCompactionItemIds.length > 0 &&
     findLastAssistantMessageKey(state.messageOrder, state.messagesById) === messageId
   );
@@ -452,6 +663,50 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 15,
     lineHeight: 21,
+  },
+  userActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+    paddingRight: 6,
+  },
+  userActionButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+  },
+  editBox: {
+    width: '100%',
+    minWidth: 260,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  editInput: {
+    minHeight: 62,
+    maxHeight: 180,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  editActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  editIconButton: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
   },
   userAttachments: {
     flexDirection: 'row',

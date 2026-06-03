@@ -5,16 +5,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { PlusSignIcon, WorkHistoryIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { useStore } from 'zustand';
-import {
-  useAgentChatStore,
-  useAgentRunMutation,
-  useAgentRuntime,
-  useAgentThreadQuery,
-  useCloseAgentRuntimeRunOnUnmount,
-  type AgentThreadSummary,
-  type AgentUiContext,
-} from '@ank1015-app/ui/agent-hooks';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -22,13 +12,24 @@ import { MobileAgentThreadDrawer } from '@/components/machine-agent/mobile-agent
 import { MobileAgentComposer } from '@/components/machine-agent/mobile-agent-composer';
 import { MobileAgentTimeline } from '@/components/machine-agent/mobile-agent-timeline';
 import { useMobileMachineWorkspace } from '@/components/mobile-machine-workspace-provider';
+import { useAgentEditMessage } from '@/hooks/agent/use-agent-edit-message';
+import { useAgentRun } from '@/hooks/agent/use-agent-run';
+import { useAgentThread } from '@/hooks/agent/use-agent-thread';
+import { useAuth } from '@/hooks/auth/use-auth';
+import {
+  getNewThreadModelSelection,
+  getThreadModelChoice,
+} from '@/lib/agent/model-selection';
+import type { AgentContent, AgentThreadSummary, AgentUiContext } from '@/lib/agent/types';
+import { useAgentChatStore } from '@/stores/agent/agent-chat-store';
+import { useAgentModelSelectionStore } from '@/stores/agent/agent-model-selection-store';
 
 export default function MachineAgentScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const palette = scheme === 'dark' ? darkPalette : lightPalette;
-  const { agentBaseUrl } = useMobileMachineWorkspace();
+  const { agentBaseUrl, agentIdentity } = useMobileMachineWorkspace();
 
-  if (agentBaseUrl === null) {
+  if (agentBaseUrl === null || agentIdentity === null) {
     return (
       <ThemedView style={[styles.shell, { backgroundColor: palette.background }]}>
         <SafeAreaView edges={['top']} style={{ flex: 1 }}>
@@ -42,17 +43,29 @@ export default function MachineAgentScreen() {
     );
   }
 
-  return <AgentScreenContent scheme={scheme} palette={palette} />;
+  return (
+    <AgentScreenContent
+      agentBaseUrl={agentBaseUrl}
+      agentIdentity={agentIdentity}
+      scheme={scheme}
+      palette={palette}
+    />
+  );
 }
 
 function AgentScreenContent({
+  agentBaseUrl,
+  agentIdentity,
   scheme,
   palette,
 }: {
+  agentBaseUrl: string;
+  agentIdentity: string;
   scheme: 'light' | 'dark';
   palette: Palette;
 }) {
   const router = useRouter();
+  const auth = useAuth();
   const {
     computer,
     currentPath,
@@ -69,19 +82,21 @@ function AgentScreenContent({
     Keyboard.dismiss();
   }, []);
 
-  useCloseAgentRuntimeRunOnUnmount();
-  useAgentThreadQuery(selectedAgentThreadId, {
+  useAgentThread(selectedAgentThreadId, {
+    agentBaseUrl,
+    agentIdentity,
     onThreadResolved: (threadId) => {
       setSelectedAgentThreadId((current) => current ?? threadId);
     },
   });
 
-  const runtime = useAgentRuntime();
-  const isRunning = useStore(runtime.chatStore, (state) => state.activeRun !== null);
+  const isRunning = useAgentChatStore((state) => state.activeRun !== null);
   const hasMessages = useAgentChatStore((state) => state.messageOrder.length > 0);
   const loadStatus = useAgentChatStore((state) => state.loadStatus);
   const loadError = useAgentChatStore((state) => state.loadError);
   const runError = useAgentChatStore((state) => state.runError ?? state.error);
+  const promptModelChoice = useAgentModelSelectionStore((state) => state.promptModelChoice);
+  const setPromptModelChoice = useAgentModelSelectionStore((state) => state.setPromptModelChoice);
 
   const uiContext = useMemo<AgentUiContext>(
     () => ({
@@ -91,7 +106,20 @@ function AgentScreenContent({
     [openFilePath],
   );
 
-  const { cancel, submit, steer } = useAgentRunMutation({
+  const { cancel, submit, steer } = useAgentRun({
+    agentBaseUrl,
+    agentIdentity,
+    currentPath,
+    selectedThreadId: selectedAgentThreadId,
+    uiContext,
+    onThreadResolved: (threadId) => {
+      setSelectedAgentThreadId((current) => current ?? threadId);
+    },
+  });
+
+  const editMessage = useAgentEditMessage({
+    agentBaseUrl,
+    agentIdentity,
     currentPath,
     selectedThreadId: selectedAgentThreadId,
     uiContext,
@@ -123,11 +151,26 @@ function AgentScreenContent({
   }, [computer, openFile, router]);
 
   const composerSubmit = useCallback(
-    (input: Parameters<typeof submit>[0]) => (isRunning ? steer(input) : submit(input)),
-    [isRunning, steer, submit],
+    (input: { content: AgentContent }) => {
+      if (isRunning) {
+        return steer(input);
+      }
+
+      return submit({
+        ...input,
+        ...getNewThreadModelSelection({
+          allowModelSelection: auth.user?.allowPiModels === true,
+          selectedThreadId: selectedAgentThreadId,
+          promptModelChoice,
+        }),
+      });
+    },
+    [auth.user?.allowPiModels, isRunning, promptModelChoice, selectedAgentThreadId, steer, submit],
   );
 
   const showEmpty = !hasMessages && !isRunning && selectedAgentThreadId === null && runError === null;
+  const allowModelSelection = auth.user?.allowPiModels === true;
+  const canChangeModel = allowModelSelection && selectedAgentThreadId === null && !isRunning;
 
   const composer = useMemo(
     () => (
@@ -135,11 +178,35 @@ function AgentScreenContent({
         palette={palette}
         activeFolderName={currentDirectoryName}
         isRunning={isRunning}
+        modelPicker={
+          allowModelSelection
+            ? {
+                value:
+                  selectedAgentThreadId === null
+                    ? promptModelChoice
+                    : getThreadModelChoice(selectedAgentThreadId),
+                disabled: !canChangeModel,
+                onChange: setPromptModelChoice,
+              }
+            : undefined
+        }
+        threadId={selectedAgentThreadId}
         onSubmit={composerSubmit}
         onCancel={cancel}
       />
     ),
-    [cancel, composerSubmit, currentDirectoryName, isRunning, palette],
+    [
+      allowModelSelection,
+      canChangeModel,
+      cancel,
+      composerSubmit,
+      currentDirectoryName,
+      isRunning,
+      palette,
+      promptModelChoice,
+      selectedAgentThreadId,
+      setPromptModelChoice,
+    ],
   );
 
   return (
@@ -205,6 +272,7 @@ function AgentScreenContent({
             currentPath={currentPath}
             palette={palette}
             onOpenFilePath={handleOpenFilePath}
+            onSubmitUserMessageEdit={editMessage.submit}
           />
         )}
 
