@@ -87,6 +87,195 @@ export async function typeBrowserViewport(input: {
   })
 }
 
+export async function insertBrowserViewportText(input: {
+  readonly bridge: BrowserExtensionBridge
+  readonly signal: AbortSignal
+  readonly tabId: number
+  readonly text: string
+}): Promise<void> {
+  const inserted = await input.bridge.sendCdpCommand({
+    tabId: input.tabId,
+    method: 'Runtime.evaluate',
+    params: {
+      expression: createBrowserTextInsertionExpression(input.text),
+      returnByValue: true,
+      userGesture: true,
+    },
+    signal: input.signal,
+  })
+  const runtimeResult = readRuntimeObjectResult(inserted)
+  logBrowserActionDebug('insert-text.runtime', {
+    textLength: input.text.length,
+    ...(runtimeResult ?? {}),
+  })
+  if (runtimeResult?.inserted === true) return
+
+  logBrowserActionDebug('insert-text.cdp-fallback', {
+    textLength: input.text.length,
+  })
+  await input.bridge.sendCdpCommand({
+    tabId: input.tabId,
+    method: 'Input.insertText',
+    params: { text: input.text },
+    signal: input.signal,
+  })
+  logBrowserActionDebug('insert-text.cdp-fallback-sent', {
+    textLength: input.text.length,
+  })
+}
+
+function createBrowserTextInsertionExpression(text: string): string {
+  return `
+(() => {
+  const describeTarget = (target) => {
+    if (!(target instanceof HTMLElement)) {
+      return {
+        tagName: target && typeof target === 'object' ? target.nodeName : null,
+      };
+    }
+    return {
+      tagName: target.tagName,
+      inputType: target instanceof HTMLInputElement ? target.type : undefined,
+      contentEditable: target.isContentEditable,
+      id: target.id || undefined,
+      className:
+        typeof target.className === 'string' && target.className.length > 0
+          ? target.className.slice(0, 80)
+          : undefined,
+    };
+  };
+
+  try {
+    const text = ${JSON.stringify(text)};
+    const target = document.activeElement;
+    if (!(target instanceof HTMLElement)) {
+      return {
+        inserted: false,
+        reason: 'no_html_active_element',
+        target: describeTarget(target),
+      };
+    }
+
+    const dispatchInput = (element, data) => {
+      const event =
+        typeof InputEvent === 'function'
+          ? new InputEvent('input', {
+              bubbles: true,
+              data,
+              inputType: 'insertText',
+            })
+          : new Event('input', { bubbles: true });
+      element.dispatchEvent(event);
+    };
+
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (target.disabled || target.readOnly) {
+        return {
+          inserted: false,
+          reason: target.disabled ? 'target_disabled' : 'target_readonly',
+          target: describeTarget(target),
+        };
+      }
+      const start =
+        typeof target.selectionStart === 'number'
+          ? target.selectionStart
+          : target.value.length;
+      const end =
+        typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
+      const nextValue =
+        target.value.slice(0, start) + text + target.value.slice(end);
+      const prototype =
+        target instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+      if (descriptor?.set) {
+        descriptor.set.call(target, nextValue);
+      } else {
+        target.value = nextValue;
+      }
+      const nextSelection = start + text.length;
+      target.setSelectionRange(nextSelection, nextSelection);
+      dispatchInput(target, text);
+      return {
+        inserted: true,
+        reason: 'input_or_textarea',
+        target: describeTarget(target),
+      };
+    }
+
+    if (target.isContentEditable) {
+      target.focus();
+      if (
+        typeof document.queryCommandSupported === 'function' &&
+        document.queryCommandSupported('insertText')
+      ) {
+        const inserted = document.execCommand('insertText', false, text);
+        return {
+          inserted,
+          reason: 'contenteditable_exec_command',
+          target: describeTarget(target),
+        };
+      }
+      const selection = window.getSelection();
+      if (selection === null || selection.rangeCount === 0) {
+        return {
+          inserted: false,
+          reason: 'contenteditable_no_selection',
+          target: describeTarget(target),
+        };
+      }
+      selection.deleteFromDocument();
+      selection.getRangeAt(0).insertNode(document.createTextNode(text));
+      selection.collapseToEnd();
+      dispatchInput(target, text);
+      return {
+        inserted: true,
+        reason: 'contenteditable_range',
+        target: describeTarget(target),
+      };
+    }
+
+    return {
+      inserted: false,
+      reason: 'active_element_not_editable',
+      target: describeTarget(target),
+    };
+  } catch {
+    return {
+      inserted: false,
+      reason: 'exception',
+    };
+  }
+})()
+`
+}
+
+function readRuntimeObjectResult(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const result = record.result
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+    return null
+  }
+  const resultRecord = result as Record<string, unknown>
+  return typeof resultRecord.value === 'object' &&
+    resultRecord.value !== null &&
+    !Array.isArray(resultRecord.value)
+    ? (resultRecord.value as Record<string, unknown>)
+    : null
+}
+
+function logBrowserActionDebug(
+  event: string,
+  details: Record<string, unknown>,
+): void {
+  // eslint-disable-next-line no-console
+  console.info('[browser-view][web]', event, details)
+}
+
 async function resolveViewportPoint(input: {
   readonly bridge: BrowserExtensionBridge
   readonly tabId: number
