@@ -29,10 +29,5 @@
     "@types/node": "^22.15.3",
     "cross-env": "^7.0.3",
     "typescript": "^5.8.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@shopify/react-native-skia"
-    ]
   }
 }
