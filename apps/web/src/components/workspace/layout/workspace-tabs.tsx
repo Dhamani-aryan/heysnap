@@ -1,11 +1,12 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { File02Icon, InternetIcon } from '@hugeicons/core-free-icons'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
 import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
 import type { FilesystemEntry } from '../../../lib/filesystem/types.ts'
 import { getFilesystemFileTypeIconSrc } from '../../../lib/filesystem/filesystem-icons.ts'
+import { BrowserExtensionPromptDialog } from './browser-extension-prompt-dialog.tsx'
 
 const LONG_NAME_THRESHOLD = 24
 
@@ -25,8 +26,15 @@ export function WorkspaceTabsStrip() {
   const ensureBrowserWindow = useBrowserStore((s) => s.ensureBrowserWindow)
   const closeBrowserWindow = useBrowserStore((s) => s.closeBrowserWindow)
   const windowError = useBrowserStore((s) => s.windowError)
+  const [isExtensionDialogOpen, setIsExtensionDialogOpen] = useState(false)
+  const didShowUnavailableExtensionDialogRef = useRef(false)
+  const isExtensionAvailable = extensionStatus === 'available'
 
   const handleOpenBrowser = (): void => {
+    if (!isExtensionAvailable) {
+      setIsExtensionDialogOpen(true)
+      return
+    }
     showBrowser()
     if (windowId === null && !isOpeningWindow) {
       void ensureBrowserWindow()
@@ -52,21 +60,27 @@ export function WorkspaceTabsStrip() {
     showDirectory,
   ])
 
+  useEffect(() => {
+    if (extensionStatus === 'available') {
+      didShowUnavailableExtensionDialogRef.current = false
+      setIsExtensionDialogOpen(false)
+      return
+    }
+    if (extensionStatus !== 'unavailable') return
+    if (didShowUnavailableExtensionDialogRef.current) return
+    didShowUnavailableExtensionDialogRef.current = true
+    setIsExtensionDialogOpen(true)
+  }, [extensionStatus])
+
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-[8px] overflow-hidden">
-      <DirectoryTab
-        title={directoryName}
-        isActive={activeSurface === 'directory'}
-        onSelect={showDirectory}
-      />
-      {extensionStatus === 'available' ? (
-        windowId === null ? (
-          <BrowserCollapsedTab
-            isActive={activeSurface === 'browser'}
-            isOpening={isOpeningWindow}
-            onSelect={handleOpenBrowser}
-          />
-        ) : (
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-[8px] overflow-hidden">
+        <DirectoryTab
+          title={directoryName}
+          isActive={activeSurface === 'directory'}
+          onSelect={showDirectory}
+        />
+        {isExtensionAvailable && windowId !== null ? (
           <BrowserExpandedTab
             isActive={activeSurface === 'browser'}
             onSelect={handleOpenBrowser}
@@ -75,26 +89,37 @@ export function WorkspaceTabsStrip() {
               void closeBrowserWindow()
             }}
           />
-        )
-      ) : null}
-      <div
-        role="tablist"
-        aria-label="Open files"
-        className="flex min-w-0 flex-1 items-center gap-[4px] overflow-hidden"
-      >
-        {openFileTabs.map((tab) => (
-          <FileTab
-            key={tab.path}
-            tab={tab}
-            isActive={
-              activeSurface === 'file' && tab.path === activeFilePath
-            }
-            onSelect={() => selectFileTab(tab.path)}
-            onClose={() => closeFileTab(tab.path)}
+        ) : (
+          <BrowserCollapsedTab
+            isActive={activeSurface === 'browser'}
+            isOpening={isExtensionAvailable && isOpeningWindow}
+            onSelect={handleOpenBrowser}
           />
-        ))}
+        )}
+        <div
+          role="tablist"
+          aria-label="Open files"
+          className="flex min-w-0 flex-1 items-center gap-[4px] overflow-hidden"
+        >
+          {openFileTabs.map((tab) => (
+            <FileTab
+              key={tab.path}
+              tab={tab}
+              isActive={
+                activeSurface === 'file' && tab.path === activeFilePath
+              }
+              onSelect={() => selectFileTab(tab.path)}
+              onClose={() => closeFileTab(tab.path)}
+            />
+          ))}
+        </div>
       </div>
-    </div>
+      {isExtensionDialogOpen ? (
+        <BrowserExtensionPromptDialog
+          onClose={() => setIsExtensionDialogOpen(false)}
+        />
+      ) : null}
+    </>
   )
 }
 
