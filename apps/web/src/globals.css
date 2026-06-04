@@ -54,6 +54,19 @@
   animation: workspace-bottom-sheet-in 210ms var(--ease-drawer);
 }
 
+@keyframes browser-extension-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes browser-extension-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
 .send-button-idle {
   background-color: color-mix(in srgb, var(--color-primary) 72%, transparent);
 }
