@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { File02Icon, InternetIcon } from '@hugeicons/core-free-icons'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesystemStore } from '../../../stores/filesystem/filesystem-store.ts'
 import { useBrowserStore } from '../../../stores/browser/browser-store.ts'
@@ -27,6 +27,7 @@ export function WorkspaceTabsStrip() {
   const closeBrowserWindow = useBrowserStore((s) => s.closeBrowserWindow)
   const windowError = useBrowserStore((s) => s.windowError)
   const [isExtensionDialogOpen, setIsExtensionDialogOpen] = useState(false)
+  const didShowUnavailableExtensionDialogRef = useRef(false)
   const isExtensionAvailable = extensionStatus === 'available'
 
   const handleOpenBrowser = (): void => {
@@ -58,6 +59,18 @@ export function WorkspaceTabsStrip() {
     windowError,
     showDirectory,
   ])
+
+  useEffect(() => {
+    if (extensionStatus === 'available') {
+      didShowUnavailableExtensionDialogRef.current = false
+      setIsExtensionDialogOpen(false)
+      return
+    }
+    if (extensionStatus !== 'unavailable') return
+    if (didShowUnavailableExtensionDialogRef.current) return
+    didShowUnavailableExtensionDialogRef.current = true
+    setIsExtensionDialogOpen(true)
+  }, [extensionStatus])
 
   return (
     <>
