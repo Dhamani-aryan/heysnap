@@ -1156,7 +1156,7 @@ const toAgentMessage = (
       timestamp,
       toolName: stringField(message, "toolName") ?? "tool",
       toolCallId: stringField(message, "toolCallId") ?? id,
-      content: toAgentContent(message?.["content"]),
+      content: stripInlineDataFromToolResultContent(toAgentContent(message?.["content"])),
       details: message?.["details"],
       isError: booleanField(message, "isError") ?? false,
     };
@@ -1215,6 +1215,45 @@ const stripHeySnapContextContent = (content: AgentContent): AgentContent =>
       ? [{ ...block, content: contentWithoutContext }]
       : [];
   });
+
+const stripInlineDataFromToolResultContent = (content: AgentContent): AgentContent =>
+  content.map((block, index): AgentContent[number] => {
+    if (block.type === "image") {
+      return {
+        type: "file",
+        filename: toolResultImageFilename(block.mimeType, index),
+        mimeType: block.mimeType,
+        metadata: {
+          ...(block.metadata ?? {}),
+          inlineDataOmitted: true,
+          inlineDataBytes: block.data.length,
+        },
+      };
+    }
+
+    if (block.type === "file" && block.data !== undefined) {
+      return {
+        ...block,
+        data: undefined,
+        metadata: {
+          ...(block.metadata ?? {}),
+          inlineDataOmitted: true,
+          inlineDataBytes: block.data.length,
+        },
+      };
+    }
+
+    return block;
+  });
+
+const toolResultImageFilename = (mimeType: string, index: number): string => {
+  const extension = mimeType.split("/")[1]?.split(";")[0]?.trim().toLowerCase();
+  const safeExtension = extension !== undefined && /^[a-z0-9.+-]+$/u.test(extension)
+    ? extension
+    : "image";
+
+  return `tool-result-image-${String(index + 1)}.${safeExtension}`;
+};
 
 const stripHeySnapContextText = (text: string): string =>
   text.replace(/(?:\n\s*)*<heysnap_context>[\s\S]*?<\/heysnap_context>\s*$/u, "").trimEnd();

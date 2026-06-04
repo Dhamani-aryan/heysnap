@@ -278,7 +278,10 @@ describe("Pi user config", () => {
           role: "toolResult",
           toolCallId: "call_1",
           toolName: "bash",
-          content: [{ type: "text", text: "passed" }],
+          content: [
+            { type: "text", text: "passed" },
+            { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+          ],
           isError: false,
           details: { exitCode: 0 },
         },
@@ -360,7 +363,18 @@ describe("Pi user config", () => {
         timestamp: Date.parse("2026-05-26T11:00:03.000Z"),
         toolName: "bash",
         toolCallId: "call_1",
-        content: [{ type: "text", content: "passed" }],
+        content: [
+          { type: "text", content: "passed" },
+          {
+            type: "file",
+            filename: "tool-result-image-2.png",
+            mimeType: "image/png",
+            metadata: {
+              inlineDataOmitted: true,
+              inlineDataBytes: 8,
+            },
+          },
+        ],
         details: { exitCode: 0 },
         isError: false,
       },
@@ -725,6 +739,45 @@ describe("Pi user config", () => {
       },
     });
     expect(turnCompletedCount).toBe(1);
+  });
+
+  it("omits inline image data from live Pi tool result messages", () => {
+    const mapper = createPiLiveTurnMapper(() => {});
+    const events = mapper.handle({
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "call_image",
+        toolName: "view_image",
+        content: [
+          { type: "text", text: "Read image file [image/png]" },
+          { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+        ],
+        isError: false,
+        timestamp: 1,
+      },
+    } as AgentSessionEvent);
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "message.completed",
+        message: expect.objectContaining({
+          role: "toolResult",
+          content: [
+            { type: "text", content: "Read image file [image/png]" },
+            {
+              type: "file",
+              filename: "tool-result-image-2.png",
+              mimeType: "image/png",
+              metadata: {
+                inlineDataOmitted: true,
+                inlineDataBytes: 8,
+              },
+            },
+          ],
+        }),
+      }),
+    ]);
   });
 
   it("maps live Pi compaction events to context compaction items", () => {
