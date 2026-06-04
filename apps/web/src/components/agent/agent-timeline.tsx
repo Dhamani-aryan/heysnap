@@ -7,6 +7,8 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   LegendList,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type LegendListRef,
 } from '@legendapp/list/react'
 import {
@@ -37,6 +39,9 @@ const ChatMarkdown = lazy(() =>
   import('./chat-markdown.tsx').then((module) => ({ default: module.ChatMarkdown })),
 )
 
+const NEAR_END_THRESHOLD_PX = 160
+const RESYNC_SCROLL_DELAYS_MS = [80, 240] as const
+
 export type AgentTimelineProps = {
   readonly currentPath: string
   readonly workspaceRoot?: string
@@ -58,10 +63,81 @@ export const AgentTimeline = memo(function AgentTimeline({
   const listRef = useRef<LegendListRef | null>(null)
   const selectedThreadId = useAgentChatStore((state) => state.selectedThreadId)
   const rows = useAgentChatStore((state) => state.timelineRows)
+  const timelineResyncSignal = useAgentChatStore((state) => {
+    const latestRowId = state.timelineRows.at(-1)?.id ?? ''
+    const latestAssistantMessageId = findLastAssistantMessageKey(
+      state.messageOrder,
+      state.messagesById,
+    )
+    const latestAssistantMessage =
+      latestAssistantMessageId === null
+        ? undefined
+        : state.messagesById[latestAssistantMessageId]
+    const latestAssistantTextLength =
+      latestAssistantMessage?.role === 'assistant'
+        ? getAssistantMarkdown(latestAssistantMessage).length
+        : 0
+
+    return [
+      state.selectedThreadId ?? '',
+      String(state.timelineRows.length),
+      latestRowId,
+      state.activeRun?.runId ?? '',
+      state.streamingMessageIds.join(','),
+      String(latestAssistantTextLength),
+    ].join('|')
+  })
   const didInitialScrollThreadRef = useRef<string | null>(null)
+  const shouldStickToEndRef = useRef(true)
+  const scrollFrameRef = useRef<number | null>(null)
+  const scrollTimeoutRefs = useRef<number[]>([])
+
+  const clearScheduledScroll = useCallback((): void => {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
+    }
+
+    for (const timeoutId of scrollTimeoutRefs.current) {
+      window.clearTimeout(timeoutId)
+    }
+    scrollTimeoutRefs.current = []
+  }, [])
+
+  const scheduleScrollToEnd = useCallback(
+    ({ force = false }: { readonly force?: boolean } = {}): void => {
+      if (!force && !shouldStickToEndRef.current) {
+        return
+      }
+
+      clearScheduledScroll()
+
+      const scrollToEnd = (): void => {
+        void listRef.current?.scrollToEnd?.({ animated: false })
+      }
+
+      scrollFrameRef.current = window.requestAnimationFrame(scrollToEnd)
+      scrollTimeoutRefs.current = RESYNC_SCROLL_DELAYS_MS.map((delay) =>
+        window.setTimeout(scrollToEnd, delay),
+      )
+    },
+    [clearScheduledScroll],
+  )
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      const distanceFromEnd =
+        event.nativeEvent.contentSize.height -
+        event.nativeEvent.contentOffset.y -
+        event.nativeEvent.layoutMeasurement.height
+      shouldStickToEndRef.current = distanceFromEnd <= NEAR_END_THRESHOLD_PX
+    },
+    [],
+  )
 
   useEffect(() => {
     didInitialScrollThreadRef.current = null
+    shouldStickToEndRef.current = true
   }, [selectedThreadId])
 
   useEffect(() => {
@@ -70,19 +146,45 @@ export const AgentTimeline = memo(function AgentTimeline({
     }
 
     didInitialScrollThreadRef.current = selectedThreadId
-    let timeoutId = 0
-    const animationFrameId = window.requestAnimationFrame(() => {
-      void listRef.current?.scrollToEnd?.({ animated: false })
-      timeoutId = window.setTimeout(() => {
-        void listRef.current?.scrollToEnd?.({ animated: false })
-      }, 80)
-    })
+    scheduleScrollToEnd({ force: true })
+  }, [rows.length, scheduleScrollToEnd, selectedThreadId])
+
+  useEffect(() => {
+    if (
+      rows.length === 0 ||
+      didInitialScrollThreadRef.current !== selectedThreadId
+    ) {
+      return
+    }
+
+    scheduleScrollToEnd()
+  }, [rows.length, scheduleScrollToEnd, selectedThreadId, timelineResyncSignal])
+
+  useEffect(() => {
+    const resyncVisibleTimeline = (): void => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+
+      scheduleScrollToEnd()
+    }
+
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        resyncVisibleTimeline()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', resyncVisibleTimeline)
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId)
-      window.clearTimeout(timeoutId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', resyncVisibleTimeline)
     }
-  }, [rows.length, selectedThreadId])
+  }, [scheduleScrollToEnd])
+
+  useEffect(() => clearScheduledScroll, [clearScheduledScroll])
 
   if (rows.length === 0) {
     return <AgentPanelState label="No displayable messages in this thread." />
@@ -98,6 +200,8 @@ export const AgentTimeline = memo(function AgentTimeline({
       maintainScrollAtEnd
       maintainScrollAtEndThreshold={0.1}
       maintainVisibleContentPosition
+      onScroll={handleScroll}
+      scrollEventThrottle={16}
       className="agent-thread-list"
       ListHeaderComponent={<div className="agent-thread-list-spacer" />}
       ListFooterComponent={<div className="agent-thread-list-spacer bottom" />}

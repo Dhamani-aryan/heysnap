@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getAgentThread,
   resumeAgentRun,
@@ -31,8 +31,21 @@ export function useAgentThread(
   threadId: string | null,
   { agentBaseUrl, agentIdentity, onThreadResolved }: Options,
 ) {
+  const queryClient = useQueryClient()
   const enabled =
     threadId !== null && agentBaseUrl.length > 0 && agentIdentity.length > 0
+  const invalidateThread = useCallback(
+    (targetThreadId: string | null | undefined): void => {
+      if (targetThreadId === undefined || targetThreadId === null) {
+        return
+      }
+
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.thread(agentIdentity, targetThreadId),
+      })
+    },
+    [agentIdentity, queryClient],
+  )
 
   const query = useQuery({
     queryKey: agentQueryKeys.thread(agentIdentity, threadId),
@@ -132,6 +145,10 @@ export function useAgentThread(
               .setThreadStreaming(completedThreadId, false)
           }
           setActiveAgentRunHandle(null)
+          void queryClient.invalidateQueries({
+            queryKey: agentQueryKeys.threadGroups(agentIdentity),
+          })
+          invalidateThread(completedThreadId)
         },
         onError: (error) => {
           const failedThreadId = useAgentChatStore.getState().activeRun?.threadId
@@ -143,6 +160,10 @@ export function useAgentThread(
               .setThreadStreaming(failedThreadId, false)
           }
           setActiveAgentRunHandle(null)
+          void queryClient.invalidateQueries({
+            queryKey: agentQueryKeys.threadGroups(agentIdentity),
+          })
+          invalidateThread(failedThreadId)
         },
       },
     )
@@ -151,7 +172,46 @@ export function useAgentThread(
     void handle.done.catch(() => {
       // Errors are already projected to the store via onError above.
     })
-  }, [agentBaseUrl, onThreadResolved, query.data, threadId])
+  }, [
+    agentBaseUrl,
+    agentIdentity,
+    invalidateThread,
+    onThreadResolved,
+    query.data,
+    queryClient,
+    threadId,
+  ])
+
+  useEffect(() => {
+    if (!enabled || threadId === null) {
+      return
+    }
+
+    const invalidateWhenIdle = (): void => {
+      if (
+        document.visibilityState === 'hidden' ||
+        getActiveAgentRunHandle() !== null
+      ) {
+        return
+      }
+
+      invalidateThread(threadId)
+    }
+
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        invalidateWhenIdle()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', invalidateWhenIdle)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', invalidateWhenIdle)
+    }
+  }, [enabled, invalidateThread, threadId])
 
   useEffect(() => {
     if (!query.isError) return

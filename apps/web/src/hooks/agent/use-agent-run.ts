@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -55,6 +55,7 @@ export function useAgentRun({
   onThreadResolved,
 }: Options) {
   const queryClient = useQueryClient()
+  const resolvedThreadIdRef = useRef<string | null>(null)
 
   const mutation = useMutation({
     mutationFn: async (input: SubmitInput) => {
@@ -62,6 +63,7 @@ export function useAgentRun({
         throw new Error('An agent run is already active.')
       }
 
+      resolvedThreadIdRef.current = selectedThreadId
       const startedAt = Date.now()
       const optimisticUserMessage = createOptimisticUserMessage(
         input.content,
@@ -94,6 +96,7 @@ export function useAgentRun({
         },
         {
           onRunStart: ({ runId, threadId }) => {
+            resolvedThreadIdRef.current = threadId
             useAgentChatStore.getState().markRunStarted({ runId, threadId })
             useAgentThreadListStore
               .getState()
@@ -115,6 +118,8 @@ export function useAgentRun({
           onRunEnd: () => {
             const completedThreadId =
               useAgentChatStore.getState().activeRun?.threadId
+            resolvedThreadIdRef.current =
+              completedThreadId ?? resolvedThreadIdRef.current
             flushBufferedAgentEvents()
             useAgentChatStore.getState().finishRun()
             if (completedThreadId !== undefined && completedThreadId !== null) {
@@ -134,6 +139,8 @@ export function useAgentRun({
             toast.error(error.message)
             const failedThreadId =
               useAgentChatStore.getState().activeRun?.threadId
+            resolvedThreadIdRef.current =
+              failedThreadId ?? resolvedThreadIdRef.current
             flushBufferedAgentEvents()
             useAgentChatStore.getState().failRun(error.message)
             if (failedThreadId !== undefined && failedThreadId !== null) {
@@ -149,10 +156,17 @@ export function useAgentRun({
       await handle.done
     },
     onSettled: () => {
+      const resolvedThreadId = resolvedThreadIdRef.current
+      resolvedThreadIdRef.current = null
       setActiveAgentRunHandle(null)
       void queryClient.invalidateQueries({
         queryKey: agentQueryKeys.threadGroups(agentIdentity),
       })
+      if (resolvedThreadId !== null) {
+        void queryClient.invalidateQueries({
+          queryKey: agentQueryKeys.thread(agentIdentity, resolvedThreadId),
+        })
+      }
     },
   })
 
