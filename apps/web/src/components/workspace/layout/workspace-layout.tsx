@@ -32,7 +32,8 @@ function WorkspaceLayoutShell({
   children,
   browserViewPublishWebSocketUrl,
 }: WorkspaceLayoutProps) {
-  const { isRightSidebarOpen, rightSidebarWidth } = useWorkspaceLayout()
+  const { isChatExpanded, isRightSidebarOpen, rightSidebarWidth } =
+    useWorkspaceLayout()
   const [isResizing, setIsResizing] = useState(false)
 
   const cardRight = isRightSidebarOpen
@@ -49,8 +50,10 @@ function WorkspaceLayoutShell({
       />
       <div className="relative min-h-0 overflow-clip">
         <section
+          aria-hidden={isChatExpanded}
+          data-chat-expanded={isChatExpanded ? 'true' : undefined}
           data-resizing={isResizing ? 'true' : undefined}
-          className="absolute top-0 overflow-clip rounded-[10px] bg-background transition-[right] duration-[180ms] ease-out data-[resizing=true]:transition-none"
+          className="absolute top-0 overflow-clip rounded-[10px] bg-background transition-[right,opacity] duration-[180ms] ease-out data-[chat-expanded=true]:pointer-events-none data-[chat-expanded=true]:opacity-0 data-[resizing=true]:transition-none"
           style={{
             left: `${FRAME_INSET_PX}px`,
             bottom: `${FRAME_INSET_PX}px`,

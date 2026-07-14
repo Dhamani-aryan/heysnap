@@ -7,6 +7,7 @@ import {
 } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
+  LayoutAlignLeftIcon,
   LayoutAlignRightIcon,
   PlusSignIcon,
   SmartPhone02Icon,
@@ -31,7 +32,12 @@ type WorkspaceToolbarProps = {
 export function WorkspaceToolbar({
   browserViewPublishWebSocketUrl,
 }: WorkspaceToolbarProps) {
-  const { isRightSidebarOpen, toggleRightSidebar } = useWorkspaceLayout()
+  const {
+    isChatExpanded,
+    isRightSidebarOpen,
+    toggleChatExpanded,
+    toggleRightSidebar,
+  } = useWorkspaceLayout()
   const goBack = useFilesystemStore((s) => s.goBack)
   const goForward = useFilesystemStore((s) => s.goForward)
   const canGoBack = useFilesystemStore(
@@ -80,6 +86,9 @@ export function WorkspaceToolbar({
   const sidebarLabel = isRightSidebarOpen
     ? 'Close right sidebar'
     : 'Open right sidebar'
+  const chatExpandedLabel = isChatExpanded
+    ? 'Restore split view'
+    : 'Expand chat'
 
   return (
     <header className="relative z-[4] flex h-[44px] flex-shrink-0 items-center gap-[8px] px-sm">
@@ -122,6 +131,12 @@ export function WorkspaceToolbar({
         icon={PlusSignIcon}
         label="New"
         onClick={handleNewThread}
+      />
+      <ToolbarIconButton
+        icon={LayoutAlignLeftIcon}
+        label={chatExpandedLabel}
+        onClick={toggleChatExpanded}
+        pressed={isChatExpanded}
       />
       <ToolbarIconButton
         icon={LayoutAlignRightIcon}

@@ -14,8 +14,12 @@ export function WorkspaceRightSidebar({
   isResizing,
   onResizingChange,
 }: Props) {
-  const { isRightSidebarOpen, rightSidebarWidth, setRightSidebarWidth } =
-    useWorkspaceLayout()
+  const {
+    isChatExpanded,
+    isRightSidebarOpen,
+    rightSidebarWidth,
+    setRightSidebarWidth,
+  } = useWorkspaceLayout()
   const { openWorkspacePath, openChromeTab } = useWorkspaceMarkdownLinkActions()
 
   const handleResizePointerDown = useCallback(
@@ -52,15 +56,19 @@ export function WorkspaceRightSidebar({
       aria-label="Right sidebar"
       aria-hidden={!isRightSidebarOpen}
       data-open={isRightSidebarOpen ? 'true' : 'false'}
+      data-expanded={isChatExpanded ? 'true' : undefined}
       data-resizing={isResizing ? 'true' : undefined}
-      className="pointer-events-none absolute top-0 z-[3] flex translate-x-[calc(100%+12px)] flex-col overflow-visible transition-transform duration-[180ms] ease-out data-[open=true]:pointer-events-auto data-[open=true]:translate-x-0 data-[resizing=true]:transition-none"
+      className="pointer-events-none absolute top-0 z-[3] flex translate-x-[calc(100%+12px)] flex-col overflow-visible transition-[left,width,transform] duration-[180ms] ease-out data-[open=true]:pointer-events-auto data-[open=true]:translate-x-0 data-[resizing=true]:transition-none"
       style={{
-        width: `${rightSidebarWidth}px`,
+        left: isChatExpanded ? `${insetPx}px` : undefined,
+        width: isChatExpanded
+          ? `calc(100% - ${insetPx * 2}px)`
+          : `${rightSidebarWidth}px`,
         right: `${insetPx}px`,
         bottom: `${insetPx}px`,
       }}
     >
-      {isRightSidebarOpen ? (
+      {isRightSidebarOpen && !isChatExpanded ? (
         <div
           role="separator"
           aria-orientation="vertical"

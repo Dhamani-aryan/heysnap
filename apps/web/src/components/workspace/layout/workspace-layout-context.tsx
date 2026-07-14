@@ -38,6 +38,7 @@ function readInitialWidth(): number {
 }
 
 export function WorkspaceLayoutProvider({ children }: { children: ReactNode }) {
+  const [isChatExpanded, setIsChatExpanded] = useState(false)
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(readInitialOpen)
   const [rightSidebarWidth, setRightSidebarWidthState] =
     useState(readInitialWidth)
@@ -54,12 +55,21 @@ export function WorkspaceLayoutProvider({ children }: { children: ReactNode }) {
   }, [rightSidebarWidth])
 
   const toggleRightSidebar = useCallback(() => {
-    setIsRightSidebarOpen((prev) => !prev)
-  }, [])
+    const nextOpen = !isRightSidebarOpen
+    setIsRightSidebarOpen(nextOpen)
+    if (!nextOpen) setIsChatExpanded(false)
+  }, [isRightSidebarOpen])
 
   const setRightSidebarOpen = useCallback((open: boolean) => {
+    if (!open) setIsChatExpanded(false)
     setIsRightSidebarOpen(open)
   }, [])
+
+  const toggleChatExpanded = useCallback(() => {
+    const nextExpanded = !isChatExpanded
+    setIsChatExpanded(nextExpanded)
+    if (nextExpanded) setIsRightSidebarOpen(true)
+  }, [isChatExpanded])
 
   const setRightSidebarWidth = useCallback((width: number) => {
     setRightSidebarWidthState(clampWidth(width))
@@ -67,6 +77,8 @@ export function WorkspaceLayoutProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
+      isChatExpanded,
+      toggleChatExpanded,
       isRightSidebarOpen,
       toggleRightSidebar,
       setRightSidebarOpen,
@@ -74,6 +86,8 @@ export function WorkspaceLayoutProvider({ children }: { children: ReactNode }) {
       setRightSidebarWidth,
     }),
     [
+      isChatExpanded,
+      toggleChatExpanded,
       isRightSidebarOpen,
       toggleRightSidebar,
       setRightSidebarOpen,
