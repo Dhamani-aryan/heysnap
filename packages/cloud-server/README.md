@@ -144,7 +144,7 @@ logging.
 Run the manual deploy action:
 
 ```sh
-gh workflow run deploy-cloud-server.yml --repo ank1015/heysnap --ref main
+gh workflow run deploy-cloud-server.yml --repo Dhamani-aryan/heysnap --ref main
 ```
 
 The workflow builds the cloud-server Docker image, pushes it to ECR, runs

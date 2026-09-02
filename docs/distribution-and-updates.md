@@ -14,7 +14,7 @@ Run when `apps/web` or shared UI changes should be published to
 `app.heysnap.xyz`.
 
 ```sh
-gh workflow run deploy-web.yml --repo ank1015/heysnap --ref main
+gh workflow run deploy-web.yml --repo Dhamani-aryan/heysnap --ref main
 ```
 
 What it does:
@@ -42,7 +42,7 @@ Run when `packages/cloud-server` changes should be published to
 `https://api.heysnap.xyz`.
 
 ```sh
-gh workflow run deploy-cloud-server.yml --repo ank1015/heysnap --ref main
+gh workflow run deploy-cloud-server.yml --repo Dhamani-aryan/heysnap --ref main
 ```
 
 What it does:
@@ -72,7 +72,7 @@ Workflow:
 Run when `packages/server` changes should be shipped to cloud VMs.
 
 ```sh
-gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
+gh workflow run release-machine-server.yml --repo Dhamani-aryan/heysnap --ref main \
   -f version=0.1.1 \
   -f channel=stable \
   -f notes='Release notes'
@@ -121,7 +121,7 @@ Workflow:
 Run when the base EC2 developer environment should change:
 
 ```sh
-gh workflow run build-machine-image.yml --repo ank1015/heysnap --ref main \
+gh workflow run build-machine-image.yml --repo Dhamani-aryan/heysnap --ref main \
   -f channel=stable
 ```
 

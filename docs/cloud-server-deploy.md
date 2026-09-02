@@ -82,7 +82,7 @@ The deployed service is normally updated through GitHub Actions rather than
 manual Docker commands:
 
 ```sh
-gh workflow run deploy-cloud-server.yml --repo ank1015/heysnap --ref main
+gh workflow run deploy-cloud-server.yml --repo Dhamani-aryan/heysnap --ref main
 ```
 
 Admin dashboard:

@@ -100,19 +100,19 @@ curl https://api.heysnap.xyz/health
 Deploy cloud server:
 
 ```sh
-gh workflow run deploy-cloud-server.yml --repo ank1015/heysnap --ref main
+gh workflow run deploy-cloud-server.yml --repo Dhamani-aryan/heysnap --ref main
 ```
 
 Deploy web app:
 
 ```sh
-gh workflow run deploy-web.yml --repo ank1015/heysnap --ref main
+gh workflow run deploy-web.yml --repo Dhamani-aryan/heysnap --ref main
 ```
 
 Release machine server:
 
 ```sh
-gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
+gh workflow run release-machine-server.yml --repo Dhamani-aryan/heysnap --ref main \
   -f version=0.1.1 \
   -f channel=stable \
   -f notes='Release notes'

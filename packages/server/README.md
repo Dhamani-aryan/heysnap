@@ -57,7 +57,7 @@ the cloud AI gateway without writing provider secrets to the VM.
 Machine-server releases are host artifacts for cloud VMs. Run:
 
 ```sh
-gh workflow run release-machine-server.yml --repo ank1015/heysnap --ref main \
+gh workflow run release-machine-server.yml --repo Dhamani-aryan/heysnap --ref main \
   -f version=0.1.1 \
   -f channel=stable \
   -f notes='Release notes'
