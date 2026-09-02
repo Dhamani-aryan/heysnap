@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "allow_browser_stream" boolean DEFAULT false NOT NULL;

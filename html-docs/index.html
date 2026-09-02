@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HeySnap Docs</title>
+    <link rel="stylesheet" href="./docs-shell.css" />
+  </head>
+  <body data-docs-path="/">
+    <div class="docs-shell" data-docs-shell>
+      <main class="docs-main">
+        <section class="docs-hero">
+          <span class="docs-kicker">Interactive documentation</span>
+          <h1>HeySnap system docs</h1>
+          <p>
+            Package and app documentation lives under matching filesystem paths.
+            Each page uses this shared shell so navigation keeps the same HeySnap
+            identity and route context.
+          </p>
+        </section>
+
+        <section class="docs-grid" aria-label="Documentation areas">
+          <a class="docs-card" href="./packages/index.html">
+            <span>
+              <h2>Packages</h2>
+              <p>Shared libraries, servers, preview surfaces, and internal tooling.</p>
+            </span>
+            <span class="docs-card-link">Open /packages</span>
+          </a>
+          <a class="docs-card" href="./apps/index.html">
+            <span>
+              <h2>Apps</h2>
+              <p>Product shells and client applications that compose the shared packages.</p>
+            </span>
+            <span class="docs-card-link">Open /apps</span>
+          </a>
+        </section>
+      </main>
+    </div>
+    <script src="./docs-shell.js" data-root-path="."></script>
+  </body>
+</html>

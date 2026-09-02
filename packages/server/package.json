@@ -1,0 +1,36 @@
+{
+  "name": "@ank1015-app/server",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./src/runtime.ts"
+  },
+  "types": "./src/runtime.ts",
+  "scripts": {
+    "dev": "pnpm --filter @ank1015-app/tunnel-protocol build && pnpm --filter @ank1015-app/previewer build && tsx watch src/index.ts",
+    "build": "pnpm --filter @ank1015-app/tunnel-protocol build && pnpm --filter @ank1015-app/previewer build && tsc -p tsconfig.json",
+    "docker:build": "docker build -f Dockerfile -t ank1015-machine-server:development ../..",
+    "typecheck": "pnpm --filter @ank1015-app/tunnel-protocol build && tsc --noEmit",
+    "lint": "pnpm --filter @ank1015-app/tunnel-protocol build && tsc --noEmit",
+    "test": "pnpm --filter @ank1015-app/tunnel-protocol build && vitest run"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "@types/yazl": "^3.3.1",
+    "tsx": "^4.19.4",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "@ank1015-app/previewer": "workspace:*",
+    "@ank1015-app/tunnel-protocol": "workspace:*",
+    "@axiomhq/pino": "^1.6.1",
+    "@earendil-works/pi-coding-agent": "^0.77.0",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "chokidar": "^5.0.0",
+    "pino": "^10.3.1",
+    "trash": "^10.1.1",
+    "ws": "^8.20.0",
+    "yazl": "^3.3.1"
+  }
+}

@@ -1,0 +1,346 @@
+/*
+ * WebWorkbook styles. Mirrors the upstream `web-workbook-*` selectors so the
+ * port renders pixel-identical to the reference client. Theming follows the
+ * same contract: when the viewer is rendered inside a `.theme-dark` ancestor
+ * the background swap is automatic via the second rule block. The
+ * `--active-border` fallback exists so focus outlines stay visible even when
+ * the consumer hasn't wired the broader `.theme-light` / `.theme-dark` vars.
+ */
+
+.web-workbook {
+  --active-border: #19736a;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 40px 32px 1fr 38px;
+  overflow: hidden;
+  background: var(--web-workbook-light-bg);
+  color: #15171c;
+  --web-workbook-header-border: #e6e8ed;
+  --web-workbook-muted-bg: #f4f5f7;
+  --web-workbook-muted-bg-hover: #eceef2;
+  --web-workbook-muted-text: #5b6472;
+  --web-workbook-sheet-bg: var(--web-workbook-light-bg);
+  --web-workbook-strong-text: #15171c;
+  --web-workbook-header-control-color: color-mix(in srgb, #15171c 70%, transparent);
+}
+
+.theme-dark .web-workbook {
+  --active-border: #4fc2b3;
+  background: var(--web-workbook-dark-bg);
+  color: #f4f6fb;
+  --web-workbook-header-border: #202126;
+  --web-workbook-muted-bg: #1c1c20;
+  --web-workbook-muted-bg-hover: #28282e;
+  --web-workbook-muted-text: #a4a9b3;
+  --web-workbook-sheet-bg: var(--web-workbook-dark-bg);
+  --web-workbook-strong-text: #f4f6fb;
+  --web-workbook-header-control-color: color-mix(in srgb, #f4f6fb 70%, transparent);
+}
+
+.web-workbook-header {
+  min-width: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--web-workbook-header-border);
+  position: relative;
+  z-index: 4;
+}
+
+.web-workbook-header-group {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  color: var(--web-workbook-header-control-color);
+}
+
+.web-workbook-header-group-left {
+  justify-content: flex-start;
+}
+
+.web-workbook-header-group-right {
+  justify-content: flex-end;
+}
+
+.web-workbook-icon-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+
+.web-workbook-icon-button:hover {
+  background: var(--web-workbook-icon-hover-bg, color-mix(in srgb, currentColor 8%, transparent));
+  color: var(--web-workbook-icon-hover-color, inherit);
+}
+
+.web-workbook-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.web-workbook-icon-button:disabled:hover {
+  background: transparent;
+  color: inherit;
+}
+
+.web-workbook-icon-button:focus-visible {
+  outline: 2px solid var(--active-border);
+  outline-offset: 2px;
+}
+
+.web-workbook-zoom-picker {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.web-workbook-zoom-trigger {
+  height: 28px;
+  min-width: 78px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  color: inherit;
+  cursor: pointer;
+  outline: none;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.web-workbook-zoom-trigger:hover,
+.web-workbook-zoom-trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.web-workbook-zoom-trigger:focus-visible {
+  outline: 2px solid var(--active-border);
+  outline-offset: 2px;
+}
+
+.web-workbook-zoom-menu {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  min-width: 104px;
+  overflow: hidden;
+  border: 1px solid var(--web-workbook-header-border);
+  border-radius: 8px;
+  background: var(--web-workbook-sheet-bg);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.16);
+  color: var(--web-workbook-strong-text);
+  padding: 4px;
+  z-index: 30;
+}
+
+.theme-dark .web-workbook-zoom-menu {
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
+}
+
+.web-workbook-zoom-menu button {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  outline: none;
+}
+
+.web-workbook-zoom-menu button.hovered,
+.web-workbook-zoom-menu button:hover,
+.web-workbook-zoom-menu button:focus-visible {
+  background: #0285ff;
+  color: #ffffff;
+}
+
+.web-workbook-zoom-check {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.web-workbook-formula-bar {
+  min-width: 0;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 76px 34px minmax(0, 1fr);
+  align-items: center;
+  border-bottom: 1px solid var(--web-workbook-header-border);
+}
+
+.web-workbook-selection,
+.web-workbook-function-icon,
+.web-workbook-formula-value {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.web-workbook-selection {
+  overflow: hidden;
+  padding: 0 10px 0 14px;
+  border-right: 1px solid var(--web-workbook-header-border);
+  color: var(--web-workbook-muted-text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-workbook-function-icon {
+  justify-content: center;
+  border-right: 1px solid var(--web-workbook-header-border);
+  color: var(--web-workbook-muted-text);
+}
+
+.web-workbook-formula-value {
+  overflow: hidden;
+  padding: 0 12px;
+  color: var(--web-workbook-strong-text);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-workbook-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.web-workbook-grid-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+.web-workbook-drawing-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.web-workbook-footer {
+  min-width: 0;
+  height: 38px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  border-top: 1px solid var(--web-workbook-header-border);
+}
+
+.web-workbook-footer-label {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 10px 0 14px;
+  border-right: 1px solid var(--web-workbook-header-border);
+  color: var(--web-workbook-muted-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.web-workbook-sheet-strip {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 8px;
+  scrollbar-width: thin;
+}
+
+.web-workbook-sheet-strip button {
+  position: relative;
+  max-width: 180px;
+  min-height: 26px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--web-workbook-muted-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0 24px 0 10px;
+  white-space: nowrap;
+}
+
+.web-workbook-sheet-strip button::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(90deg, transparent, var(--web-workbook-sheet-bg) 78%);
+  pointer-events: none;
+}
+
+.web-workbook-sheet-strip button:hover {
+  background: var(--web-workbook-muted-bg-hover);
+  color: var(--web-workbook-strong-text);
+  --web-workbook-sheet-bg: var(--web-workbook-muted-bg-hover);
+}
+
+.web-workbook-sheet-strip button.active {
+  background: var(--web-workbook-muted-bg);
+  color: var(--web-workbook-strong-text);
+  --web-workbook-sheet-bg: var(--web-workbook-muted-bg);
+}
+
+.web-workbook-sheet-strip button:focus-visible {
+  outline: 2px solid var(--active-border);
+  outline-offset: 2px;
+}

@@ -1,0 +1,7 @@
+{
+  "id": "remotion",
+  "label": "Remotion",
+  "version": "1.0.0",
+  "description": "programmatic video with animations, walkthroughs, and code-driven scenes.",
+  "activeByDefault": true
+}

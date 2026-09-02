@@ -1,0 +1,512 @@
+import { constants } from "node:fs";
+import { cp, lstat, mkdir, readdir, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import path, { basename, dirname, join } from "node:path";
+
+import trash from "trash";
+import { FilesystemError } from "./errors.js";
+import { ensureWithinRoot, resolveClientPath, toClientPath, validateEntryName } from "./paths.js";
+import type { FilesystemEntry, FilesystemEntryType, FilesystemListing, FilesystemPasteMode, FilesystemPasteResult, FilesystemUploadFile } from "./types.js";
+
+export type TrashFunction = (input: string | readonly string[]) => Promise<void>;
+export type RenameFunction = (oldPath: string, newPath: string) => Promise<void>;
+
+export interface FilesystemServiceOptions {
+  readonly rootPath: string;
+  readonly trashFunction?: TrashFunction;
+  readonly renameFunction?: RenameFunction;
+}
+
+const DEFAULT_FOLDER_NAME = "untitled folder";
+
+export class FilesystemService {
+  private readonly rootPath: string;
+  private readonly trashFunction: TrashFunction;
+  private readonly renameFunction: RenameFunction;
+
+  constructor(options: FilesystemServiceOptions) {
+    this.rootPath = options.rootPath;
+    this.trashFunction = options.trashFunction ?? ((input) => trash(input, { glob: false }));
+    this.renameFunction = options.renameFunction ?? rename;
+  }
+
+  async listDirectory(rawPath: string | undefined, showHidden: boolean): Promise<FilesystemListing> {
+    const directoryPath = resolveClientPath(this.rootPath, rawPath);
+    const directoryStats = await this.getStats(directoryPath);
+
+    if (!directoryStats.isDirectory()) {
+      throw new FilesystemError("NOT_DIRECTORY", "Path is not a directory");
+    }
+
+    const dirEntries = await readdir(directoryPath, { withFileTypes: true });
+    const mappedEntries = await Promise.all(
+      dirEntries.map(async (entry): Promise<FilesystemEntry | null> => {
+        const entryPath = join(directoryPath, entry.name);
+        const isSymlink = entry.isSymbolicLink();
+
+        if (isSymlink && !(await this.isSafeSymlink(entryPath))) {
+          return null;
+        }
+
+        try {
+          const entryStats = await lstat(entryPath);
+          const resolvedStats = isSymlink ? await stat(entryPath) : entryStats;
+          const type = classifyEntryType(resolvedStats.isDirectory(), resolvedStats.isFile());
+
+          if (type === null) {
+            return null;
+          }
+
+          return {
+            name: entry.name,
+            path: toClientPath(this.rootPath, entryPath),
+            type,
+            size: type === "file" ? entryStats.size : null,
+            updatedAt: entryStats.mtime.toISOString(),
+            isHidden: entry.name.startsWith("."),
+            isSymlink,
+          };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    const entries = mappedEntries
+      .filter((entry): entry is FilesystemEntry => entry !== null)
+      .filter((entry) => showHidden || !entry.isHidden)
+      .sort(compareEntries);
+    const clientPath = toClientPath(this.rootPath, directoryPath);
+    const parentDirectory = dirname(directoryPath);
+    const parent =
+      directoryPath === this.rootPath ? null : toClientPath(this.rootPath, parentDirectory);
+
+    return {
+      path: clientPath,
+      name: basename(directoryPath) || directoryPath,
+      parent,
+      isRoot: directoryPath === this.rootPath,
+      entries,
+    };
+  }
+
+  async createFolder(rawDirectoryPath: string | undefined, rawName?: string): Promise<FilesystemEntry> {
+    const directoryPath = resolveClientPath(this.rootPath, rawDirectoryPath);
+    const directoryStats = await this.getStats(directoryPath);
+
+    if (!directoryStats.isDirectory()) {
+      throw new FilesystemError("NOT_DIRECTORY", "Path is not a directory");
+    }
+
+    const folderPath = rawName === undefined
+      ? await this.getAvailableFolderPath(directoryPath)
+      : join(directoryPath, validateEntryName(rawName));
+
+    ensureWithinRoot(this.rootPath, folderPath);
+    await this.ensurePathAvailable(folderPath);
+    await mkdir(folderPath);
+
+    return this.getEntryFromAbsolutePath(folderPath);
+  }
+
+  async uploadFiles(
+    rawDirectoryPath: string | undefined,
+    files: readonly FilesystemUploadFile[],
+  ): Promise<{ readonly entries: FilesystemEntry[] }> {
+    if (files.length === 0) {
+      throw new FilesystemError("INVALID_UPLOAD", "At least one file is required");
+    }
+
+    const directoryPath = resolveClientPath(this.rootPath, rawDirectoryPath);
+    const directoryStats = await this.getStats(directoryPath);
+
+    if (!directoryStats.isDirectory()) {
+      throw new FilesystemError("NOT_DIRECTORY", "Path is not a directory");
+    }
+
+    const uploadItems = files.map((file) => {
+      const relativePath = validateUploadRelativePath(file.relativePath);
+      const type = file.type ?? "file";
+
+      if (type !== "file" && type !== "directory") {
+        throw new FilesystemError("INVALID_UPLOAD", "Upload item type is invalid");
+      }
+
+      if (type === "file" && typeof file.contentBase64 !== "string") {
+        throw new FilesystemError("INVALID_UPLOAD_CONTENT", "Upload file content is required");
+      }
+
+      if (type === "directory" && file.contentBase64 !== undefined) {
+        throw new FilesystemError("INVALID_UPLOAD_CONTENT", "Upload folders cannot include file content");
+      }
+
+      const targetPath = join(directoryPath, ...relativePath.split("/"));
+      ensureWithinRoot(this.rootPath, targetPath);
+      ensureWithinRoot(directoryPath, targetPath);
+
+      return { file, targetPath, type };
+    });
+    const targetPaths = uploadItems.map((item) => item.targetPath);
+
+    const uniquePaths = new Set(targetPaths);
+
+    if (uniquePaths.size !== targetPaths.length) {
+      throw new FilesystemError("DUPLICATE_UPLOAD_PATH", "Upload contains duplicate file paths");
+    }
+
+    await Promise.all(targetPaths.map((targetPath) => this.ensurePathAvailable(targetPath)));
+
+    const uploadedEntries: FilesystemEntry[] = [];
+
+    const directoryItems = uploadItems
+      .filter((item) => item.type === "directory")
+      .sort((left, right) => getPathDepth(left.file.relativePath) - getPathDepth(right.file.relativePath));
+
+    for (const item of directoryItems) {
+
+      await mkdir(item.targetPath);
+
+      if (item.file.updatedAt !== undefined) {
+        const updatedAt = new Date(item.file.updatedAt);
+
+        if (!Number.isNaN(updatedAt.getTime())) {
+          await utimes(item.targetPath, updatedAt, updatedAt);
+        }
+      }
+
+      uploadedEntries.push(await this.getEntryFromAbsolutePath(item.targetPath));
+    }
+
+    for (const item of uploadItems) {
+      if (item.type !== "file") {
+        continue;
+      }
+
+      const content = decodeBase64(item.file.contentBase64 ?? "");
+      await mkdir(dirname(item.targetPath), { recursive: true });
+      await writeFile(item.targetPath, content, { flag: "wx" });
+
+      if (item.file.updatedAt !== undefined) {
+        const updatedAt = new Date(item.file.updatedAt);
+
+        if (!Number.isNaN(updatedAt.getTime())) {
+          await utimes(item.targetPath, updatedAt, updatedAt);
+        }
+      }
+
+      uploadedEntries.push(await this.getEntryFromAbsolutePath(item.targetPath));
+    }
+
+    return { entries: uploadedEntries };
+  }
+
+  async renameEntry(rawPath: string, rawNewName: string): Promise<FilesystemEntry> {
+    const targetPath = resolveClientPath(this.rootPath, rawPath);
+    await this.getStats(targetPath);
+
+    const nextPath = join(dirname(targetPath), validateEntryName(rawNewName));
+    ensureWithinRoot(this.rootPath, nextPath);
+
+    if (nextPath === targetPath) {
+      return this.getEntryFromAbsolutePath(targetPath);
+    }
+
+    await this.ensurePathAvailable(nextPath);
+    await this.renameFunction(targetPath, nextPath);
+
+    return this.getEntryFromAbsolutePath(nextPath);
+  }
+
+  async trashEntries(rawPaths: readonly string[]): Promise<{ readonly paths: string[] }> {
+    if (rawPaths.length === 0) {
+      throw new FilesystemError("INVALID_PATH", "At least one path is required");
+    }
+
+    const targetPaths = await Promise.all(
+      rawPaths.map(async (rawPath) => {
+        const targetPath = resolveClientPath(this.rootPath, rawPath);
+        await this.getStats(targetPath);
+        return targetPath;
+      }),
+    );
+
+    await this.trashFunction(targetPaths);
+
+    return { paths: rawPaths.map((rawPath) => toClientPath(this.rootPath, resolveClientPath(this.rootPath, rawPath))) };
+  }
+
+  async pasteEntries(
+    rawDestinationPath: string,
+    rawSourcePaths: readonly string[],
+    mode: FilesystemPasteMode,
+  ): Promise<FilesystemPasteResult> {
+    if (mode !== "copy" && mode !== "move") {
+      throw new FilesystemError("INVALID_PASTE_MODE", "Paste mode is invalid");
+    }
+
+    if (rawSourcePaths.length === 0) {
+      throw new FilesystemError("INVALID_PATH", "At least one source path is required");
+    }
+
+    const destinationPath = resolveClientPath(this.rootPath, rawDestinationPath);
+    const destinationStats = await this.getStats(destinationPath);
+
+    if (!destinationStats.isDirectory()) {
+      throw new FilesystemError("NOT_DIRECTORY", "Paste target path is not a directory");
+    }
+
+    const operations = await Promise.all(
+      rawSourcePaths.map((rawSourcePath) => this.resolvePasteOperation(destinationPath, rawSourcePath)),
+    );
+    const targetPaths = operations.map((operation) => operation.targetPath);
+
+    if (new Set(targetPaths).size !== targetPaths.length) {
+      throw new FilesystemError("DUPLICATE_PASTE_TARGET", "Paste contains duplicate target paths");
+    }
+
+    await Promise.all(targetPaths.map((targetPath) => this.ensurePathAvailable(targetPath)));
+
+    if (mode === "copy") {
+      await Promise.all(operations.map((operation) => this.copyPasteOperation(operation)));
+    } else {
+      await this.movePasteOperations(operations);
+    }
+
+    return {
+      mode,
+      sourcePaths: operations.map((operation) => operation.sourceClientPath),
+      destinationPath: toClientPath(this.rootPath, destinationPath),
+      entries: await Promise.all(operations.map((operation) => this.getEntryFromAbsolutePath(operation.targetPath))),
+    };
+  }
+
+  async getEntry(rawPath: string): Promise<FilesystemEntry> {
+    return this.getEntryFromAbsolutePath(resolveClientPath(this.rootPath, rawPath));
+  }
+
+  private async resolvePasteOperation(
+    destinationPath: string,
+    rawSourcePath: string,
+  ): Promise<PasteOperation> {
+    if (rawSourcePath === "") {
+      throw new FilesystemError("INVALID_PATH", "Cannot paste the filesystem root");
+    }
+
+    const sourcePath = resolveClientPath(this.rootPath, rawSourcePath);
+    let sourceStats;
+
+    try {
+      sourceStats = await lstat(sourcePath);
+    } catch {
+      throw new FilesystemError("PATH_NOT_FOUND", "Path not found");
+    }
+
+    if (sourceStats.isSymbolicLink()) {
+      throw new FilesystemError("UNSUPPORTED_ENTRY", "Symlink entries cannot be pasted");
+    }
+
+    const type = classifyEntryType(sourceStats.isDirectory(), sourceStats.isFile());
+
+    if (type === null) {
+      throw new FilesystemError("UNSUPPORTED_ENTRY", "Unsupported entry type");
+    }
+
+    if (type === "directory" && isPathInsideOrSame(sourcePath, destinationPath)) {
+      throw new FilesystemError("INVALID_PATH", "Cannot paste a folder into itself");
+    }
+
+    const targetPath = join(destinationPath, basename(sourcePath));
+    ensureWithinRoot(this.rootPath, targetPath);
+
+    return {
+      sourcePath,
+      sourceClientPath: toClientPath(this.rootPath, sourcePath),
+      targetPath,
+      type,
+    };
+  }
+
+  private async copyPasteOperation(operation: PasteOperation): Promise<void> {
+    try {
+      await cp(operation.sourcePath, operation.targetPath, {
+        recursive: operation.type === "directory",
+        force: false,
+        errorOnExist: true,
+        mode: constants.COPYFILE_EXCL,
+      });
+    } catch (error) {
+      if (isNodeError(error) && error.code === "EEXIST") {
+        throw new FilesystemError("PATH_EXISTS", "An item with that name already exists");
+      }
+
+      throw error;
+    }
+  }
+
+  private async movePasteOperations(operations: readonly PasteOperation[]): Promise<void> {
+    const moved: Array<{ readonly sourcePath: string; readonly targetPath: string }> = [];
+
+    try {
+      for (const operation of operations) {
+        await this.renameFunction(operation.sourcePath, operation.targetPath);
+        moved.push({
+          sourcePath: operation.sourcePath,
+          targetPath: operation.targetPath,
+        });
+      }
+    } catch (error) {
+      for (const operation of [...moved].reverse()) {
+        await this.renameFunction(operation.targetPath, operation.sourcePath).catch(() => undefined);
+      }
+
+      throw error;
+    }
+  }
+
+  private async getEntryFromAbsolutePath(entryPath: string): Promise<FilesystemEntry> {
+    let entryStats;
+    let resolvedStats;
+
+    try {
+      entryStats = await lstat(entryPath);
+      resolvedStats = entryStats.isSymbolicLink() ? await stat(entryPath) : entryStats;
+    } catch {
+      throw new FilesystemError("PATH_NOT_FOUND", "Path not found");
+    }
+
+    const type = classifyEntryType(resolvedStats.isDirectory(), resolvedStats.isFile());
+
+    if (type === null) {
+      throw new FilesystemError("UNSUPPORTED_ENTRY", "Unsupported entry type");
+    }
+
+    return {
+      name: basename(entryPath),
+      path: toClientPath(this.rootPath, entryPath),
+      type,
+      size: type === "file" ? entryStats.size : null,
+      updatedAt: entryStats.mtime.toISOString(),
+      isHidden: basename(entryPath).startsWith("."),
+      isSymlink: entryStats.isSymbolicLink(),
+    };
+  }
+
+  private async getStats(targetPath: string): Promise<Awaited<ReturnType<typeof stat>>> {
+    try {
+      return await stat(targetPath);
+    } catch {
+      throw new FilesystemError("PATH_NOT_FOUND", "Path not found");
+    }
+  }
+
+  private async getAvailableFolderPath(directoryPath: string): Promise<string> {
+    for (let index = 1; index < 1000; index += 1) {
+      const folderName = index === 1 ? DEFAULT_FOLDER_NAME : `${DEFAULT_FOLDER_NAME} ${String(index)}`;
+      const folderPath = join(directoryPath, folderName);
+
+      if (await this.isPathAvailable(folderPath)) {
+        return folderPath;
+      }
+    }
+
+    throw new FilesystemError("NO_AVAILABLE_NAME", "Could not find an available folder name");
+  }
+
+  private async ensurePathAvailable(targetPath: string): Promise<void> {
+    if (!(await this.isPathAvailable(targetPath))) {
+      throw new FilesystemError("PATH_EXISTS", "An item with that name already exists");
+    }
+  }
+
+  private async isPathAvailable(targetPath: string): Promise<boolean> {
+    try {
+      await lstat(targetPath);
+      return false;
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return true;
+      }
+
+      throw error;
+    }
+  }
+
+  private async isSafeSymlink(entryPath: string): Promise<boolean> {
+    try {
+      ensureWithinRoot(await realpath(this.rootPath), await realpath(entryPath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+interface PasteOperation {
+  readonly sourcePath: string;
+  readonly sourceClientPath: string;
+  readonly targetPath: string;
+  readonly type: FilesystemEntryType;
+}
+
+export const removeEntriesForTest: TrashFunction = async (input) => {
+  const paths = Array.isArray(input) ? input : [input];
+  await Promise.all(paths.map((targetPath) => rm(targetPath, { recursive: true, force: false })));
+};
+
+const classifyEntryType = (isDirectory: boolean, isFile: boolean): FilesystemEntryType | null => {
+  if (isDirectory) {
+    return "directory";
+  }
+
+  if (isFile) {
+    return "file";
+  }
+
+  return null;
+};
+
+const compareEntries = (a: FilesystemEntry, b: FilesystemEntry): number => {
+  if (a.type !== b.type) {
+    return a.type === "directory" ? -1 : 1;
+  }
+
+  return a.name.localeCompare(b.name);
+};
+
+const validateUploadRelativePath = (rawPath: string): string => {
+  if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
+    throw new FilesystemError("INVALID_UPLOAD_PATH", "Upload path is required");
+  }
+
+  if (rawPath.includes("\0") || rawPath.startsWith("/") || rawPath.includes("\\")) {
+    throw new FilesystemError("INVALID_UPLOAD_PATH", "Upload path must be relative");
+  }
+
+  const normalizedPath = path.posix.normalize(rawPath);
+
+  if (normalizedPath === "." || normalizedPath.startsWith("../") || normalizedPath === "..") {
+    throw new FilesystemError("INVALID_UPLOAD_PATH", "Upload path cannot leave the target folder");
+  }
+
+  normalizedPath.split("/").forEach(validateEntryName);
+
+  return normalizedPath;
+};
+
+const decodeBase64 = (contentBase64: string): Buffer => {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(contentBase64) || contentBase64.length % 4 !== 0) {
+    throw new FilesystemError("INVALID_UPLOAD_CONTENT", "Upload content must be base64 encoded");
+  }
+
+  return Buffer.from(contentBase64, "base64");
+};
+
+const getPathDepth = (relativePath: string): number =>
+  relativePath.split("/").length;
+
+const isPathInsideOrSame = (parentPath: string, targetPath: string): boolean => {
+  const relativePath = path.relative(parentPath, targetPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+};
+
+const isNodeError = (value: unknown): value is NodeJS.ErrnoException =>
+  value instanceof Error && "code" in value;

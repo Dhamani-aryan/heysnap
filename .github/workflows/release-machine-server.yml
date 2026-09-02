@@ -1,0 +1,201 @@
+name: Release machine server
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Machine server version to build and publish, for example 0.1.1
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      notes:
+        description: Short release notes
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    name: Build and publish machine server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck machine server
+        run: pnpm --filter @ank1015-app/server typecheck
+
+      - name: Test machine server
+        run: pnpm --filter @ank1015-app/server test
+
+      - name: Test machine bootstrap
+        run: pnpm --filter @ank1015-app/machine-bootstrap test
+
+      - name: Validate machine migrations
+        run: |
+          set -euo pipefail
+          if compgen -G "packages/server/migrations/*.sh" >/dev/null; then
+            bash -n packages/server/migrations/*.sh
+          fi
+
+      - name: Build machine server
+        run: pnpm --filter @ank1015-app/server build
+
+      - name: Package host artifact
+        id: package
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          ARTIFACT_NAME="machine-server-${VERSION}-linux-x64.tar.gz"
+          ARTIFACT_ROOT="$(mktemp -d)"
+          ARTIFACT_DIR="$ARTIFACT_ROOT/machine-server"
+
+          mkdir -p "$ARTIFACT_DIR"
+          cp packages/server/package.json "$ARTIFACT_DIR/package.json"
+          cp -R packages/server/dist "$ARTIFACT_DIR/dist"
+          cp -R packages/server/skills "$ARTIFACT_DIR/skills"
+          cp -R packages/previewer "$ARTIFACT_DIR/previewer"
+          mkdir -p "$ARTIFACT_DIR/tunnel-protocol"
+          cp packages/tunnel-protocol/package.json "$ARTIFACT_DIR/tunnel-protocol/package.json"
+          cp -R packages/tunnel-protocol/dist "$ARTIFACT_DIR/tunnel-protocol/dist"
+          if [ -d packages/server/migrations ]; then
+            cp -R packages/server/migrations "$ARTIFACT_DIR/migrations"
+          fi
+
+          ARTIFACT_DIR="$ARTIFACT_DIR" node <<'NODE'
+          const { readFileSync, writeFileSync } = require("node:fs");
+          const packagePath = `${process.env.ARTIFACT_DIR}/package.json`;
+          const packageJson = JSON.parse(readFileSync(packagePath, "utf8"));
+          packageJson.dependencies ??= {};
+          packageJson.dependencies["@ank1015-app/previewer"] = "file:./previewer";
+          packageJson.dependencies["@ank1015-app/tunnel-protocol"] = "file:./tunnel-protocol";
+          writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+          npm install --omit=dev --ignore-scripts --prefix "$ARTIFACT_DIR"
+
+          node "$ARTIFACT_DIR/dist/index.js" &
+          SERVER_PID="$!"
+          trap 'kill "$SERVER_PID" >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4000/health >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:4000/status >/dev/null
+
+          tar -czf "$ARTIFACT_NAME" -C "$ARTIFACT_DIR" .
+          SHA256="$(sha256sum "$ARTIFACT_NAME" | awk '{print $1}')"
+
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_MACHINE_SERVER_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload host artifact
+        id: upload
+        env:
+          ARTIFACT_NAME: ${{ steps.package.outputs.artifact_name }}
+          BUCKET: ${{ vars.MACHINE_SERVER_ARTIFACT_BUCKET }}
+          BASE_URL: ${{ vars.MACHINE_SERVER_ARTIFACT_BASE_URL }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$BUCKET" ] || [ -z "$BASE_URL" ]; then
+            echo "MACHINE_SERVER_ARTIFACT_BUCKET and MACHINE_SERVER_ARTIFACT_BASE_URL are required" >&2
+            exit 1
+          fi
+
+          KEY="machine-server/${CHANNEL}/${VERSION}/${ARTIFACT_NAME}"
+          aws s3 cp "$ARTIFACT_NAME" "s3://${BUCKET}/${KEY}" --only-show-errors
+
+          DOWNLOAD_URL="${BASE_URL%/}/${KEY}"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Publish cloud release manifest
+        env:
+          ADMIN_TOKEN: ${{ secrets.CLOUD_SERVER_ADMIN_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          NOTES: ${{ inputs.notes }}
+          DOWNLOAD_URL: ${{ steps.upload.outputs.download_url }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+          ARTIFACT_NAME: ${{ steps.package.outputs.artifact_name }}
+        run: |
+          node <<'NODE'
+          void main().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+
+          async function main() {
+            const adminToken = requireEnv("ADMIN_TOKEN");
+            const version = requireEnv("VERSION");
+            const channel = requireEnv("CHANNEL");
+            const downloadUrl = requireEnv("DOWNLOAD_URL");
+            const sha256 = requireEnv("SHA256");
+            const artifactName = requireEnv("ARTIFACT_NAME");
+            const notes = process.env.NOTES?.trim() || null;
+            const response = await fetch("https://api.heysnap.xyz/admin/releases/machine-server", {
+              method: "POST",
+              body: JSON.stringify({
+                channel,
+                version,
+                downloadUrl,
+                notes,
+                metadata: {
+                  artifactName,
+                  platform: "linux-x64",
+                  sha256,
+                },
+              }),
+              headers: {
+                authorization: `Bearer ${adminToken}`,
+                "content-type": "application/json",
+              },
+            });
+            const text = await response.text();
+
+            if (!response.ok) {
+              throw new Error(`Failed to publish machine server release: ${response.status} ${text}`);
+            }
+
+            console.log(`Published machine server ${version}: ${text}`);
+          }
+
+          function requireEnv(name) {
+            const value = process.env[name];
+
+            if (value === undefined || value.trim().length === 0) {
+              throw new Error(`${name} is required`);
+            }
+
+            return value;
+          }
+          NODE

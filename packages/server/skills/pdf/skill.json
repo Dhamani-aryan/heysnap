@@ -1,0 +1,7 @@
+{
+  "id": "pdf",
+  "label": "PDF",
+  "version": "1.0.0",
+  "description": "create, read, edit, and manipulate PDF files.",
+  "activeByDefault": true
+}

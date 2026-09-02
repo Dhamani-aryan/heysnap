@@ -1,0 +1,7 @@
+{
+  "id": "image-gen",
+  "label": "Image Gen",
+  "version": "1.0.2",
+  "description": "generate or edit images from a prompt, with optional reference images. Versatile across styles; combines well with any task that needs visuals.",
+  "activeByDefault": true
+}

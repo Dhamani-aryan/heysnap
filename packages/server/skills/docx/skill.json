@@ -1,0 +1,7 @@
+{
+  "id": "docx",
+  "label": "DOCX",
+  "version": "1.0.0",
+  "description": "create, read, edit, and manipulate Word documents (`.docx`)",
+  "activeByDefault": true
+}

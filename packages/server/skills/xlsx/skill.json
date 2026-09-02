@@ -1,0 +1,7 @@
+{
+  "id": "xlsx",
+  "label": "XLSX",
+  "version": "1.0.0",
+  "description": "create, read, edit, and manipulate `.xlsx`, `.xlsm`, `.csv`, and `.tsv` files.",
+  "activeByDefault": true
+}

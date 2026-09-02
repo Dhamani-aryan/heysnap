@@ -1,0 +1,7 @@
+{
+  "id": "web",
+  "label": "Web",
+  "version": "1.0.0",
+  "description": "search engines, fetching public pages as markdown, quick research. API-based and fast. Reach for this first for lookups and public-page work.",
+  "activeByDefault": true
+}

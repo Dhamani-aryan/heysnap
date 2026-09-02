@@ -1,0 +1,7 @@
+{
+  "id": "pptx",
+  "label": "PPTX",
+  "version": "1.0.0",
+  "description": "create, read, edit, and manipulate PowerPoint files (`.pptx`).",
+  "activeByDefault": true
+}

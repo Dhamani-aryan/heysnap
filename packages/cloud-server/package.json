@@ -1,0 +1,40 @@
+{
+  "name": "@ank1015-app/cloud-server",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "pnpm --filter @ank1015-app/tunnel-protocol build && tsx watch src/index.ts",
+    "dev:admin-ui": "pnpm --filter @ank1015-app/cloud-server-admin-ui dev",
+    "start": "node dist/index.js",
+    "build": "pnpm --filter @ank1015-app/tunnel-protocol build && pnpm run build:admin-ui && tsc -p tsconfig.json",
+    "build:admin-ui": "pnpm --filter @ank1015-app/cloud-server-admin-ui build",
+    "typecheck": "pnpm --filter @ank1015-app/tunnel-protocol build && tsc --noEmit && pnpm --filter @ank1015-app/cloud-server-admin-ui typecheck",
+    "lint": "pnpm --filter @ank1015-app/tunnel-protocol build && tsc --noEmit",
+    "test": "pnpm --filter @ank1015-app/tunnel-protocol build && vitest run",
+    "test:db": "RUN_POSTGRES_TESTS=true vitest run tests/postgres.integration.test.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@ank1015-app/tunnel-protocol": "workspace:*",
+    "@aws-sdk/client-ec2": "^3.954.0",
+    "@aws-sdk/client-s3": "^3.954.0",
+    "@aws-sdk/client-ssm": "^3.954.0",
+    "@aws-sdk/lib-storage": "^3.954.0",
+    "@axiomhq/pino": "^1.6.1",
+    "@hono/node-server": "^1.19.6",
+    "drizzle-orm": "^0.44.7",
+    "hono": "^4.10.5",
+    "pino": "^10.3.1",
+    "postgres": "^3.4.7",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "drizzle-kit": "^0.31.7",
+    "tsx": "^4.20.6",
+    "vitest": "^4.1.5"
+  }
+}

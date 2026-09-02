@@ -1,0 +1,7 @@
+{
+  "id": "ffmpeg",
+  "label": "Ffmpeg",
+  "version": "1.0.0",
+  "description": "processing, editing, and producing video and audio files.",
+  "activeByDefault": true
+}

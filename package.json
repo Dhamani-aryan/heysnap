@@ -1,0 +1,33 @@
+{
+  "name": "ank1015-app",
+  "private": true,
+  "packageManager": "pnpm@9.15.2",
+  "scripts": {
+    "dev": "pnpm --filter @ank1015-app/web dev",
+    "dev:server": "pnpm --filter @ank1015-app/server dev",
+    "dev:cloud-server": "pnpm --filter @ank1015-app/cloud-server dev",
+    "dev:local": "node scripts/local-dev/start.mjs",
+    "dev:local:start": "node scripts/local-dev/start.mjs",
+    "dev:local:infra": "node scripts/local-dev/infra.mjs",
+    "dev:local:cloud": "node scripts/local-dev/cloud.mjs",
+    "dev:local:release": "node scripts/local-dev/release-machine-server.mjs",
+    "dev:local:web": "pnpm --filter @ank1015-app/web dev",
+    "dev:local:mobile": "node scripts/local-dev/mobile.mjs",
+    "dev:web": "pnpm --filter @ank1015-app/web dev",
+    "dev:local:admin": "pnpm --filter @ank1015-app/cloud-server-admin-ui dev",
+    "dev:local:logs": "node scripts/local-dev/machine-logs.mjs",
+    "dev:local:shell": "node scripts/local-dev/machine-shell.mjs",
+    "dev:local:status": "node scripts/local-dev/machine-status.mjs",
+    "dev:local:down": "node scripts/local-dev/down.mjs",
+    "dev:local:prune": "node scripts/local-dev/prune.mjs",
+    "dev:previewer": "pnpm --filter @ank1015-app/previewer dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.8.3"
+  }
+}

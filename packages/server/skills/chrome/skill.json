@@ -1,0 +1,7 @@
+{
+  "id": "chrome",
+  "label": "Chrome",
+  "version": "1.0.0",
+  "description": "driving the user's real Chrome window for authenticated sites, web apps, multi-step workflows, anything that has to happen as the user. Central skill, used often.",
+  "activeByDefault": true
+}
